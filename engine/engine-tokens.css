@@ -1,0 +1,12 @@
+/* Brand color tokens referenced by the vendored deck engine (default/light values,
+   from mm-website). Override these (or wrap with a provider/theme) to rebrand. */
+:root {
+  --color-mm-cream: #fdf3e4;
+  --color-mm-cream-pale: #fdebd5;
+  --color-mm-dark-brown: #3a2318;
+  --color-mm-gold: #d4a843;
+  --color-mm-hairline: #f0c9a0;
+  --color-mm-mushroom: #5c3d2e;
+  --color-mm-terracotta: #c07850;
+  --color-mm-warm-tan: #f5dfc0;
+}
