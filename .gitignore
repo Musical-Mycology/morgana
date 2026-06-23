@@ -5,3 +5,7 @@ out
 next-env.d.ts
 test-results
 playwright-report
+
+# Real decks are private user data — never commit them.
+/data/decks/*
+!/data/decks/.gitkeep
