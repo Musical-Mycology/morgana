@@ -6,7 +6,7 @@ import gsap from "gsap";
 import type { ArtMode, ArtTransition, CinematicSlideSlots, Action, EffectCue, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
 import type { StoryAsset } from "@/engine/deck/story-assets";
 import { renderPanelHTML } from "@/engine/deck/panel";
-import { sporekleAsset } from "@/engine/sporekles";
+import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
 import { parseInlineLinks, hasInlineMarkup } from "@/engine/deck/inline-links";
 import { formatCounterValue, counterTarget } from "@/engine/deck/counter";
@@ -99,6 +99,7 @@ interface Props {
 }
 
 export function CinematicSlide({ slots, animate, runtime, print, instantText }: Props) {
+  const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
   const loopers = useRef<gsap.core.Timeline[]>([]);
   const masterRef = useRef<gsap.core.Timeline | null>(null);
@@ -559,7 +560,7 @@ export function CinematicSlide({ slots, animate, runtime, print, instantText }: 
       <div className="cin__stage">
         {slots.sceneId === "intro" && (
           <div className="cin__splash">
-            <img className="cin__logo" src={sporekleAsset("logo_day_angelring.png")} alt="Musical Mycology" />
+            <img className="cin__logo" src={assets.brand("logo_day_angelring.png")} alt="Musical Mycology" />
             <p className="cin__tagline">Connecting People and Music</p>
           </div>
         )}

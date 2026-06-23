@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import gsap from "gsap";
 import { emitNote, launchNote, makeNote, makeNoteHex, randomGlyph } from "./effects/notes";
 import { PANEL_ANCHORS, type NoteColor, type Panel } from "@/engine/deck/story-assets";
+import { useAssetResolver } from "@/engine/asset-resolver-react";
 
 /** A placeable directional note emitter. x/y are 0–1 on the stage. */
 export interface NoteEmitterOpts {
@@ -42,6 +43,9 @@ export interface NoteFieldHandle {
 interface Props { reduced?: boolean }
 
 export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({ reduced }, ref) {
+  const assets = useAssetResolver();
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
   const root = useRef<HTMLDivElement>(null);
   const emitTimer = useRef<gsap.core.Timeline | null>(null);
   const swirlTl = useRef<gsap.core.Timeline | null>(null);
@@ -66,7 +70,7 @@ export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({
       emitTimer.current = gsap.timeline({ repeat: -1, repeatDelay: 0.6 / Math.max(0.2, intensity) })
         .call(() => {
           const a = anchors[i % anchors.length];
-          emitNote(host, color, a.x * host.clientWidth, a.y * host.clientHeight, i++);
+          emitNote(host, color, a.x * host.clientWidth, a.y * host.clientHeight, i++, assetsRef.current.story);
         });
     },
     stopEmit() {
@@ -88,7 +92,7 @@ export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({
       const N = 10;
       const tl = gsap.timeline(); // one timeline owns all orbit tweens, so kill() stops them
       for (let k = 0; k < N; k++) {
-        const el = makeNote(color, randomGlyph(k)); el.classList.add("swirl");
+        const el = makeNote(color, randomGlyph(k), assetsRef.current.story); el.classList.add("swirl");
         host.appendChild(el);
         const phase = (k / N) * Math.PI * 2;
         tl.add(gsap.to({ a: phase }, {
@@ -109,7 +113,7 @@ export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({
       const tl = gsap.timeline({ repeat: -1, repeatDelay: 1 / Math.max(0.1, opts.freq) })
         .call(() => launchNote(
           host, opts.color, opts.x * host.clientWidth, opts.y * host.clientHeight,
-          opts.dir, opts.spread, opts.decayMs, i++,
+          opts.dir, opts.spread, opts.decayMs, i++, assetsRef.current.story,
         ));
       emitters.current.push(tl);
     },
@@ -124,7 +128,7 @@ export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({
       const dur = Math.max(0.1, speed / 1000); // speed is ms/orbit → gsap seconds
       const tl = gsap.timeline(); // one timeline owns all orbits, so kill() stops them
       for (let k = 0; k < N; k++) {
-        const el = makeNoteHex(colors[k % colors.length], randomGlyph(k));
+        const el = makeNoteHex(colors[k % colors.length], randomGlyph(k), assetsRef.current.story);
         el.classList.add("circle");
         host.appendChild(el);
         const phase = (k / N) * Math.PI * 2; // evenly distribute around the ring

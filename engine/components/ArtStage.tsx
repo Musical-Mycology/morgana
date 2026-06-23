@@ -4,7 +4,8 @@ import { forwardRef, useImperativeHandle, useRef } from "react";
 import gsap from "gsap";
 import type { ArtMode, ArtTransition } from "@/engine/deck/types";
 import { applyArt } from "@/engine/deck/flatten";
-import { isOverlay, storyAssetUrl, type StoryAsset } from "@/engine/deck/story-assets";
+import { isOverlay, type StoryAsset } from "@/engine/deck/story-assets";
+import { useAssetResolver } from "@/engine/asset-resolver-react";
 
 export interface ArtStageHandle {
   /** Cross-fade the visible stack to exactly `layers` (bottom→top) using `mode`. */
@@ -24,6 +25,9 @@ interface Props { nightlight: number; reduced?: boolean; transparentBg?: boolean
 export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
   { nightlight, reduced, transparentBg }, ref
 ) {
+  const assets = useAssetResolver();
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
   const root = useRef<HTMLDivElement>(null);
   const current = useRef<StoryAsset[]>([]);
 
@@ -47,7 +51,7 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
         return;
       }
       const img = document.createElement("img");
-      img.src = storyAssetUrl(asset);
+      img.src = assetsRef.current.story(asset);
       img.className = "artstage__layer";
       img.dataset.asset = asset;
       img.style.zIndex = String(i + 1);

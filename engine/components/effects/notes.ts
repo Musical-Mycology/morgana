@@ -1,11 +1,11 @@
 import gsap from "gsap";
-import { storyAssetUrl, NOTE_TINTS, NOTE_GLYPHS, type NoteColor, type NoteGlyph } from "@/engine/deck/story-assets";
+import { NOTE_TINTS, NOTE_GLYPHS, type NoteColor, type NoteGlyph, type StoryAsset } from "@/engine/deck/story-assets";
 
 /** Build a tinted, glowing note sprite element (glyph is white line-art → mask + bg color). */
-export function makeNote(color: NoteColor, glyph: NoteGlyph): HTMLElement {
+export function makeNote(color: NoteColor, glyph: NoteGlyph, resolveStory: (key: StoryAsset) => string): HTMLElement {
   const el = document.createElement("span");
   const { fill, glow } = NOTE_TINTS[color];
-  const url = storyAssetUrl(glyph);
+  const url = resolveStory(glyph);
   Object.assign(el.style, {
     position: "absolute", width: "42px", height: "42px",
     backgroundColor: fill,
@@ -19,9 +19,9 @@ export function makeNote(color: NoteColor, glyph: NoteGlyph): HTMLElement {
 }
 
 /** Like makeNote but tinted to an arbitrary HEX color (fill + glow). */
-export function makeNoteHex(hex: string, glyph: NoteGlyph): HTMLElement {
+export function makeNoteHex(hex: string, glyph: NoteGlyph, resolveStory: (key: StoryAsset) => string): HTMLElement {
   const el = document.createElement("span");
-  const url = storyAssetUrl(glyph);
+  const url = resolveStory(glyph);
   Object.assign(el.style, {
     position: "absolute", width: "42px", height: "42px",
     backgroundColor: hex,
@@ -46,9 +46,10 @@ const EMIT_SPEED = 130; // px/sec a launched note travels — tune
  */
 export function launchNote(
   host: HTMLElement, hex: string, x: number, y: number,
-  dirDeg: number, spreadDeg: number, decayMs: number, i: number
+  dirDeg: number, spreadDeg: number, decayMs: number, i: number,
+  resolveStory: (key: StoryAsset) => string,
 ): void {
-  const el = makeNoteHex(hex, randomGlyph(i));
+  const el = makeNoteHex(hex, randomGlyph(i), resolveStory);
   el.style.left = `${x}px`; el.style.top = `${y}px`; el.style.opacity = "0";
   host.appendChild(el);
   const theta = ((dirDeg + (Math.random() * 2 - 1) * spreadDeg) * Math.PI) / 180;
@@ -63,8 +64,11 @@ export function launchNote(
 }
 
 /** Emit a note from (x,y) px: bounce in, drift up, fade. Returns its tween. */
-export function emitNote(host: HTMLElement, color: NoteColor, x: number, y: number, i: number) {
-  const el = makeNote(color, randomGlyph(i));
+export function emitNote(
+  host: HTMLElement, color: NoteColor, x: number, y: number, i: number,
+  resolveStory: (key: StoryAsset) => string,
+) {
+  const el = makeNote(color, randomGlyph(i), resolveStory);
   el.style.left = `${x}px`; el.style.top = `${y}px`;
   el.style.opacity = "0";
   host.appendChild(el);
