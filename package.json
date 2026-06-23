@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "seed": "tsx tools/seed-deck.ts"
+    "seed": "tsx tools/seed-deck.ts",
+    "seed:demo": "mkdir -p data/decks && cp samples/demo.deck.json data/decks/demo.deck.json"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

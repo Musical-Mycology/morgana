@@ -1,0 +1,7 @@
+.ed { position: fixed; inset: 0; display: grid; grid-template-columns: 200px 1fr 280px; grid-template-rows: 48px 1fr 180px;
+  grid-template-areas: "bar bar bar" "film canvas inspector" "film timeline timeline"; background: var(--color-mm-dark-brown); color: var(--color-mm-cream); }
+.ed__bar { grid-area: bar; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: #1c130d; font-family: var(--font-display); }
+.ed__film { grid-area: film; overflow: auto; border-right: 1px solid rgba(255,255,255,0.1); }
+.ed__canvas { grid-area: canvas; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: hidden; min-height: 0; min-width: 0; }
+.ed__inspector { grid-area: inspector; overflow: auto; border-left: 1px solid rgba(255,255,255,0.1); padding: 12px; }
+.ed__timeline { grid-area: timeline; border-top: 1px solid rgba(255,255,255,0.1); padding: 12px; }
