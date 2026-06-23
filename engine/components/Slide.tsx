@@ -8,6 +8,7 @@ import { SectionLeadSlide } from "./layouts/SectionLeadSlide";
 import { ClosingSlide } from "./layouts/ClosingSlide";
 import { CinematicSlide, type CinematicRuntime } from "./layouts/CinematicSlide";
 import { staggerReveal } from "./effects/anim";
+import type { DeckChrome } from "@/engine/deck-doc";
 
 interface Props {
   slide: SlideType;
@@ -21,6 +22,8 @@ interface Props {
   runtime?: CinematicRuntime;
   /** True when rendering for PDF print — suppresses screen-only elements. */
   print?: boolean;
+  /** Optional host-app chrome (splash, fin CTAs, wordmark). Generic by default (no chrome). */
+  chrome?: DeckChrome;
 }
 
 interface LayoutBodyProps {
@@ -29,9 +32,10 @@ interface LayoutBodyProps {
   animate?: boolean;
   runtime?: CinematicRuntime;
   print?: boolean;
+  chrome?: DeckChrome;
 }
 
-function LayoutBody({ slide, downloadOpacity, animate, runtime, print }: LayoutBodyProps) {
+function LayoutBody({ slide, downloadOpacity, animate, runtime, print, chrome }: LayoutBodyProps) {
   switch (slide.layout) {
     case "title":
       return <TitleSlide slots={slide.slots} />;
@@ -42,11 +46,11 @@ function LayoutBody({ slide, downloadOpacity, animate, runtime, print }: LayoutB
     case "cinematic":
       // Treated slides (the investor deck) render narration text instantly — no text-in
       // transitions. /story slides carry no treatment, so they keep their cinematic reveals.
-      return <CinematicSlide slots={slide.slots} animate={animate ?? false} runtime={runtime!} print={print} instantText={!!slide.treatment} />;
+      return <CinematicSlide slots={slide.slots} animate={animate ?? false} runtime={runtime!} print={print} instantText={!!slide.treatment} chrome={chrome} />;
   }
 }
 
-function SlideInner({ slide, index, count, downloadOpacity, animate = false, runtime, print }: Props) {
+function SlideInner({ slide, index, count, downloadOpacity, animate = false, runtime, print, chrome }: Props) {
   const scope = useRef<HTMLDivElement>(null);
 
   useGSAP(
@@ -69,10 +73,10 @@ function SlideInner({ slide, index, count, downloadOpacity, animate = false, run
   return (
     <div className="slide" data-slide-id={slide.id} ref={scope}>
       <div className="slide__body">
-        <LayoutBody slide={slide} downloadOpacity={downloadOpacity} animate={animate} runtime={runtime} print={print} />
+        <LayoutBody slide={slide} downloadOpacity={downloadOpacity} animate={animate} runtime={runtime} print={print} chrome={chrome} />
       </div>
       <span className="slide__page">{index + 1} / {count}</span>
-      <span className="slide__wordmark">Musical Mycology</span>
+      {chrome?.wordmark && <span className="slide__wordmark">{chrome.wordmark}</span>}
       <style>{`
         .slide { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 6vh 8vw; }
         .slide__body { position: relative; z-index: 1; }

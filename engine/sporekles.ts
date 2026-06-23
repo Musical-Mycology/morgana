@@ -63,6 +63,6 @@ export type SporekleAsset =
   | "bits_night.png";
 
 /** Resolve a sporekles asset filename to its absolute CDN URL. */
-export function sporekleAsset(filename: SporekleAsset): string {
+export function sporekleAsset(filename: SporekleAsset | string): string {
   return `${SPOREKLES_CDN}/assets/${filename}`;
 }

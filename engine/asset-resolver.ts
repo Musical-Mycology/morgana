@@ -4,7 +4,7 @@ import { sporekleAsset, type SporekleAsset } from "@/engine/sporekles";
 
 export interface AssetResolver {
   story(key: StoryAsset): string;
-  brand(file: SporekleAsset): string;
+  brand(file: SporekleAsset | string): string;
 }
 
 export const defaultAssetResolver: AssetResolver = {

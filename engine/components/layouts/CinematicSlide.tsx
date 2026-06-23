@@ -5,6 +5,7 @@ import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import type { ArtMode, ArtTransition, CinematicSlideSlots, Action, EffectCue, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
 import type { StoryAsset } from "@/engine/deck/story-assets";
+import type { DeckChrome } from "@/engine/deck-doc";
 import { renderPanelHTML } from "@/engine/deck/panel";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
@@ -91,6 +92,8 @@ interface Props {
   slots: CinematicSlideSlots;
   animate: boolean;
   runtime: CinematicRuntime;
+  /** Optional host-app chrome (splash, fin CTAs, wordmark). Generic by default (no chrome). */
+  chrome?: DeckChrome;
   /** True when rendering for PDF print — suppresses screenOnly text actions. */
   print?: boolean;
   /** Investor deck: render narration text instantly (no per-line entrance animation).
@@ -98,7 +101,7 @@ interface Props {
   instantText?: boolean;
 }
 
-export function CinematicSlide({ slots, animate, runtime, print, instantText }: Props) {
+export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
   const loopers = useRef<gsap.core.Timeline[]>([]);
@@ -558,19 +561,20 @@ export function CinematicSlide({ slots, animate, runtime, print, instantText }: 
   return (
     <div className={`cin${slots.sceneId === "intro" ? " cin--intro" : ""}`} ref={scope}>
       <div className="cin__stage">
-        {slots.sceneId === "intro" && (
+        {slots.sceneId === "intro" && chrome?.splash && (
           <div className="cin__splash">
-            <img className="cin__logo" src={assets.brand("logo_day_angelring.png")} alt="Musical Mycology" />
-            <p className="cin__tagline">Connecting People and Music</p>
+            {chrome.splash.logo && <img className="cin__logo" src={assets.brand(chrome.splash.logo)} alt="" />}
+            {chrome.splash.tagline && <p className="cin__tagline">{chrome.splash.tagline}</p>}
           </div>
         )}
         <div className="cin__text" style={{ left: anchor.left || undefined, right: anchor.right || undefined, top: `${pos.y * 100}%`, transform: anchor.transform || undefined }} />
         {slots.beat.id === "fin" && againRevealed && (
           <div className="cin__ending">
-            <div className="cin__ending-row">
-              <a className="cin__cta" href="/vision/">Why it&rsquo;s important</a>
-              <a className="cin__cta" href="/vision/#vision-solution">How we will do it</a>
-            </div>
+            {!!chrome?.ending?.ctas?.length && (
+              <div className="cin__ending-row">
+                {chrome.ending.ctas.map((c) => <a key={c.href} className="cin__cta" href={c.href}>{c.label}</a>)}
+              </div>
+            )}
             <button
               className="cin__again"
               onClick={() => { const u = new URL(location.href); u.searchParams.set("slide", "1"); location.href = u.toString(); }}
