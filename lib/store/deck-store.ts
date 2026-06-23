@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, readdir, unlink, access } from "node:fs/pro
 import { join } from "node:path";
 import { DECK_ID_RE, validateDeckDoc, type DeckDoc, type DeckMeta } from "@/engine/deck-doc";
 
-const dataDir = () => process.env.MORGANA_DATA_DIR ?? "/data";
+const dataDir = () => process.env.MORGANA_DATA_DIR ?? (process.env.NODE_ENV === "production" ? "/data" : "./data");
 const decksDir = () => join(dataDir(), "decks");
 
 function safeId(id: string): string {
