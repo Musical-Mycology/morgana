@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "meta": { "id": "demo", "title": "Morgana Demo" },
+  "scenes": [
+    { "id": "open", "beats": [
+      { "id": "b1", "timeline": [{ "kind": "text", "value": "Welcome to Morgana", "in": "flyUp" }] },
+      { "id": "b2", "timeline": [
+        { "kind": "text", "value": "Build shows as data.", "in": "fade" },
+        { "kind": "wait", "ms": 300 },
+        { "kind": "text", "value": "Scrub the timeline.", "in": "fade" }
+      ] }
+    ] }
+  ]
+}
