@@ -13,7 +13,7 @@ export function ClosingSlide({ slots, downloadOpacity = 1 }: { slots: ClosingSlo
       <style>{`
         .cls { text-align: center; max-width: 56ch; }
         .cls__eyebrow { font-family: var(--font-display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--deck-accent, var(--color-mm-gold)); font-size: 0.9rem; margin-bottom: 1rem; }
-        .cls__title { font-family: var(--font-display); font-size: clamp(2.5rem, 6vw, 4.5rem); line-height: 1.04; color: var(--deck-ink, var(--color-mm-cream)); }
+        .cls__title { font-family: var(--font-display); font-size: clamp(2.5rem, 6cqw, 4.5rem); line-height: 1.04; color: var(--deck-ink, var(--color-mm-cream)); }
         .cls__sub { margin-top: 1rem; color: var(--deck-ink, var(--color-mm-cream)); opacity: 0.85; font-size: 1.1rem; }
         .cls__dl { display: inline-block; margin-top: 2rem; transition: opacity 300ms ease; }
         @media (prefers-reduced-motion: reduce) { .cls__dl { transition: none; } }

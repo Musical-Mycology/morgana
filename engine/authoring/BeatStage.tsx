@@ -9,11 +9,12 @@ import { CinematicSlide } from "@/engine/components/layouts/CinematicSlide";
 import { makeAuthoringRuntime } from "./runtime";
 
 export function BeatStage({
-  sceneId, beat, animate = true, entryLayers = [], endLayers = [], chrome,
+  sceneId, beat, animate = true, entryLayers = [], endLayers = [], chrome, contained = false,
 }: {
   sceneId: string; beat: Beat; animate?: boolean;
   entryLayers?: StoryAsset[]; endLayers?: StoryAsset[];
   chrome?: DeckChrome;
+  contained?: boolean;
 }) {
   const art = useRef<ArtStageHandle>(null);
   const notes = useRef<NoteFieldHandle>(null);
@@ -31,7 +32,7 @@ export function BeatStage({
   );
 
   return (
-    <div data-testid="beatstage" style={{ position: "fixed", inset: 0, background: "var(--color-mm-dark-brown)" }}>
+    <div data-testid="beatstage" style={{ position: contained ? "absolute" : "fixed", inset: 0, containerType: "size", background: "var(--color-mm-dark-brown)" }}>
       <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />
       <NoteField ref={notes} reduced={false} />
       <div className="deck__stage" style={{ position: "absolute", inset: 0 }}>

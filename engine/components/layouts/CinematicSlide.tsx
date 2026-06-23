@@ -588,8 +588,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         .cin { position: relative; width: 100%; height: 100%; }
         /* A fixed 16:9 box matching the letterboxed art rect — the slide canvas that
            text positions (and note anchors) are normalized against. */
-        .cin__stage { position: fixed; inset: 0; margin: auto; z-index: 2; pointer-events: none;
-          width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); }
+        .cin__stage { position: absolute; inset: 0; margin: auto; z-index: 2; pointer-events: none;
+          width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16)); }
         .cin__text { position: absolute; max-width: 90%; text-align: left; color: var(--color-mm-cream); text-shadow: 0 2px 14px rgba(0,0,0,0.6); }
         /* Intro is bright day — dark ink for legibility on the light ground. */
         .cin--intro .cin__text, .cin--intro .cin__tagline { color: var(--color-mm-dark-brown); text-shadow: 0 1px 10px rgba(255,247,235,0.55); }
@@ -606,9 +606,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         /* Investor treatments: larger, tighter type with a distinct TITLE scale (~2×, ≥1.8× body)
            and a rule beneath the title. Body uses the body font. Scoped to warm/paper so /story
            keeps its own scale; text-in transitions are suppressed by instantText (Slide.tsx). */
-        .deck--warm .cin__line--lg, .deck--paper .cin__line--lg { font-size: clamp(2rem, 5.6vmin, 3.4rem); line-height: 1.1; }
-        .deck--warm .cin__line--md, .deck--paper .cin__line--md { font-size: clamp(1.1rem, 3vmin, 1.6rem); line-height: 1.3; }
-        .deck--warm .cin__line--sm, .deck--paper .cin__line--sm { font-size: clamp(1rem, 2.7vmin, 1.45rem); font-family: var(--font-body); line-height: 1.35; opacity: 1; }
+        .deck--warm .cin__line--lg, .deck--paper .cin__line--lg { font-size: clamp(2rem, 5.6cqmin, 3.4rem); line-height: 1.1; }
+        .deck--warm .cin__line--md, .deck--paper .cin__line--md { font-size: clamp(1.1rem, 3cqmin, 1.6rem); line-height: 1.3; }
+        .deck--warm .cin__line--sm, .deck--paper .cin__line--sm { font-size: clamp(1rem, 2.7cqmin, 1.45rem); font-family: var(--font-body); line-height: 1.35; opacity: 1; }
         .deck--warm .cin__line, .deck--paper .cin__line { margin: 0.08em 0; line-height: 1.2; }
         /* Rule under the slide title (the only <p> lg line on an investor slide; not the counter). */
         .deck--warm p.cin__line--lg { border-bottom: 2px solid var(--color-mm-gold); padding-bottom: 0.2em; margin-bottom: 0.5em; }
@@ -650,21 +650,21 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         .cin__media-img--round { aspect-ratio: 1 / 1; border-radius: 50%; object-fit: cover; }
         .cin__media-cap { position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
           margin-top: 0.4em; white-space: nowrap; text-align: center; font-family: var(--font-display);
-          font-size: clamp(0.7rem, 2vmin, 1rem); line-height: 1.1; color: var(--color-mm-cream);
+          font-size: clamp(0.7rem, 2cqmin, 1rem); line-height: 1.1; color: var(--color-mm-cream);
           text-shadow: 0 1px 8px rgba(0,0,0,0.5); }
         .deck--paper .cin__media-cap { color: var(--color-mm-mushroom); text-shadow: none; }
         /* Stub placeholders keep their label inside the dashed box. */
         .cin__media--round { aspect-ratio: 1 / 1; border-radius: 50%; overflow: hidden; }
         .cin__media--stub { box-sizing: border-box; aspect-ratio: 16 / 10; display: flex; align-items: center;
           justify-content: center; text-align: center; white-space: pre-line; padding: 0.6em;
-          font-family: var(--font-display); font-size: clamp(0.7rem, 2.4vmin, 1.05rem);
+          font-family: var(--font-display); font-size: clamp(0.7rem, 2.4cqmin, 1.05rem);
           line-height: 1.2; color: var(--color-mm-cream); background: rgba(40,28,22,0.55);
           border: 2px dashed var(--color-mm-mushroom); border-radius: 12px;
           text-shadow: 0 1px 8px rgba(0,0,0,0.5); }
         .cin__media--round.cin__media--stub { aspect-ratio: 1 / 1; border-radius: 50%; }
         /* Native data panels (funding / financials / SAFE terms). Treatment-aware skins below. */
         .cin__panel { box-sizing: border-box; border-radius: 12px; padding: 1em 1.1em; text-align: left;
-          font-family: var(--font-body); font-size: clamp(0.7rem, 2.2vmin, 1rem); line-height: 1.5; }
+          font-family: var(--font-body); font-size: clamp(0.7rem, 2.2cqmin, 1rem); line-height: 1.5; }
         .cin__panel-title { font-family: var(--font-display); font-size: 1.05em; margin-bottom: 0.5em; }
         .cin__panel-row { display: flex; justify-content: space-between; gap: 1em; padding: 0.32em 0; }
         .cin__panel-val.is-neg { font-style: italic; opacity: 0.9; }
@@ -685,9 +685,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         .dots { display: inline-block; }
         .cin__splash { position: absolute; top: 38%; left: 50%; transform: translate(-50%, -50%);
           display: flex; flex-direction: column; align-items: center; gap: 0.8rem; max-width: 90%; }
-        .cin__logo { width: clamp(220px, 30vw, 460px); height: auto; filter: drop-shadow(0 4px 24px rgba(0,0,0,0.3)); }
+        .cin__logo { width: clamp(220px, 30cqw, 460px); height: auto; filter: drop-shadow(0 4px 24px rgba(0,0,0,0.3)); }
         .cin__tagline { margin: 0; font-family: var(--font-display); font-weight: 400;
-          font-size: clamp(1.5rem, 2.8vw, 2.4rem); letter-spacing: 0.01em; text-align: center; }
+          font-size: clamp(1.5rem, 2.8cqw, 2.4rem); letter-spacing: 0.01em; text-align: center; }
         /* End-of-deck actions: two primary Vision-link pills on top, a quiet replay below.
            The group is the absolutely-centered element; only the buttons capture pointer
            events so the nav arrows behind the group stay clickable. */
@@ -702,14 +702,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         @media (prefers-reduced-motion: reduce) { .cin__ending { animation: none; } }
         /* Primary Vision-link pills (solid brand ink). */
         .cin__cta { pointer-events: auto; cursor: pointer; text-decoration: none; white-space: nowrap;
-          font-family: var(--font-display); font-size: clamp(1rem, 1.8vw, 1.4rem); letter-spacing: 0.03em;
+          font-family: var(--font-display); font-size: clamp(1rem, 1.8cqw, 1.4rem); letter-spacing: 0.03em;
           color: var(--color-mm-cream); background: var(--color-mm-dark-brown); border: 0; border-radius: 999px;
           padding: 0.55em 1.6em; box-shadow: 0 2px 12px rgba(0,0,0,0.45);
           transition: transform 0.15s, background 0.15s; }
         .cin__cta:hover { background: var(--color-mm-mushroom); transform: scale(1.04); }
         /* Quiet replay — ghost button, secondary to the Vision links. */
         .cin__again { pointer-events: auto; cursor: pointer; font-family: var(--font-display);
-          font-size: clamp(0.9rem, 1.5vw, 1.15rem); letter-spacing: 0.03em; color: var(--color-mm-cream);
+          font-size: clamp(0.9rem, 1.5cqw, 1.15rem); letter-spacing: 0.03em; color: var(--color-mm-cream);
           background: transparent; border: 0; border-radius: 999px; padding: 0.35em 1.1em; opacity: 0.78;
           text-shadow: 0 2px 10px rgba(0,0,0,0.55); transition: opacity 0.15s, transform 0.15s; }
         .cin__again:hover { opacity: 1; transform: scale(1.04); }

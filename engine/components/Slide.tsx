@@ -78,7 +78,7 @@ function SlideInner({ slide, index, count, downloadOpacity, animate = false, run
       <span className="slide__page">{index + 1} / {count}</span>
       {chrome?.wordmark && <span className="slide__wordmark">{chrome.wordmark}</span>}
       <style>{`
-        .slide { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 6vh 8vw; }
+        .slide { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 6cqh 8cqw; }
         .slide__body { position: relative; z-index: 1; }
         .slide__page { position: absolute; right: 1.5rem; bottom: 1.25rem; font-family: ui-monospace, monospace; font-size: 0.8rem; opacity: 0.6; color: var(--color-mm-mushroom); }
         .slide__wordmark { position: absolute; left: 1.5rem; bottom: 1.25rem; font-family: var(--font-display); font-size: 0.8rem; letter-spacing: 0.1em; opacity: 0.5; color: var(--color-mm-mushroom); }

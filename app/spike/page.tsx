@@ -15,7 +15,7 @@ export default function Spike() {
   }, [t]);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "var(--color-mm-dark-brown)" }}>
+    <div style={{ position: "fixed", inset: 0, containerType: "size", background: "var(--color-mm-dark-brown)" }}>
       <ArtStage ref={art} nightlight={0.6} reduced={false} transparentBg />
       <div className="cin"><div className="cin__stage"><div ref={textHost} className="cin__text" data-testid="spike-text" /></div></div>
       <input

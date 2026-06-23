@@ -9,8 +9,8 @@ export function SectionLeadSlide({ slots }: { slots: SectionLeadSlots }) {
       <style>{`
         .sls { max-width: 60ch; }
         .sls__eyebrow { font-family: var(--font-display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--deck-accent, var(--color-mm-terracotta)); font-size: 0.9rem; margin-bottom: 1rem; }
-        .sls__title { font-family: var(--font-display); font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1.08; color: var(--deck-ink, var(--color-mm-mushroom)); margin-bottom: 1.25rem; }
-        .sls__lead { font-size: clamp(1.05rem, 2.2vw, 1.4rem); line-height: 1.55; color: var(--deck-ink, var(--color-mm-mushroom)); }
+        .sls__title { font-family: var(--font-display); font-size: clamp(2rem, 5cqw, 3.5rem); line-height: 1.08; color: var(--deck-ink, var(--color-mm-mushroom)); margin-bottom: 1.25rem; }
+        .sls__lead { font-size: clamp(1.05rem, 2.2cqw, 1.4rem); line-height: 1.55; color: var(--deck-ink, var(--color-mm-mushroom)); }
       `}</style>
     </div>
   );

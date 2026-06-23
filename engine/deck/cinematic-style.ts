@@ -13,16 +13,16 @@ import type { TextSize } from "./types";
  * add it BOTH here and to `TextSize` in `types.ts`.
  */
 export const TEXT_SIZES: Record<TextSize, string> = {
-  lg: "clamp(1.4rem, 7vmin, 3.0rem)",
-  md: "clamp(1.15rem, 5.6vmin, 2.4rem)",
-  sm: "clamp(0.95rem, 4.6vmin, 1.95rem)",
+  lg: "clamp(1.4rem, 7cqmin, 3.0rem)",
+  md: "clamp(1.15rem, 5.6cqmin, 2.4rem)",
+  sm: "clamp(0.95rem, 4.6cqmin, 1.95rem)",
 };
 
 /**
  * Font-size for the `cursive` text effect (a script face, intentionally larger than `lg`
  * since cursive runs visually smaller at the same size). Tweak freely; /story hot-reloads.
  */
-export const CURSIVE_SIZE = "clamp(5rem, 28vmin, 12rem)";
+export const CURSIVE_SIZE = "clamp(5rem, 28cqmin, 12rem)";
 
 /** Default text-box top-left on the 16:9 stage when a beat omits `pos` (normalized 0–1). */
 export const DEFAULT_TEXT_POS = { x: 0.03, y: 0.1 };
