@@ -1,7 +1,13 @@
 import { listDecks, createDeck } from "@/lib/store/deck-store";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
-  return Response.json(await listDecks());
+  try {
+    return Response.json(await listDecks());
+  } catch (err) {
+    return Response.json({ error: String((err as Error).message) }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {

@@ -1,5 +1,7 @@
 import { loadDeck, saveDeck, deleteDeck } from "@/lib/store/deck-store";
-import { validateDeckDoc } from "@/engine/deck-doc";
+import { validateDeckDoc, type DeckDoc } from "@/engine/deck-doc";
+
+export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -14,11 +16,20 @@ export async function GET(_req: Request, { params }: Ctx) {
 
 export async function PUT(req: Request, { params }: Ctx) {
   const { id } = await params;
-  const doc = await req.json();
+  let doc: DeckDoc;
+  try {
+    doc = await req.json();
+  } catch {
+    return Response.json({ error: "invalid JSON body" }, { status: 400 });
+  }
   if (doc?.meta?.id !== id) return Response.json({ error: "id mismatch" }, { status: 400 });
   const v = validateDeckDoc(doc);
   if (!v.ok) return Response.json({ error: v.errors.join(", ") }, { status: 400 });
-  await saveDeck(doc);
+  try {
+    await saveDeck(doc);
+  } catch (err) {
+    return Response.json({ error: String((err as Error).message) }, { status: 500 });
+  }
   return Response.json({ ok: true });
 }
 
