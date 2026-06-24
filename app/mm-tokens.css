@@ -1,0 +1,114 @@
+/* Sporekles --mm-* tokens, vendored from mm-website app/sporekles-tokens.css */
+
+:root {
+  /* ---------- Color tokens ---------- */
+  /* Surfaces — paper-like creams that warm the page */
+  --mm-cream:        #fdf3e4;   /* primary surface, default body */
+  --mm-cream-pale:   #fdebd5;   /* hero surface, slightly warmer */
+  --mm-warm-tan:     #f5dfc0;   /* secondary surface, sub-section */
+  --mm-tan-edge:     #f0c9a0;   /* hairline borders / dividers */
+
+  /* Browns — ink for text + dark surfaces */
+  --mm-mushroom:     #5c3d2e;   /* default text + dark surface */
+  --mm-mushroom-2:   #4a3020;   /* heavier text on cream */
+  --mm-dark-brown:   #3a2318;   /* footer / deep surface */
+  --mm-stem:         #b89070;   /* hairline brown lines */
+
+  /* Accents — cap colors used sparingly */
+  --mm-terracotta:   #c07850;   /* primary accent (eyebrow, dots) */
+  --mm-terracotta-2: #a06040;   /* terracotta darker (spore) */
+  --mm-rose:         #d96680;   /* rare amanita pink-cap accent */
+  --mm-sage:         #7a9e6e;   /* forest sage, used rarely */
+  --mm-gold:         #d4a843;   /* spore gold, used on dark only */
+  --mm-gold-pale:    #e8c090;   /* warm sand spore */
+
+  /* Semantic ----------------------------------------- */
+  --mm-bg:           var(--mm-cream);
+  --mm-bg-alt:       var(--mm-warm-tan);
+  --mm-bg-hero:      var(--mm-cream-pale);
+  --mm-bg-dark:      var(--mm-mushroom);
+  --mm-bg-deepest:   var(--mm-dark-brown);
+
+  --mm-fg:           var(--mm-mushroom);
+  --mm-fg-strong:    var(--mm-mushroom-2);
+  --mm-fg-muted:     #8a6a55;          /* mushroom @ 60% on cream */
+  --mm-fg-on-dark:   var(--mm-cream);
+  --mm-fg-on-dark-muted: rgba(253,243,228,0.75);
+
+  --mm-accent:       var(--mm-terracotta);
+  --mm-accent-on-dark: var(--mm-gold);
+
+  --mm-border:       var(--mm-tan-edge);
+  --mm-border-soft:  rgba(184,144,112,0.5);   /* hairline brown */
+  --mm-border-dark:  rgba(255,255,255,0.15);
+
+  /* ---------- Type tokens ---------- */
+  /* Two-family system. --mm-font-display is the chunky rounded
+     face used for titles, eyebrows, the subtitle bar, button
+     labels, and the page-num footer. --mm-font-body is the
+     humanist sans used for paragraph copy, lead, captions,
+     quotes, and any UI label longer than ~3 words. */
+  --mm-font-display: 'Londrina Solid', system-ui, sans-serif;
+  --mm-font-body:    'Atkinson Hyperlegible', system-ui, sans-serif;
+  --mm-font-mono:    ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Type scale — fluid where useful */
+  --mm-fs-eyebrow:   0.78rem;
+  --mm-fs-caption:   0.72rem;
+  --mm-fs-small:     0.82rem;
+  --mm-fs-body:      1rem;
+  --mm-fs-lead:      1.15rem;
+  --mm-fs-h3:        1.25rem;
+  --mm-fs-h2:        clamp(1.8rem, 4vw, 2.8rem);
+  --mm-fs-h1:        clamp(3rem, 8vw, 6rem);
+  --mm-fs-display:   clamp(3rem, 8vw, 7rem);   /* hero slide-style */
+
+  --mm-lh-tight:     1.05;
+  --mm-lh-snug:      1.2;
+  --mm-lh-body:      1.6;       /* humanist sans — a bit tighter than the all-Londrina version */
+
+  --mm-tracking-eyebrow: 0.2em;
+  --mm-tracking-button:  0.04em;
+
+  /* ---------- Spacing (8pt-ish, with generous outdoors air) ---------- */
+  --mm-space-1:  4px;
+  --mm-space-2:  8px;
+  --mm-space-3:  12px;
+  --mm-space-4:  16px;
+  --mm-space-5:  24px;
+  --mm-space-6:  32px;
+  --mm-space-7:  48px;
+  --mm-space-8:  64px;
+  --mm-space-9:  80px;
+  --mm-space-10: 128px;
+
+  /* ---------- Radii — round and friendly ---------- */
+  --mm-radius-xs:    4px;     /* subtitle bar */
+  --mm-radius-sm:    10px;    /* badges */
+  --mm-radius-md:    16px;    /* slide-card / hero cards */
+  --mm-radius-lg:    18px;    /* inner cards */
+  --mm-radius-xl:    20px;    /* section boxes */
+  --mm-radius-pill:  9999px;  /* buttons, chips */
+
+  /* ---------- Borders ---------- */
+  --mm-border-w:        1.5px;
+  --mm-border-w-strong: 2.5px;
+  --mm-divider-w:       1.5px;
+
+  /* ---------- Shadows — warm, soft, NEVER neutral grey ---------- */
+  --mm-shadow-card:    0 3px 16px rgba(92,61,46,0.07);
+  --mm-shadow-card-2:  0 4px 20px rgba(92,61,46,0.09);
+  --mm-shadow-lift:    0 14px 40px rgba(92,61,46,0.16);
+  --mm-shadow-slide:   0 12px 48px rgba(58,35,24,0.13);
+  --mm-shadow-button:  0 10px 28px rgba(0,0,0,0.14);
+  --mm-shadow-shroom:  drop-shadow(0 8px 20px rgba(58,35,24,0.13));
+
+  /* ---------- Motion ---------- */
+  --mm-ease:           cubic-bezier(0.4, 0, 0.2, 1);
+  --mm-ease-soft:      cubic-bezier(0.25, 1, 0.5, 1);
+  --mm-dur-fast:       0.2s;
+  --mm-dur-med:        0.45s;
+  --mm-dur-reveal:     0.7s;
+  --mm-float-period:   6s;     /* gentle mushroom hover */
+  --mm-spore-period:   18s;    /* falling-spore particle */
+}

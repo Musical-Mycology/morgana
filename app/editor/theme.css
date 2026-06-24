@@ -1,0 +1,19 @@
+/* Editor dark-surface hierarchy from the Sporekles dark-surface tokens. */
+:root {
+  --ed-bg-0: #231712;            /* app frame / toolbar / timeline base */
+  --ed-bg-1: #2d1e15;            /* side panels: filmstrip / inspector */
+  --ed-bg-2: #17110d;            /* canvas stage well */
+  --ed-surface: var(--mm-mushroom);
+  --ed-fg: var(--mm-cream);
+  --ed-fg-muted: rgba(253,243,228,0.58);
+  --ed-accent: var(--mm-gold);
+  --ed-accent-2: var(--mm-terracotta);
+  --ed-line: rgba(253,243,228,0.12);
+  --ed-line-2: rgba(253,243,228,0.22);
+  --ed-disp: var(--mm-font-display);
+  --ed-body: var(--mm-font-body);
+  --ed-mono: var(--mm-font-mono);
+  --ed-radius: 10px;
+  --ed-radius-pill: 999px;
+  --ed-shadow: 0 8px 30px rgba(0,0,0,0.4);
+}
