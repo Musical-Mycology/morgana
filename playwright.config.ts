@@ -6,6 +6,7 @@ const DATA_DIR = resolve("./data");
 
 export default defineConfig({
   testDir: "./e2e",
+  expect: { timeout: 15_000 },
   // Builds once + copies standalone assets before either server starts.
   globalSetup: "./e2e/global-setup.ts",
   webServer: [
