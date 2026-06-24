@@ -9,3 +9,6 @@ playwright-report
 # Real decks are private user data — never commit them.
 /data/decks/*
 !/data/decks/.gitkeep
+
+# Smoke-test scratch volumes (project-relative; /tmp does not bind-mount on Docker Desktop)
+.smoke-data*

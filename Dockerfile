@@ -18,5 +18,9 @@ RUN mkdir -p /data/decks
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# Bundled sample for first-run auto-seed (see docker-entrypoint.sh).
+COPY samples/demo.deck.json ./samples/demo.deck.json
+COPY --chmod=755 docker-entrypoint.sh /docker-entrypoint.sh
 EXPOSE 3000
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["node", "server.js"]
