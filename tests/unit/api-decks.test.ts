@@ -46,3 +46,11 @@ test("PUT: invalid JSON → 400; write failure → 500", async () => {
   const res = await onePUT(new Request("http://t", { method: "PUT", body: JSON.stringify(doc) }), ctx("d1"));
   expect(res.status).toBe(500);
 });
+
+test("list GET → 500 when the data dir is unreadable", async () => {
+  // Point the data dir at a FILE so mkdir(<dir>/decks) throws ENOTDIR inside listDecks().
+  writeFileSync(join(dir, "blocker"), "x");
+  process.env.MORGANA_DATA_DIR = join(dir, "blocker");
+  const res = await listGET();
+  expect(res.status).toBe(500);
+});

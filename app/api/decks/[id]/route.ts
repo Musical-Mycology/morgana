@@ -28,7 +28,7 @@ export async function PUT(req: Request, { params }: Ctx) {
   try {
     await saveDeck(doc);
   } catch (err) {
-    return Response.json({ error: String((err as Error).message) }, { status: 500 });
+    return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
   return Response.json({ ok: true });
 }
