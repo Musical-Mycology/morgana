@@ -7,6 +7,7 @@ import { DeckCanvas, type CanvasHandle } from "@/components/editor/DeckCanvas";
 import { Filmstrip } from "@/components/editor/Filmstrip";
 import { Timeline } from "@/components/editor/Timeline";
 import { Inspector } from "@/components/editor/Inspector";
+import { DeckSettings } from "@/components/editor/DeckSettings";
 
 export default function Editor() {
   const doc = useEditor((s) => s.doc);
@@ -15,16 +16,21 @@ export default function Editor() {
   const load = useEditor((s) => s.load);
   const canvasRef = useRef<CanvasHandle>(null);
   const [time, setTime] = useState({ t: 0, duration: 0 });
+  const [showSettings, setShowSettings] = useState(false);
   useEffect(() => { loadDeck("demo").then(load).catch(() => {}); }, [load]);
   const selectedFlat = beats[selected] ?? null;
   const onTime = useCallback((t: number, duration: number) => setTime({ t, duration }), []);
   return (
     <div className="ed">
-      <div className="ed__bar"><span className="ed__brand">Morgana</span><span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? "no deck"}</span></div>
+      <div className="ed__bar">
+        <span className="ed__brand">Morgana</span>
+        <span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? "no deck"}</span>
+        <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => setShowSettings(v => !v)}>Deck settings</button>
+      </div>
       <Filmstrip />
       <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} /></div>
       <Timeline canvasRef={canvasRef} time={time} />
-      <Inspector />
+      {showSettings ? <DeckSettings /> : <Inspector />}
     </div>
   );
 }

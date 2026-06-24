@@ -12,6 +12,7 @@ interface EditorState {
   select: (i: number) => void;
   selectAction: (i: number | null) => void;
   updateAction: (beatIdx: number, actionIdx: number, path: string, value: unknown) => void;
+  updateMeta: (path: string, value: unknown) => void;
 }
 
 export const useEditor = create<EditorState>((set, get) => ({
@@ -45,4 +46,5 @@ export const useEditor = create<EditorState>((set, get) => ({
     const doc = { ...s.doc, scenes };
     return { doc, beats: flattenBeats(doc) };
   }),
+  updateMeta: (path, value) => set((s) => s.doc ? { doc: { ...s.doc, meta: setPath(s.doc.meta, path, value) } } : s),
 }));
