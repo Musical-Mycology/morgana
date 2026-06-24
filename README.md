@@ -49,7 +49,7 @@ MORGANA_DATA_DIR="$PWD/data" node .next/standalone/server.js
 ```bash
 npm ci
 npm run seed:demo   # copy the demo deck into ./data/decks/
-npm run dev         # http://localhost:3000
+npm run dev         # http://localhost:3000/editor
 ```
 
 ## Configuration
