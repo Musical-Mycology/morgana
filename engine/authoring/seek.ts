@@ -64,12 +64,13 @@ export function beatDuration(timeline: Action[]): number {
   return beatTimeline(timeline).reduce((m, w) => Math.max(m, w.end), 0);
 }
 
-export interface SeekCtx { textHost: HTMLElement; art: ArtStageHandle | null; }
+export interface SeekCtx { textHost: HTMLElement; art: ArtStageHandle | null; setNight?: (n: number) => void; }
 
 /** Render the beat's visual state at absolute time `t` (seconds). Frame-accurate for tween
  *  effects; particle effects render nothing (non-seekable / suppressed under scrub). */
 export function renderBeatAt(timeline: Action[], t: number, ctx: SeekCtx): void {
   ctx.textHost.innerHTML = "";
+  ctx.textHost.style.opacity = "";
   for (const { action, start, end } of beatTimeline(timeline)) {
     if (start > t) break;                       // not reached yet (strictly after t)
     const dur = end - start;
@@ -82,10 +83,11 @@ function applyAt(a: Action, p: number, ctx: SeekCtx): void {
   switch (a.kind) {
     case "text": {
       const el = document.createElement("p");
-      el.className = "cin__line cin__line--lg";
+      el.className = "cin__line cin__line--" + (a.size ?? "lg");
       el.textContent = a.value;
       el.style.opacity = String(p);
-      el.style.transform = a.in === "flyUp" ? `translateY(${(1 - p) * 40}px)` : "";
+      el.style.transform = a.in === "flyUp" ? `translateY(${(1 - p) * 40}px)` : a.in === "fadeSide" ? `translateX(${(1 - p) * 24}px)` : "";
+      if (a.align) el.style.textAlign = a.align;
       ctx.textHost.appendChild(el);
       break;
     }
@@ -94,8 +96,18 @@ function applyAt(a: Action, p: number, ctx: SeekCtx): void {
       if (p >= 1) ctx.art?.snap(layers); else ctx.art?.show(layers, "fade", 1);
       break;
     }
-    // note_emitter / note_circle: non-seekable → render nothing under scrub (full life only in playback).
-    default:
+    case "clear":
+      ctx.textHost.innerHTML = "";
+      ctx.textHost.style.opacity = "";
       break;
+    case "fade_out":
+      if (p >= 1) { ctx.textHost.innerHTML = ""; ctx.textHost.style.opacity = ""; }
+      else ctx.textHost.style.opacity = String(1 - p);
+      break;
+    case "nightlight":
+      ctx.setNight?.(a.to);
+      break;
+    default:
+      break;  // wait/click_gate: no visual. note_*/cue/counter_*/media*: non-seekable, not rendered under scrub.
   }
 }
