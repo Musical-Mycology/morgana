@@ -17,14 +17,17 @@ export default function Editor() {
   const canvasRef = useRef<CanvasHandle>(null);
   const [time, setTime] = useState({ t: 0, duration: 0 });
   const [showSettings, setShowSettings] = useState(false);
-  useEffect(() => { loadDeck("demo").then(load).catch(() => {}); }, [load]);
+  const [loadError, setLoadError] = useState(false);
+  useEffect(() => {
+    loadDeck("demo").then(load).catch((e) => { console.error("failed to load deck", e); setLoadError(true); });
+  }, [load]);
   const selectedFlat = beats[selected] ?? null;
   const onTime = useCallback((t: number, duration: number) => setTime({ t, duration }), []);
   return (
     <div className="ed">
       <div className="ed__bar">
         <span className="ed__brand">Morgana</span>
-        <span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? "no deck"}</span>
+        <span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? (loadError ? "couldn't load deck" : "no deck")}</span>
         <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => setShowSettings(v => !v)}>Deck settings</button>
       </div>
       <Filmstrip />
