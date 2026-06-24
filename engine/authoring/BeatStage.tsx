@@ -35,7 +35,7 @@ export function BeatStage({
     <div data-testid="beatstage" style={{ position: contained ? "absolute" : "fixed", inset: 0, containerType: "size", background: "var(--color-mm-dark-brown)" }}>
       <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />
       <NoteField ref={notes} reduced={false} />
-      <div className="deck__stage" style={{ position: "absolute", inset: 0 }}>
+      <div style={{ position: "absolute", inset: 0 }}>
         <CinematicSlide slots={{ sceneId, beat }} animate={animate} runtime={runtime} chrome={chrome} />
       </div>
     </div>

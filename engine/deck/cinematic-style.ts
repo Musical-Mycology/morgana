@@ -4,10 +4,10 @@ import type { TextSize } from "./types";
  * Editable font-size scale for cinematic narration text.
  *
  * The `size` field on a `{ kind: "text" }` action ("lg" | "md" | "sm") maps to
- * one of these. Values are any CSS font-size — `clamp(min, vmin, max)` keeps them
- * responsive across screen sizes (the middle `vmin` term scales with the window).
- * The stage is height-constrained in landscape, so vmin (the short axis) tracks it better than vw.
- * The `max` is the desktop size; `min` is the floor on very small viewports.
+ * one of these. Values are any CSS font-size — `clamp(min, cqmin, max)` keeps them
+ * responsive to the stage container (container-query units, not the viewport/window).
+ * The stage is height-constrained in landscape, so cqmin (the short axis) tracks it better than cqw.
+ * The `max` is the desktop size; `min` is the floor on very small containers.
  *
  * Tweak these freely; /story hot-reloads. To ADD a new size token (e.g. "xl"),
  * add it BOTH here and to `TextSize` in `types.ts`.
