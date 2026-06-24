@@ -19,7 +19,7 @@ export default function Editor() {
   const selectedFlat = beats[selected] ?? null;
   return (
     <div className="ed">
-      <div className="ed__bar"><strong>Morgana</strong><span style={{ opacity: 0.7 }}>{doc?.meta.title ?? "no deck"}</span></div>
+      <div className="ed__bar"><span className="ed__brand">Morgana</span><span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? "no deck"}</span></div>
       <Filmstrip />
       <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={(t, duration) => setTime({ t, duration })} /></div>
       <Timeline canvasRef={canvasRef} time={time} />
