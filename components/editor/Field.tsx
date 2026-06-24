@@ -1,15 +1,5 @@
 "use client";
-
-// Temporary inline type — T5 will switch this to import from @/lib/editor/registry
-interface FieldSpec {
-  key: string;
-  label: string;
-  type: "text" | "textarea" | "number" | "select" | "range";
-  options?: { value: string; label: string }[];
-  min?: number;
-  max?: number;
-  step?: number;
-}
+import type { Field as FieldSpec } from "@/lib/editor/registry";
 
 const base: React.CSSProperties = {
   background: "var(--ed-bg-2)",

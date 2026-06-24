@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./editor.css";
 import { useEditor } from "@/lib/editor/store";
 import { loadDeck } from "@/lib/api/decks-client";
@@ -17,11 +17,12 @@ export default function Editor() {
   const [time, setTime] = useState({ t: 0, duration: 0 });
   useEffect(() => { loadDeck("demo").then(load).catch(() => {}); }, [load]);
   const selectedFlat = beats[selected] ?? null;
+  const onTime = useCallback((t: number, duration: number) => setTime({ t, duration }), []);
   return (
     <div className="ed">
       <div className="ed__bar"><span className="ed__brand">Morgana</span><span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? "no deck"}</span></div>
       <Filmstrip />
-      <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={(t, duration) => setTime({ t, duration })} /></div>
+      <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} /></div>
       <Timeline canvasRef={canvasRef} time={time} />
       <Inspector />
     </div>

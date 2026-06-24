@@ -7,6 +7,8 @@ import { actionDuration } from "@/engine/authoring/seek";
 export function Timeline({ canvasRef, time }: { canvasRef: RefObject<CanvasHandle | null>; time: { t: number; duration: number } }) {
   const beats = useEditor((s) => s.beats);
   const selected = useEditor((s) => s.selected);
+  const selectedAction = useEditor((s) => s.selectedAction);
+  const selectAction = useEditor((s) => s.selectAction);
   const timeline = beats[selected]?.beat.timeline ?? [];
   return (
     <div className="ed__timeline" data-testid="timeline">
@@ -19,10 +21,10 @@ export function Timeline({ canvasRef, time }: { canvasRef: RefObject<CanvasHandl
       </div>
       <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
         {timeline.map((a, i) => (
-          <span key={i} className="ed__chip">
+          <button key={i} className="ed__chip" onClick={() => selectAction(i)} aria-current={i === selectedAction ? "true" : undefined}>
             {a.kind}{a.kind === "text" ? `:${a.in}` : ""}{a.kind === "wait" ? ` ${a.ms}ms` : ""}{" "}
             <span style={{ color: "var(--ed-fg-muted)" }}>({actionDuration(a).toFixed(1)}s)</span>
-          </span>
+          </button>
         ))}
         {!timeline.length && <span style={{ color: "var(--ed-fg-muted)" }}>empty beat</span>}
       </div>
