@@ -12,11 +12,19 @@ It runs locally in Docker and stores decks as portable JSON on a mounted volume.
 
 ## Status
 
-Under active development. The design spec and the first implementation plan live in
+Under active development. The design spec and all implementation plans live in
 [`docs/`](docs/):
 
-- [`docs/2026-06-23-morgana-design.md`](docs/2026-06-23-morgana-design.md) — design spec
-- [`docs/2026-06-23-morgana-plan-1-foundation-engine.md`](docs/2026-06-23-morgana-plan-1-foundation-engine.md) — Plan 1: foundation & engine spike
+- [`2026-06-23-morgana-design.md`](docs/2026-06-23-morgana-design.md) — design spec
+
+Implementation plans, in build order:
+
+- [Plan 1 — Foundation & engine spike](docs/2026-06-23-morgana-plan-1-foundation-engine.md)
+- [Plan 2 — Backend & bridges](docs/2026-06-23-morgana-plan-2-backend-bridges.md)
+- [Plan 3a — Editor shell & read-only viewer](docs/2026-06-23-morgana-plan-3a-editor-shell.md)
+- [Plan 3b — Sporekles dark theme + inspector core](docs/2026-06-23-morgana-plan-3b-theming-inspector.md)
+- [Plan 3c — Structural editing & persistence](docs/2026-06-26-morgana-plan-3c-structural-editing.md)
+- Deployment hardening — standalone server + Docker deck-loading: [spec](docs/2026-06-24-morgana-deploy-harden-standalone-api.md) · [plan](docs/2026-06-24-morgana-deploy-harden-plan.md)
 
 ## Run it
 
