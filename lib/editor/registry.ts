@@ -13,8 +13,10 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
   text: { kind: "text", label: "Text", icon: "ti-text-caption", seekable: true, schema: [
     { key: "value", label: "Value", type: "textarea" },
     { key: "in", label: "Effect", type: "select", options: TEXT_INS.map((v) => ({ value: v, label: v })) },
-    { key: "size", label: "Size", type: "select", options: opts("lg", "md", "sm") },
+    { key: "size", label: "Size", type: "select", options: opts("xs", "sm", "md", "lg", "xl") },
     { key: "align", label: "Align", type: "select", options: opts("left", "center", "right") },
+    { key: "bold", label: "Bold", type: "checkbox" },
+    { key: "italic", label: "Italic", type: "checkbox" },
     { key: "speed", label: "Speed", type: "range", min: 0.2, max: 3, step: 0.1 },
     { key: "pos.x", label: "Pos X", type: "number", min: 0, max: 1, step: 0.01 },
     { key: "pos.y", label: "Pos Y", type: "number", min: 0, max: 1, step: 0.01 },
