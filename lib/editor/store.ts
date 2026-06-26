@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { DeckDoc } from "@/engine/deck-doc";
 import { flattenBeats, beatLocation, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
+import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt } from "./mutations";
 
 const HISTORY_CAP = 50;
 
@@ -20,6 +21,12 @@ interface EditorState {
   updateMeta: (path: string, value: unknown) => void;
   undo: () => void;
   redo: () => void;
+  addBeat: (flatIdx: number) => void;
+  duplicateBeat: (flatIdx: number) => void;
+  deleteBeat: (flatIdx: number) => void;
+  moveBeat: (flatIdx: number, dir: -1 | 1) => void;
+  addScene: () => void;
+  deleteScene: (flatIdx: number) => void;
 }
 
 /** Record the current doc into history, swap in the produced doc, re-derive beats, bump revision.
@@ -78,5 +85,26 @@ export const useEditor = create<EditorState>((set, get) => ({
     const doc = s.future[0];
     const beats = flattenBeats(doc);
     return { doc, beats, future: s.future.slice(1), past: [...s.past, s.doc].slice(-HISTORY_CAP), revision: s.revision + 1, selected: Math.min(s.selected, Math.max(0, beats.length - 1)), selectedAction: null };
+  }),
+  addBeat: (flatIdx) => set((s) => commit(s, (doc) => insertBeatAfter(doc, flatIdx))),
+  duplicateBeat: (flatIdx) => set((s) => commit(s, (doc) => duplicateBeatAt(doc, flatIdx))),
+  deleteBeat: (flatIdx) => set((s) => {
+    if (!s.doc) return {};
+    const part = commit(s, (doc) => deleteBeatAt(doc, flatIdx));
+    if (!part.beats) return {};
+    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null };
+  }),
+  moveBeat: (flatIdx, dir) => set((s) => {
+    if (!s.doc) return {};
+    const next = moveBeatBy(s.doc, flatIdx, dir);
+    if (next === s.doc) return {};
+    return { ...commit(s, () => next), selected: flatIdx + dir };
+  }),
+  addScene: () => set((s) => commit(s, (doc) => appendScene(doc))),
+  deleteScene: (flatIdx) => set((s) => {
+    if (!s.doc) return {};
+    const part = commit(s, (doc) => deleteSceneAt(doc, flatIdx));
+    if (!part.beats) return {};
+    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null };
   }),
 }));

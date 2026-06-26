@@ -36,3 +36,26 @@ test("undo with empty history is a no-op", () => {
   useEditor.getState().undo();
   expect(useEditor.getState().beats[0].beat.timeline[0]).toMatchObject({ value: "hi" });
 });
+
+test("structural methods mutate + record history; delete clamps selection", () => {
+  const multi: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [
+    { id: "s", beats: [{ id: "a", timeline: [] }, { id: "b", timeline: [] }] },
+  ] };
+  const s = useEditor.getState();
+  s.load(multi);
+  s.select(1);
+
+  s.addBeat(1);                                       // after "b"
+  expect(useEditor.getState().beats.length).toBe(3);
+
+  s.deleteBeat(2);                                    // remove the new one
+  expect(useEditor.getState().beats.length).toBe(2);
+
+  s.deleteBeat(1);                                    // remove "b" while it was selected
+  expect(useEditor.getState().beats.map((e) => e.beat.id)).toEqual(["a"]);
+  expect(useEditor.getState().selected).toBe(0);      // clamped
+
+  expect(useEditor.getState().past.length).toBeGreaterThan(0);
+  useEditor.getState().undo();
+  expect(useEditor.getState().beats.map((e) => e.beat.id)).toEqual(["a", "b"]);
+});
