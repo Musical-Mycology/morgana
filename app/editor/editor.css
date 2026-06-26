@@ -16,3 +16,5 @@
 .ed__chip[aria-current="true"] { border-color: var(--ed-accent); color: var(--ed-accent); }
 .ed__icon { background: transparent; border: 1px solid var(--ed-line); color: var(--ed-fg); border-radius: 6px; width: 22px; height: 22px; line-height: 1; font-size: 12px; cursor: pointer; padding: 0; }
 .ed__icon:hover { border-color: var(--ed-accent); color: var(--ed-accent); }
+.ed__chip--gate { background: rgba(212,168,67,0.16); border-color: var(--ed-accent); color: var(--ed-accent); font-family: var(--ed-mono); letter-spacing: 0.04em; }
+.ed__timeline select.ed__pill { background: var(--ed-bg-2); }
