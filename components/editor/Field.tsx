@@ -40,6 +40,8 @@ export function Field({ spec, value, onChange }: { spec: FieldSpec; value: unkno
           value={Number(value ?? 0)}
           onChange={(e) => onChange(parseFloat(e.target.value))}
         />
+      ) : spec.type === "checkbox" ? (
+        <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
       ) : (
         <input style={base} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />
       )}
