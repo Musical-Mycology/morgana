@@ -33,7 +33,8 @@ export default function Editor() {
   const [decks, setDecks] = useState<DeckMeta[]>([]);
   const [showExport, setShowExport] = useState(false);
   const exportText = doc ? deckDocToModule(doc) : "";
-  const currentId = doc?.meta.id ?? "";
+  const [pendingId, setPendingId] = useState("");
+  const currentId = doc?.meta.id ?? pendingId;
   useEffect(() => { listDecks().then(setDecks).catch(() => {}); }, []);
 
   const switchDeck = (id: string) => { if (id && id !== currentId) window.location.href = `/editor?deck=${id}`; };
@@ -53,6 +54,7 @@ export default function Editor() {
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("deck") ?? "demo";
+    setPendingId(id);
     loadDeck(id).then(load).catch((e) => { console.error("failed to load deck", e); setLoadError(true); });
   }, [load]);
 
@@ -80,7 +82,7 @@ export default function Editor() {
         <span className="ed__brand">Morgana</span>
         <select className="ed__pill ed__pill--ghost" data-testid="deck-switcher" value={currentId} onChange={(e) => switchDeck(e.target.value)}>
           {!decks.some((d) => d.id === currentId) && <option value={currentId}>{doc?.meta.title ?? "…"}</option>}
-          {decks.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+          {decks.map((d) => <option key={d.id} value={d.id}>{d.id === currentId ? (doc?.meta.title ?? d.title) : d.title}</option>)}
         </select>
         <button className="ed__pill ed__pill--ghost" data-testid="deck-new" onClick={onNewDeck}>＋ New</button>
         <button className="ed__pill ed__pill--ghost" data-testid="deck-delete" onClick={onDeleteDeck}>🗑 Delete</button>
