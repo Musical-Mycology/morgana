@@ -149,7 +149,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
           if (print && a.screenOnly) continue;
           const el = a.append
             ? appendFragment(a.value)
-            : appendText(a.pos ? makeLineBox(a.pos, a.align) : textHost, a.value, a.size, a.align, a.dots, true, a.tone);
+            : appendText(a.pos ? makeLineBox(a.pos, a.align) : textHost, a.value, a.size, a.align, a.dots, true, a.tone, a.bold, a.italic);
           if (a.in === "cursive") el.classList.add("cin__line--cursive");
         }
         else if (a.kind === "rotateList" && a.items[0]) appendText(textHost, a.items[0], a.size ?? "md", undefined, false, true);
@@ -241,12 +241,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     }
   }
 
-  function appendText(host: HTMLElement, value: string, size?: TextSize, align?: TextAlign, dots?: boolean, instant = false, tone?: SlideTheme) {
+  function appendText(host: HTMLElement, value: string, size?: TextSize, align?: TextAlign, dots?: boolean, instant = false, tone?: SlideTheme, bold?: boolean, italic?: boolean) {
     const sz = size ?? "lg";
     const p = document.createElement("p");
     // font-size per token set in the <style> block from TEXT_SIZES; tone:"dark" → dark ink for light grounds
     p.className = `cin__line cin__line--${sz}${tone === "dark" ? " cin__line--dark" : ""}`;
     if (align) p.style.textAlign = align;
+    if (bold) p.style.fontWeight = "700";
+    if (italic) p.style.fontStyle = "italic";
     if (dots) {
       const { line } = lineAndDots(value);
       p.textContent = line + " ";
@@ -446,7 +448,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
           master.add(() => {
             const el = a.append
               ? appendFragment(a.value)
-              : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, true, a.tone);
+              : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, true, a.tone, a.bold, a.italic);
             if (a.in === "cursive") el.classList.add("cin__line--cursive");
           });
           master.to({}, { duration: 0.01 });
@@ -460,7 +462,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         master.add(() => {
           const el = a.append
             ? appendFragment(a.value) // inline fragment on the current line
-            : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, false, a.tone);
+            : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, false, a.tone, a.bold, a.italic);
           if (a.in === "cursive") el.classList.add("cin__line--cursive"); // script font + larger size
           const dir = a.align === "right" ? "right" : "left"; // letterFly follows justification
           const tl =
