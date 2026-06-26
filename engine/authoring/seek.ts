@@ -88,6 +88,7 @@ function applyAt(a: Action, p: number, ctx: SeekCtx): void {
       el.style.opacity = String(p);
       el.style.transform = a.in === "flyUp" ? `translateY(${(1 - p) * 40}px)` : a.in === "fadeSide" ? `translateX(${(1 - p) * 24}px)` : "";
       if (a.align) el.style.textAlign = a.align;
+      if (a.pos) { el.style.position = "absolute"; el.style.left = `${a.pos.x * 100}%`; el.style.top = `${a.pos.y * 100}%`; }
       ctx.textHost.appendChild(el);
       break;
     }
