@@ -1,0 +1,13 @@
+{
+  "defaults": { "display": "Londrina Solid", "body": "Atkinson Hyperlegible", "cursive": "Dancing Script" },
+  "families": [
+    { "family": "Londrina Solid", "pkg": "londrina-solid", "role": "display", "weights": [400, 900], "license": "OFL-1.1" },
+    { "family": "Bebas Neue", "pkg": "bebas-neue", "role": "display", "weights": [400], "license": "OFL-1.1" },
+    { "family": "Space Grotesk", "pkg": "space-grotesk", "role": "display", "weights": [400, 700], "license": "OFL-1.1" },
+    { "family": "Atkinson Hyperlegible", "pkg": "atkinson-hyperlegible", "role": "body", "weights": [400, 700], "license": "OFL-1.1" },
+    { "family": "Inter", "pkg": "inter", "role": "body", "weights": [400, 700], "license": "OFL-1.1" },
+    { "family": "Source Serif 4", "pkg": "source-serif-4", "role": "body", "weights": [400, 700], "license": "OFL-1.1" },
+    { "family": "Dancing Script", "pkg": "dancing-script", "role": "cursive", "weights": [400, 700], "license": "OFL-1.1" },
+    { "family": "Caveat", "pkg": "caveat", "role": "cursive", "weights": [400, 700], "license": "OFL-1.1" }
+  ]
+}
