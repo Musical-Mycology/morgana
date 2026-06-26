@@ -2,7 +2,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./editor.css";
 import { useEditor } from "@/lib/editor/store";
-import { loadDeck } from "@/lib/api/decks-client";
+import { loadDeck, listDecks, createDeck, deleteDeck } from "@/lib/api/decks-client";
+import type { DeckMeta } from "@/engine/deck-doc";
+import { DECK_ID_RE } from "@/engine/deck-doc";
 import { useAutosave, type SaveStatus } from "@/lib/editor/use-autosave";
 import { DeckCanvas, type CanvasHandle } from "@/components/editor/DeckCanvas";
 import { Filmstrip } from "@/components/editor/Filmstrip";
@@ -27,6 +29,24 @@ export default function Editor() {
   const [showSettings, setShowSettings] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<SaveStatus>("idle");
+  const [decks, setDecks] = useState<DeckMeta[]>([]);
+  const currentId = doc?.meta.id ?? "";
+  useEffect(() => { listDecks().then(setDecks).catch(() => {}); }, []);
+
+  const switchDeck = (id: string) => { if (id && id !== currentId) window.location.href = `/editor?deck=${id}`; };
+  const onNewDeck = async () => {
+    const id = window.prompt("New deck id (lowercase, a–z 0–9 -):")?.trim();
+    if (!id) return;
+    if (!DECK_ID_RE.test(id)) { window.alert("id must match a-z 0-9 - (start alphanumeric)"); return; }
+    await createDeck({ id, title: id });
+    window.location.href = `/editor?deck=${id}`;
+  };
+  const onDeleteDeck = async () => {
+    if (!currentId || !window.confirm(`Delete deck "${currentId}"? This cannot be undone.`)) return;
+    await deleteDeck(currentId);
+    const next = decks.find((d) => d.id !== currentId)?.id ?? "demo";
+    window.location.href = `/editor?deck=${next}`;
+  };
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("deck") ?? "demo";
@@ -55,7 +75,13 @@ export default function Editor() {
     <div className="ed">
       <div className="ed__bar">
         <span className="ed__brand">Morgana</span>
-        <span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? (loadError ? "couldn't load deck" : "no deck")}</span>
+        <select className="ed__pill ed__pill--ghost" data-testid="deck-switcher" value={currentId} onChange={(e) => switchDeck(e.target.value)}>
+          {!decks.some((d) => d.id === currentId) && <option value={currentId}>{doc?.meta.title ?? "…"}</option>}
+          {decks.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+        </select>
+        <button className="ed__pill ed__pill--ghost" data-testid="deck-new" onClick={onNewDeck}>＋ New</button>
+        <button className="ed__pill ed__pill--ghost" data-testid="deck-delete" onClick={onDeleteDeck}>🗑 Delete</button>
+        {loadError && <span style={{ color: "var(--ed-fg-muted)" }}>couldn&apos;t load deck</span>}
         <button className="ed__pill ed__pill--ghost" data-testid="undo" disabled={!canUndo} onClick={() => undo()}>↶ Undo</button>
         <button className="ed__pill ed__pill--ghost" data-testid="redo" disabled={!canRedo} onClick={() => redo()}>↷ Redo</button>
         <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => setShowSettings(v => !v)}>Deck settings</button>
