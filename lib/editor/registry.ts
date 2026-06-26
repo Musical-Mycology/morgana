@@ -81,6 +81,7 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
     { key: "id", label: "Tile id", type: "text" },
     { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
   ] },
+  // `hex` (string[]) is intentionally not exposed: no array-field type in the inspector yet; newAction sets a default palette.
   note_circle: { kind: "note_circle", label: "Note circle", icon: "ti-circle", seekable: false, schema: [
     { key: "pos.x", label: "Pos X", type: "number", min: 0, max: 1, step: 0.01 },
     { key: "pos.y", label: "Pos Y", type: "number", min: 0, max: 1, step: 0.01 },
@@ -98,7 +99,7 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
   ] },
 };
 
-const GENERIC = (kind: string): EffectDescriptor => ({ kind, label: kind, icon: "ti-square", seekable: kind !== "note_circle" && kind !== "cue", schema: [] });
+const GENERIC = (kind: string): EffectDescriptor => ({ kind, label: kind, icon: "ti-square", seekable: kind !== "cue", schema: [] });
 
 export function descriptorFor(a: Pick<Action, "kind"> & Record<string, unknown>): EffectDescriptor {
   return REGISTRY[a.kind] ?? GENERIC(a.kind);
