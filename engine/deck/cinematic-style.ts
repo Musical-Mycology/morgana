@@ -3,7 +3,7 @@ import type { TextSize } from "./types";
 /**
  * Editable font-size scale for cinematic narration text.
  *
- * The `size` field on a `{ kind: "text" }` action ("lg" | "md" | "sm") maps to
+ * The `size` field on a `{ kind: "text" }` action (xs | sm | md | lg | xl) maps to
  * one of these. Values are any CSS font-size — `clamp(min, cqmin, max)` keeps them
  * responsive to the stage container (container-query units, not the viewport/window).
  * The stage is height-constrained in landscape, so cqmin (the short axis) tracks it better than cqw.

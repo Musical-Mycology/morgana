@@ -42,12 +42,18 @@ export default function Editor() {
     const id = window.prompt("New deck id (lowercase, a–z 0–9 -):")?.trim();
     if (!id) return;
     if (!DECK_ID_RE.test(id)) { window.alert("id must match a-z 0-9 - (start alphanumeric)"); return; }
-    await createDeck({ id, title: id });
+    try {
+      await createDeck({ id, title: id });
+    } catch { window.alert("Failed to create deck (the id may already exist)."); return; }
     window.location.href = `/editor?deck=${id}`;
   };
   const onDeleteDeck = async () => {
-    if (!currentId || !window.confirm(`Delete deck "${currentId}"? This cannot be undone.`)) return;
-    await deleteDeck(currentId);
+    if (!currentId) return;
+    if (decks.length <= 1) { window.alert("Can't delete the only deck."); return; }
+    if (!window.confirm(`Delete deck "${currentId}"? This cannot be undone.`)) return;
+    try {
+      await deleteDeck(currentId);
+    } catch { window.alert("Failed to delete deck."); return; }
     const next = decks.find((d) => d.id !== currentId)?.id ?? "demo";
     window.location.href = `/editor?deck=${next}`;
   };
@@ -55,7 +61,7 @@ export default function Editor() {
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("deck") ?? "demo";
     setPendingId(id);
-    loadDeck(id).then(load).catch((e) => { console.error("failed to load deck", e); setLoadError(true); });
+    loadDeck(id).then(load).catch((e) => { console.error("failed to load deck", e); setLoadError(true); setPendingId(""); });
   }, [load]);
 
   const onStatus = useCallback((s: SaveStatus) => setStatus(s), []);

@@ -41,13 +41,13 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
     { key: "freq", label: "Notes/sec", type: "number", min: 0, step: 0.5 },
   ] },
   rotateList: { kind: "rotateList", label: "Rotating list", icon: "ti-list", seekable: true, schema: [
-    { key: "size", label: "Size", type: "select", options: opts("lg", "md", "sm") },
+    { key: "size", label: "Size", type: "select", options: opts("xs", "sm", "md", "lg", "xl") },
   ] },
   counter_show: { kind: "counter_show", label: "Counter (show)", icon: "ti-number", seekable: true, schema: [
     { key: "prefix", label: "Prefix", type: "text" },
     { key: "label", label: "Label", type: "text" },
     { key: "value", label: "Start value", type: "number", step: 1 },
-    { key: "size", label: "Size", type: "select", options: opts("lg", "md", "sm") },
+    { key: "size", label: "Size", type: "select", options: opts("xs", "sm", "md", "lg", "xl") },
     { key: "pos.x", label: "Pos X", type: "number", min: 0, max: 1, step: 0.01 },
     { key: "pos.y", label: "Pos Y", type: "number", min: 0, max: 1, step: 0.01 },
   ] },
