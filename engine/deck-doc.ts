@@ -16,6 +16,7 @@ export interface DeckMeta {
   treatment?: SlideTreatment;
   noindex?: boolean;
   chrome?: DeckChrome;
+  fonts?: { display?: string; body?: string; cursive?: string };
 }
 
 export interface DeckDoc {

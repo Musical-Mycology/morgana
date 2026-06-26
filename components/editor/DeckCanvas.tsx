@@ -17,6 +17,12 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     const t = useRef(0);
     const raf = useRef<number | null>(null);
     const [night, setNight] = useState(0.6);
+    const fonts = useEditor((s) => s.doc?.meta.fonts);
+    const fontVars = {
+      ...(fonts?.display ? { ["--font-display"]: `'${fonts.display}'` } : {}),
+      ...(fonts?.body ? { ["--font-body"]: `'${fonts.body}'` } : {}),
+      ...(fonts?.cursive ? { ["--font-cursive"]: `'${fonts.cursive}'` } : {}),
+    } as React.CSSProperties;
     const dur = () => (flat ? beatDuration(flat.beat.timeline) : 0);
     const draw = () => { if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight }); };
     const cancel = () => { if (raf.current != null) cancelAnimationFrame(raf.current); raf.current = null; };
@@ -39,7 +45,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     useEffect(() => { cancel(); t.current = 0; draw(); onTime?.(0, dur()); return cancel; }, [flat]);
 
     return (
-      <div ref={host} className="ed__canvas-host" style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", maxHeight: "100%", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
+      <div ref={host} className="ed__canvas-host" style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", maxHeight: "100%", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)", ...fontVars }}>
         <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />
         <div className="cin"><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
         <PosHandle hostRef={host} redraw={draw} />
