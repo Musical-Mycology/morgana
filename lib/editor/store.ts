@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { DeckDoc } from "@/engine/deck-doc";
 import { flattenBeats, beatLocation, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
-import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt } from "./mutations";
+import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, insertActionAfter, deleteActionAt, moveActionBy, duplicateActionAt } from "./mutations";
 
 const HISTORY_CAP = 50;
 
@@ -27,6 +27,10 @@ interface EditorState {
   moveBeat: (flatIdx: number, dir: -1 | 1) => void;
   addScene: () => void;
   deleteScene: (flatIdx: number) => void;
+  addAction: (flatIdx: number, afterIdx: number, action: import("@/engine/deck/types").Action) => void;
+  deleteAction: (flatIdx: number, actionIdx: number) => void;
+  moveAction: (flatIdx: number, actionIdx: number, dir: -1 | 1) => void;
+  duplicateAction: (flatIdx: number, actionIdx: number) => void;
 }
 
 /** Record the current doc into history, swap in the produced doc, re-derive beats, bump revision.
@@ -106,5 +110,29 @@ export const useEditor = create<EditorState>((set, get) => ({
     const part = commit(s, (doc) => deleteSceneAt(doc, flatIdx));
     if (!part.beats) return {};
     return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null };
+  }),
+  addAction: (flatIdx, afterIdx, action) => set((s) => {
+    if (!s.doc) return {};
+    const part = commit(s, (doc) => insertActionAfter(doc, flatIdx, afterIdx, action));
+    if (!part.doc) return {};
+    return { ...part, selectedAction: afterIdx + 1 };
+  }),
+  deleteAction: (flatIdx, actionIdx) => set((s) => {
+    if (!s.doc) return {};
+    const part = commit(s, (doc) => deleteActionAt(doc, flatIdx, actionIdx));
+    if (!part.doc) return {};
+    return { ...part, selectedAction: null };
+  }),
+  moveAction: (flatIdx, actionIdx, dir) => set((s) => {
+    if (!s.doc) return {};
+    const next = moveActionBy(s.doc, flatIdx, actionIdx, dir);
+    if (next === s.doc) return {};
+    return { ...commit(s, () => next), selectedAction: actionIdx + dir };
+  }),
+  duplicateAction: (flatIdx, actionIdx) => set((s) => {
+    if (!s.doc) return {};
+    const part = commit(s, (doc) => duplicateActionAt(doc, flatIdx, actionIdx));
+    if (!part.doc) return {};
+    return { ...part, selectedAction: actionIdx + 1 };
   }),
 }));

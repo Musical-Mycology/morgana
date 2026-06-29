@@ -1,5 +1,5 @@
 import type { DeckDoc } from "@/engine/deck-doc";
-import type { Beat, Scene } from "@/engine/deck/types";
+import type { Action, Beat, Scene } from "@/engine/deck/types";
 import { beatLocation } from "./flatten-beats";
 
 export function uniqueBeatId(doc: DeckDoc): string {
@@ -73,4 +73,46 @@ export function deleteSceneAt(doc: DeckDoc, flatIdx: number): DeckDoc {
   const loc = beatLocation(doc, flatIdx);
   if (!loc) return doc;
   return { ...doc, scenes: doc.scenes.filter((_, si) => si !== loc.sceneIdx) };
+}
+
+/** Map the timeline of the beat at a flat index, returning the same doc on a miss. */
+function mapTimeline(doc: DeckDoc, flatIdx: number, f: (tl: Action[]) => Action[]): DeckDoc {
+  const loc = beatLocation(doc, flatIdx);
+  if (!loc) return doc;
+  return mapScene(doc, loc.sceneIdx, (s) => ({
+    ...s,
+    beats: s.beats.map((b, bi) => (bi !== loc.beatIdx ? b : { ...b, timeline: f(b.timeline) })),
+  }));
+}
+
+/** Insert `action` after `actionIdx` (use -1 to prepend). */
+export function insertActionAfter(doc: DeckDoc, flatIdx: number, actionIdx: number, action: Action): DeckDoc {
+  return mapTimeline(doc, flatIdx, (tl) => [...tl.slice(0, actionIdx + 1), action, ...tl.slice(actionIdx + 1)]);
+}
+
+export function deleteActionAt(doc: DeckDoc, flatIdx: number, actionIdx: number): DeckDoc {
+  return mapTimeline(doc, flatIdx, (tl) => (actionIdx < 0 || actionIdx >= tl.length ? tl : tl.filter((_, i) => i !== actionIdx)));
+}
+
+/** Swap an action with its neighbour. Returns the same doc at a timeline boundary. */
+export function moveActionBy(doc: DeckDoc, flatIdx: number, actionIdx: number, dir: -1 | 1): DeckDoc {
+  const loc = beatLocation(doc, flatIdx);
+  if (!loc) return doc;
+  const tl = doc.scenes[loc.sceneIdx].beats[loc.beatIdx].timeline;
+  const target = actionIdx + dir;
+  if (actionIdx < 0 || actionIdx >= tl.length || target < 0 || target >= tl.length) return doc;
+  return mapTimeline(doc, flatIdx, (t) => {
+    const next = t.slice();
+    [next[actionIdx], next[target]] = [next[target], next[actionIdx]];
+    return next;
+  });
+}
+
+export function duplicateActionAt(doc: DeckDoc, flatIdx: number, actionIdx: number): DeckDoc {
+  const loc = beatLocation(doc, flatIdx);
+  if (!loc) return doc;
+  const tl = doc.scenes[loc.sceneIdx].beats[loc.beatIdx].timeline;
+  if (actionIdx < 0 || actionIdx >= tl.length) return doc;
+  const copy = JSON.parse(JSON.stringify(tl[actionIdx])) as Action;
+  return mapTimeline(doc, flatIdx, (t) => [...t.slice(0, actionIdx + 1), copy, ...t.slice(actionIdx + 1)]);
 }

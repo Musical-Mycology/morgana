@@ -87,7 +87,7 @@ export type TextIn =
   | "flyUp" | "fade" | "fadeSide" | "cursive"
   // per-letter / per-word (GSAP SplitText). letterFly direction follows `align`.
   | "letterFly" | "letterUp" | "wordUp" | "blurIn" | "typewriter";
-export type TextSize = "lg" | "md" | "sm";
+export type TextSize = "xs" | "sm" | "md" | "lg" | "xl";
 /** Text justification within the box; also sets letterFly's fly-in direction. */
 export type TextAlign = "left" | "right" | "center";
 /** How a media tile reveals on entry (the media action's `in`). */
@@ -111,7 +111,7 @@ export type Action =
   // on a LIGHT art panel (e.g. the closing musicians).
   // reveal: force this line's `in` animation even when the deck suppresses text-in transitions
   // (instantText, the investor deck) — opts a single line back into motion.
-  | { kind: "text"; value: string; in: TextIn; size?: TextSize; align?: TextAlign; speed?: number; dots?: true; pos?: StagePoint; append?: true; tone?: SlideTheme; screenOnly?: true; reveal?: true }
+  | { kind: "text"; value: string; in: TextIn; size?: TextSize; align?: TextAlign; speed?: number; dots?: true; pos?: StagePoint; append?: true; tone?: SlideTheme; screenOnly?: true; reveal?: true; bold?: boolean; italic?: boolean }
   | { kind: "rotateList"; items: string[]; size?: TextSize }
   | { kind: "clear" }
   | { kind: "art"; art: ArtTransition }

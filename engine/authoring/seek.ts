@@ -1,4 +1,4 @@
-import type { Action, TextIn } from "@/engine/deck/types";
+import type { Action, TextIn, TextSize } from "@/engine/deck/types";
 import type { ArtStageHandle } from "@/engine/components/ArtStage";
 
 // Mirrors INTRO_DUR + introDuration() in CinematicSlide.tsx so windows match playback timing.
@@ -7,6 +7,15 @@ const INTRO_DUR: Record<TextIn, number> = {
   letterFly: 1.6, letterUp: 1.6, wordUp: 1.3, blurIn: 1.6, typewriter: 1.5,
 };
 const DOTFADE_TAIL = 2.02;
+
+/** Editor-preview font sizes (the canvas doesn't mount CinematicSlide, so size is inline). */
+const TEXT_SIZE_PREVIEW: Record<TextSize, string> = {
+  xs: "clamp(0.7rem, 2cqmin, 1.1rem)",
+  sm: "clamp(0.9rem, 2.6cqmin, 1.4rem)",
+  md: "clamp(1.1rem, 3.2cqmin, 1.7rem)",
+  lg: "clamp(1.6rem, 4.6cqmin, 2.8rem)",
+  xl: "clamp(2.2rem, 6cqmin, 3.8rem)",
+};
 
 function introDuration(a: { in: TextIn; value: string; dots?: true; speed?: number }): number {
   const sp = a.speed ?? (a.in === "cursive" ? 0.2 : 1);
@@ -86,6 +95,9 @@ function applyAt(a: Action, p: number, ctx: SeekCtx): void {
       el.className = "cin__line cin__line--" + (a.size ?? "lg");
       el.textContent = a.value;
       el.style.opacity = String(p);
+      el.style.fontSize = TEXT_SIZE_PREVIEW[a.size ?? "lg"];
+      if (a.bold) el.style.fontWeight = "700";
+      if (a.italic) el.style.fontStyle = "italic";
       el.style.transform = a.in === "flyUp" ? `translateY(${(1 - p) * 40}px)` : a.in === "fadeSide" ? `translateX(${(1 - p) * 24}px)` : "";
       if (a.align) el.style.textAlign = a.align;
       if (a.pos) { el.style.position = "absolute"; el.style.left = `${a.pos.x * 100}%`; el.style.top = `${a.pos.y * 100}%`; }

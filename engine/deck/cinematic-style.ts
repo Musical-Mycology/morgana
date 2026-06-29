@@ -3,7 +3,7 @@ import type { TextSize } from "./types";
 /**
  * Editable font-size scale for cinematic narration text.
  *
- * The `size` field on a `{ kind: "text" }` action ("lg" | "md" | "sm") maps to
+ * The `size` field on a `{ kind: "text" }` action (xs | sm | md | lg | xl) maps to
  * one of these. Values are any CSS font-size — `clamp(min, cqmin, max)` keeps them
  * responsive to the stage container (container-query units, not the viewport/window).
  * The stage is height-constrained in landscape, so cqmin (the short axis) tracks it better than cqw.
@@ -13,9 +13,11 @@ import type { TextSize } from "./types";
  * add it BOTH here and to `TextSize` in `types.ts`.
  */
 export const TEXT_SIZES: Record<TextSize, string> = {
-  lg: "clamp(1.4rem, 7cqmin, 3.0rem)",
-  md: "clamp(1.15rem, 5.6cqmin, 2.4rem)",
+  xs: "clamp(0.7rem, 3.2cqmin, 1.35rem)",
   sm: "clamp(0.95rem, 4.6cqmin, 1.95rem)",
+  md: "clamp(1.15rem, 5.6cqmin, 2.4rem)",
+  lg: "clamp(1.4rem, 7cqmin, 3.0rem)",
+  xl: "clamp(1.8rem, 9cqmin, 3.8rem)",
 };
 
 /**

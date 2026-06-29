@@ -10,6 +10,7 @@ export function Filmstrip() {
   const deleteBeat = useEditor((s) => s.deleteBeat);
   const moveBeat = useEditor((s) => s.moveBeat);
   const addScene = useEditor((s) => s.addScene);
+  const deleteScene = useEditor((s) => s.deleteScene);
 
   // group consecutive flat beats by sceneId, preserving the flat index
   const groups: { sceneId: string; items: { flatIdx: number; id: string }[] }[] = [];
@@ -23,7 +24,12 @@ export function Filmstrip() {
     <div className="ed__film" data-testid="filmstrip">
       {groups.map((g) => (
         <div key={g.sceneId}>
-          <div className="ed__lbl">{g.sceneId}</div>
+          <div className="ed__lbl" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>{g.sceneId}</span>
+            {groups.length > 1 && (
+              <button className="ed__icon" title="Delete scene" data-testid="scene-delete" onClick={() => deleteScene(g.items[0].flatIdx)}>✕</button>
+            )}
+          </div>
           {g.items.map(({ flatIdx, id }) => (
             <div key={`${g.sceneId}-${id}-${flatIdx}`} style={{ display: "flex", alignItems: "center" }}>
               <button onClick={() => select(flatIdx)} aria-current={flatIdx === selected} className="ed__beat" style={{ flex: 1 }}>
