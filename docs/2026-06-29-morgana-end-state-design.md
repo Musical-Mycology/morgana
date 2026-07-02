@@ -1,6 +1,6 @@
 # Morgana — End-State ("North Star") Design
 
-- **Date:** 2026-06-29
+- **Date:** 2026-06-29 · **Revised:** 2026-07-02 (resolved the eight §18 open questions; deepened §7/§9/§11/§12)
 - **Status:** Vision / architecture artifact (not an implementation spec)
 - **Author of record:** Chris Oltyan (brainstormed with Claude)
 - **Companion docs:** [`2026-06-23-morgana-design.md`](2026-06-23-morgana-design.md) (the v1 design spec — goals/non-goals, the effect-descriptor registry, the scrub compromise, and the Tier 2/3 roadmap sketch in §11). This document is the long-horizon expansion of that §11.
@@ -97,10 +97,10 @@ lands.
 | | Multi-select + bulk ops | ❌ | ✅ | 2 |
 | | Keyboard-driven authoring | ⚠️ ⌘Z only | ✅ full command surface | 2 |
 | | Templates / snippets | ❌ | ✅ deck + beat library | 2 |
-| **Assets** | Picker / upload / manage | ❌ (no asset handling) | ✅ asset panel + upload + resolver UI | 2 / 3 |
+| **Assets** | Picker / upload / manage | ❌ (no asset handling; MM-coupled default resolver) | ✅ asset panel + upload + generic/pluggable resolver | 2 / 3 |
 | **Fonts** | Per-deck fonts | ❌ (no font system) | ✅ bundled library + upload/registration/subsetting | 2 |
 | **Effects** | Effect framework | ✅ internal registry | ✅ external/declarative third-party descriptors | 2 / 3 |
-| **AI** | In-app assistant | ❌ | ✅ docked Claude assistant over the editing API | 3 |
+| **AI** | In-app assistant | ❌ | ✅ docked Claude assistant (read · safe-edit · lint-fix · generative) over the editing API | 3 |
 | **Validation** | Deck validators | ⚠️ `validateDeckDoc` (structural) + `validateDeck` (slide-level), not surfaced in editor | ✅ live lint panel (dangling counters, missing media, gate-less infinite beats, empty beats) | 1.5 / 2 |
 | **Interop** | Export to TS | ⚠️ `deckDocToModule` lib, no UI | ✅ in-app export + import + round-trip | 1.5 / 2 |
 | | Portable format / package | ⚠️ vendored engine | ✅ documented format + `@musical-mycology/morgana` engine package | 3 |
@@ -141,6 +141,16 @@ selected action's descriptor declares a `pos.x` field. The end state generalizes
 `onStageEditor` (the handles/affordances to render and the mutations they emit). The canvas asks the
 registry "what handles does this action want?" exactly as the inspector asks "what fields?" today.
 This is the same widen-the-descriptor move as principle #2.
+
+**Where the bespoke editor lives (resolves §18 Q2).** Descriptor-owned — but *split*, so declarative
+plugins (§11) still work. The descriptor carries **declarative metadata** (schema, defaults, duration,
+validators, AI hints) *and* an optional **`onStageEditor`** reference: a lazily-imported editor
+module — the handles to draw and the mutations they emit — keyed by kind. A pure-JSON/config plugin
+with no editor module still gets the generic `pos` handle plus its full inspector, validators, and AI
+tools; bespoke handles are an **optional code capability** layered on top, never a requirement. That
+keeps principle #2's "one definition lights up the whole editor" while letting the plugin framework
+load declarative effects that can't embed a React component. (The end-state descriptor interface is
+defined in [§11](#11-effect--plugin-framework).)
 
 **Tier.** Tier 2 (design §9, §11 "full effect editors"). Depends on the real-engine canvas
 (§7) so handles overlay the true render.
@@ -205,18 +215,41 @@ explicitly deferred.
 (`renderBeatAt`/`beatDuration` from [`seek.ts`](../engine/authoring/seek.ts)) driven by a
 `requestAnimationFrame` loop, which approximates text/art/nightlight and **draws nothing** for
 particles, counters, or media (they fall through `applyAt`'s `default` branch). The real runtime
-already exists ([`engine/authoring/BeatStage.tsx`](../engine/authoring/BeatStage.tsx),
-`CinematicSlide`) and is exercised in a dev route — the end state promotes it into the editor canvas
-and adds an "authoring mode" so it renders under external time control, doesn't hijack input, and
-exposes DOM nodes for the on-stage handles (design §7.1).
+already exists ([`engine/authoring/BeatStage.tsx`](../engine/authoring/BeatStage.tsx) wrapping
+[`CinematicSlide`](../engine/components/layouts/CinematicSlide.tsx)) and is exercised in a dev route
+(`app/dev/beatstage/page.tsx`, `e2e/beatstage.spec.ts`).
 
-The seek-renderer doesn't necessarily disappear overnight — a pragmatic transition keeps it as a
-fast fallback while the real runtime gains deterministic seeking, then retires it once parity holds.
-This avoids the "two renderers drift" problem (visible today: counter/media/notes are editable in
-the inspector but invisible on the canvas).
+Two of the three "authoring mode" properties are *already met*: the runtime **doesn't hijack global
+input** (`makeAuthoringRuntime` in [`runtime.ts`](../engine/authoring/runtime.ts) no-ops
+`revealArrows`/`pulseArrow`/`cue`, and the e2e asserts ArrowRight isn't captured) and it **exposes DOM
+nodes** (`data-testid="beatstage"`). The missing piece is the hard one — **external time control.**
+The slide is *play-only*: its GSAP master timeline is driven by the `animate` prop with no
+`seek(t)`/`pause()` surface (the only index hook is `jumpTo(index)`, an internal `click_gate`
+beat-jump, not a time-seek). So the §7 work is **not** "promote the runtime," it is two concrete
+pieces:
 
-**Tier.** Tier 2 (design §11 "deterministic particle scrubbing"). The single highest-leverage
-fidelity item; several other areas (on-stage editors, keyframe editing) are best built on top of it.
+1. **Expose a transport surface** over the GSAP master timeline — `seek(t)`, `pause()`, `play()`,
+   `duration()` — so the canvas scrub bar drives the *real* timeline instead of the seek-renderer's
+   rAF loop. GSAP timelines are natively seekable; the work is surfacing that control and reconciling
+   it with `CinematicSlide`'s click-gate segmentation of the master timeline.
+2. **Make particles time-pure.** `note_emitter`/`note_circle`/`cue` are stochastic today;
+   deterministic scrubbing needs a seeded, closed-form state at time *t* (design §7.2, explicitly
+   deferred in v1). This is the one genuinely new algorithmic piece.
+
+**Determinism & the seek-renderer's fate (resolves §18 Q1).** The end state **retires**
+[`seek.ts`](../engine/authoring/seek.ts): once the real engine scrubs deterministically, keeping two
+renderers that can drift is a liability, not a safety net (the drift is *already* visible — counters,
+media, and notes are editable in the inspector but invisible on today's seek-renderer canvas). The
+retirement is gated, not abrupt: keep `seek.ts` as a **transitional lo-fi fallback** until a **parity
+gate** passes — an e2e assertion that, across the deck corpus, the real-engine scrub matches the
+seek-renderer on the shared set (text/art/nightlight) *and* renders the three kinds the seek-renderer
+drops (particles/counters/media) at representative times. When the gate is green, `seek.ts` is
+deleted; a fallback survives only as an explicit opt-in for very long decks / low-power clients, and
+only if a measured need appears — not by default.
+
+**Tier.** Tier 2 (design §11 "deterministic particle scrubbing") — the keystone. The transport
+surface and time-pure particles are prerequisites for the on-stage editors (§4, handles overlay the
+true render) and keyframe/curve editing (§5).
 
 ## 8. Validation & linting
 
@@ -249,15 +282,26 @@ the local volume, a CDN (sporekles), or arbitrary URLs by swapping the injected 
 
 **How it extends today.** There is **no asset handling at all** today — the data volume holds only
 `decks/`, there is no `assets/` directory and no upload/serve route, and the design's `assets/` slot
-is reserved but unimplemented. The engine already has the right seam: an injected `AssetResolver`
-(`(assetKey) => url`, design §5.2; [`engine/asset-resolver.ts`](../engine/asset-resolver.ts)). The
-end state adds: an `assets/` area on the data volume, upload + list + delete API routes mirroring the
-deck API, an asset-picker field type in the inspector, and a settings surface to choose the resolver
-(local volume vs CDN vs custom base URL).
+is reserved but unimplemented. The engine has a resolver seam, but *not* the shape earlier drafts
+assumed: [`engine/asset-resolver.ts`](../engine/asset-resolver.ts) exports an **`AssetResolver`
+interface with two methods** (`story(key)` and `brand(file)` → URL, design §5.2), and the shipped
+`defaultAssetResolver` routes through `sporekleAsset`, which **hardcodes an MM-specific CDN**
+(`https://design-assets.musicalmycology.org`). That default is an existing infrastructure coupling —
+exactly what principle #4 says the end state neutralizes.
 
-**Tier.** The asset **panel + upload + picker** is Tier 2; the broader **CDN/sporekles resolution**
-configuration and hosted asset management are Tier 2–3. (Asset upload UI is explicitly a v1 non-goal,
-design §3.)
+The end state therefore: **(a)** makes the **default resolver generic** — local-`assets/`-volume-first,
+no MM host baked in — and demotes the sporekle/CDN resolver to **one configured backend** among
+others (chosen in settings), so out of the box Morgana resolves against its own volume; **(b)** keeps
+the resolver a clean **pluggable seam** so S3 / CDN / custom-base-URL backends slot in later without
+touching decks (**resolves §18 Q5:** volume-first, seam kept pluggable for later backends); **(c)**
+adds the `assets/` volume area, upload + list + delete API routes mirroring the deck API, an
+asset-picker inspector field, and the resolver-selection settings surface. The **upload/storage
+plumbing is shared with fonts** (§10, **resolves §18 Q6:** one storage + upload mechanism underneath,
+distinct registration UIs on top).
+
+**Tier.** The asset **panel + upload + picker** and the **generic default resolver** are Tier 2;
+**pluggable CDN/S3 backends** and hosted asset management are Tier 2–3. (Asset upload UI is explicitly
+a v1 non-goal, design §3.)
 
 ## 10. Fonts
 
@@ -266,12 +310,17 @@ design §3.)
 flow into the engine as CSS-var config (`--font-display`, `--font-body`, `--font-cursive`, design
 §5.2) so they carry no MM-specific assumptions.
 
-**How it extends today.** This branch has **no font system** — no `public/fonts/`, no `sync:fonts`
-script, no `meta.fonts`, no font packing in the inspector. (A later branch introduced a self-hosted
-bundle + per-deck picker; treat that as Tier-2 work to bring here.) The end state is: a bundled
-library shipped under `public/fonts/` with OFL licensing, a `sync:fonts` tooling step, a per-deck
-`meta.fonts` selection, **and** an extensibility path — upload → register → (optional) subset →
-available in the deck font picker — so users aren't limited to the bundled set.
+**How it extends today.** This branch has **no runtime font system** — no `public/fonts/`, no
+`sync:fonts` script, no `meta.fonts`, no font packing in the inspector. Fonts today are **build-time
+Google fonts** loaded via `next/font/google` in [`app/layout.tsx`](../app/layout.tsx) (Londrina
+Solid, Atkinson Hyperlegible, Dancing Script — display / body / cursive), fixed at build time and not
+deck-selectable. (A later branch introduced a self-hosted bundle + per-deck picker; treat that as
+Tier-2 work to bring here.) The end state is: a bundled library shipped under `public/fonts/` with
+OFL licensing, a `sync:fonts` tooling step, a per-deck `meta.fonts` selection feeding those same
+`--font-*` vars, **and** an extensibility path — upload → register → (optional) subset → available in
+the deck font picker — so users aren't limited to the bundled set. That upload/register/subset path
+**shares storage + upload plumbing with the asset pipeline** (§9, §18 Q6), with a font-specific
+registration UI on top.
 
 **Tier.** The bundled library + per-deck picker is **Tier 2**; the upload/registration/subsetting
 extensibility is **Tier 2** (advanced) and overlaps the assets pipeline (§9).
@@ -285,12 +334,46 @@ the core" (§5.4). This is what lets non-MM users extend Morgana with their own 
 natural home for the engine's `cue`/legacy and any future effect.
 
 **How it extends today.** Today the registry is **internal and static** — a `REGISTRY` record in
-[`registry.ts`](../lib/editor/registry.ts) with a `GENERIC` fallback for unregistered kinds. The end
-state formalizes the `EffectDescriptor` interface into a stable, versioned **plugin contract** and
-adds a loading mechanism (config-declared descriptors first; a sandboxed runtime later). Crucially,
-because the descriptor already drives inspector + seekability, widening it to also drive on-stage
-editor + validators + AI tool schema means one plugin definition lights up the whole editor for a new
-effect.
+[`registry.ts`](../lib/editor/registry.ts) with a `GENERIC` fallback for unregistered kinds — and the
+descriptor is just five fields:
+
+```ts
+// today (registry.ts)
+interface EffectDescriptor { kind: string; label: string; icon: string; schema: Field[]; seekable: boolean; }
+```
+
+The end state widens this into the single contract every zone reads (illustrative shape):
+
+```ts
+// end state
+interface EffectDescriptor {
+  kind: string; label: string; icon: string;
+  schema: Field[];                    // inspector fields (today)
+  defaults(): Partial<Action>;        // what "add this effect" inserts (§5 kind picker)
+  duration(a: Action): number;        // timeline geometry (today lives in seek.ts's actionDuration)
+  render: RenderContract;             // how it draws + whether/how it seeks (replaces the `seekable` boolean)
+  validators?: ActionValidator[];     // cross-action lints (§8) — declarative
+  aiHints?: AiToolHints;              // labels/enums that sharpen the generated tool schema (§12) — declarative
+  onStageEditor?: () => Promise<EditorModule>;  // optional, lazily-imported bespoke handles (§4) — CODE
+}
+```
+
+The line that matters: **everything except `render` and `onStageEditor` is declarative data.** That is
+what makes two loading tiers possible without special-casing:
+
+- **Tier 2 — config-declared descriptors.** A plugin that supplies only declarative fields (schema,
+  defaults, duration, validators, aiHints) plus a `render` chosen from built-in primitives loads from
+  config with **no core edit** — the design's "descriptors loaded from outside the core" (§5.4). It
+  immediately lights up the inspector, timeline, validators, and AI tools; with no `onStageEditor` it
+  falls back to the generic `pos` handle. This is the first cut.
+- **Tier 3 — sandboxed runtime.** Effects that ship *code* — a custom `render` or an `onStageEditor`
+  module — need a sandbox so third-party code can't compromise the host. That isolation model is the
+  long-horizon plugin runtime.
+
+Because the descriptor already drives inspector + seekability today, widening it to also drive the
+on-stage editor + validators + AI schema means **one plugin definition lights up the whole editor**
+for a new effect — the payoff of principle #2, and the same contract the on-stage-editor split (§4)
+and the AI tool surface (§12) both consume.
 
 **Tier.** First cut (declarative, config-loaded descriptors) is **Tier 2**; a fully sandboxed
 third-party plugin runtime is **Tier 3**.
@@ -302,11 +385,25 @@ you author: answer questions about the current deck, draft and restructure beats
 choreograph timelines, suggest effects, and fix validation issues. It operates **only through the
 same editing operations exposed in the UI**, so it can do what a user can do and no more.
 
+**Scope of the first cut (resolves §18 Q3).** The first milestone covers read + safe-edit + lint-fix
+**and generative authoring** ("draft a 5-beat investor intro," "add a counter-reveal scene"). Generation
+adds no new tool surface — it is the model *composing* the same undoable, validated safe-mutations —
+so it is the strongest reason to dock an assistant at all, and it rides for free on the guardrails
+below. The **in-app dock is the first and primary surface**; the MCP server (below) is a **follow-up
+milestone**, not part of the first cut.
+
 **Authentication (decided 2026-06-29).** Primary path is **"Log in with Claude"** — an OAuth flow so
 the assistant runs on the *user's own* Claude account/subscription; Morgana holds the resulting
 short-lived bearer token **server-side** (per session) and refreshes it. A **bring-your-own Anthropic
 API key** is the fallback. The assistant is entirely **optional**: with no credentials connected,
 Morgana is unchanged and fully usable — preserving the standalone-OSS positioning (principle #4).
+
+**Token custody (resolves §18 Q4).** By default the bearer/refresh token lives in **server memory
+only** — a container restart re-auths, and no secret ever touches the volume. An explicit env opt-in
+(e.g. `MORGANA_PERSIST_CLAUDE_TOKEN`) enables an **encrypted-at-rest** refresh token for users who'd
+rather not re-auth across restarts; it is **off by default**. Either way the token **never reaches
+the browser** — the agentic loop runs server-side. (Residual detail for the §12 spec: where the
+encryption key comes from on a self-hosted box.)
 
 **Action model (decided 2026-06-29) — apply-with-guardrails.** The assistant reads the deck freely;
 **safe** edits (add beat, set text, choreograph a timeline, place an effect) apply directly and are
@@ -326,7 +423,14 @@ Claude **tool use**:
   `update_action`, `add_action`, `move_beat`, etc., with `input_schema` derived from the same field
   schemas that generate the inspector, and `strict: true` so tool inputs validate exactly. "Items
   explicitly exposed through the interface" becomes literally true — the AI's capabilities are the
-  registry's capabilities.
+  registry's capabilities. *Honesty check:* the mutation layer today is **beat/scene-level only** —
+  `insertBeatAfter`/`duplicateBeatAt`/`deleteBeatAt`/`moveBeatBy` (within-scene), `appendScene`/
+  `deleteSceneAt`, plus the store's `updateAction(path,value)`/`updateMeta`
+  ([`mutations.ts`](../lib/editor/mutations.ts), [`store.ts`](../lib/editor/store.ts)). The
+  action-level tools (`add_action`/`delete_action`/`convert_action`) map onto mutations that **don't
+  exist yet** — that's the **Tier-1.5 action CRUD** of §5. So the AI tool surface *grows with* the
+  mutation API, and shipping the assistant **presupposes Tier-1.5 landed**; it does not invent a
+  parallel editing path.
 - **Guardrails as tool design:** safe mutations execute and return the new state; destructive
   mutations are promoted to confirm-gated tools (the agent-design "promote to a dedicated tool to
   gate it" pattern). Every applied tool call is one undo entry; `validateDeckDoc` runs on the result.
@@ -335,12 +439,26 @@ Claude **tool use**:
   (Chris's "don't make me switch windows"). MCP is the secondary surface and overlaps the plugin
   framework's "capabilities declared once, consumed many ways" idea.
 
+**Streaming & approval UX.** The dock streams the assistant's turn — prose *and* tool calls — as it
+runs. **Safe** tool calls apply **optimistically** and land as ordinary undo entries, tagged
+AI-authored so the user can see (and ⌘Z) exactly what changed; the canvas, filmstrip, and inspector
+re-render live as each mutation commits. **Destructive** tool calls **pause the loop** on a confirm
+card that summarizes the effect ("delete scene `s-3` and its 4 beats?") — approve or reject before
+the agent continues. A **generative** turn that touches many beats collapses into **one batched undo
+entry** ("AI: draft 5-beat intro"), so a single ⌘Z reverts the whole suggestion, and `validateDeckDoc`
+runs on the batched result before it commits. An optional **review-before-apply** mode surfaces
+proposed-but-unapplied edits as ghosted filmstrip/timeline entries the user accepts or discards. This
+is the guardrail model made concrete: every AI change is an entry in the *same* history a human edit
+uses, and nothing bypasses the validator.
+
 **How it extends today.** Nothing AI exists today; this is wholly new. But it is *cheap* precisely
 because the spine is already in place — the registry, pure mutations, undo, and the validator are
 exactly the substrate an agentic editor needs.
 
-**Tier.** Tier 3 (platform), opt-in. Open design details: OAuth token custody/refresh, streaming UX,
-how proposed-vs-applied is surfaced in the timeline, and rate/cost controls.
+**Tier.** Tier 3 (platform), opt-in. **Prerequisite:** Tier-1.5 action CRUD (§5), which the tool
+surface is generated from. Token custody, generative scope, streaming, and proposed-vs-applied are now
+decided (above); the residual open detail for the spec is **rate/cost controls** (per-tool budgets,
+loop caps) and the encryption-key source for the opt-in at-rest token.
 
 ## 13. Quality of life
 
@@ -354,14 +472,19 @@ how proposed-vs-applied is surfaced in the timeline, and rate/cost controls.
   and save status shows `Saving…/Saved/Save failed`; the end state extends this to autosave conflicts,
   validation blocks, and asset/AI failures).
 - **Version history / undo depth** — beyond the 50-step in-memory history: named snapshots/versions
-  of a deck, restore points, and a visible history a user can scrub. (The JSON-tree document makes
-  point-in-time snapshots cheap.)
+  of a deck, restore points, and a visible history a user can scrub. This is nearly free structurally:
+  the store's `past`/`future` are *already* arrays of full `DeckDoc` snapshots (capped at 50 in
+  [`store.ts`](../lib/editor/store.ts)), so persisting named ones is the same shape written to the
+  volume. **Resolves §18 Q8:** persisted snapshots are **single-user and linear** — restore points for
+  one author, *not* concurrent branches or merge — so they stay firmly clear of the §17 collaboration
+  non-goal.
 
 **How it extends today.** Undo/redo, save-status, and surfaced load errors exist; onboarding, a11y
 passes, named versions, and richer error recovery do not.
 
-**Tier.** Onboarding/empty-states and error handling are **Tier 1.5**; a11y and version history are
-**Tier 2** (version history can extend toward Tier 3 if it becomes server-side/shared).
+**Tier.** Onboarding/empty-states and error handling are **Tier 1.5**; a11y is **Tier 2**. Version
+history splits: a scrubbable in-memory view is **Tier 2**, while **persisted named snapshots on the
+volume are Tier 3** — and, per Q8, deliberately **single-user/linear**, not the shared-or-collab kind.
 
 ## 14. Interop, portability & theming
 
@@ -379,7 +502,11 @@ passes, named versions, and richer error recovery do not.
   is a shared dependency, closing the design's "vendor now, converge later" loop (decision #3).
   *Framing (decided 2026-06-29):* this is **generic-OSS-first** — extraction is a clean-seams
   outcome, and any downstream consumer (mm-website included) is just one user of the package, not the
-  reason it exists.
+  reason it exists. *Trigger (resolves §18 Q7):* the signal that the engine is "stable enough" to lift
+  is a **`DeckDoc` format-version freeze** — a published, versioned format spec *plus* a declared
+  version-bump policy (what changes bump `version`, what stays backward-compatible). Until the format
+  is frozen, vendoring keeps engine and editor free to co-evolve; once frozen, the package boundary is
+  safe to draw.
 
 **How it extends today.** Export is a library function only; there is no import, no in-app export
 panel, no published format doc, and the engine is vendored (not a package).
@@ -431,7 +558,7 @@ ahead*.
 | --- | --- | --- |
 | **1.5 — Hardening** *(near-term; finish the v1 surface)* | Complete what Plan-3c started | Timeline **action CRUD** (add/delete/reorder/dupe); **deck switcher / New / Delete** UI; **delete-scene** button + **scene reorder**; **cross-scene** beat move; **in-app TS export**; **surface the existing validators**; onboarding/empty-states + error handling; **e2e determinism + CI**. |
 | **2 — Depth** *(the core of the north star)* | Make every effect first-class and the canvas truthful | **Real-engine canvas + deterministic particle scrubbing** (§7, the keystone); **bespoke on-stage effect editors** (§4); **rich timeline** — gate viz, segment grouping, drag-resize waits, convert-kind, keyframe/curve (§5); **editing power** — copy/paste, multi-select, keyboard surface, templates (§6); **assets** panel + upload + picker (§9); **fonts** library + upload/subset (§10); **action-level validators** (§8); **plugin framework** first cut (§11); **theme editor** (§14b); **a11y** (§13); **import + round-trip** (§14a). |
-| **3 — Platform** *(long-horizon; deliberately lean)* | Share, assist, extract | **In-app AI assistant** (§12); **share links + present mode** (§17); **package extraction** `@musical-mycology/morgana` (§14a); **CDN/hosted asset management** (§9); **sandboxed third-party plugin runtime** (§11); **named version history** (§13); optional **lightweight hosting**. |
+| **3 — Platform** *(long-horizon; deliberately lean)* | Share, assist, extract | **In-app AI assistant** (§12, incl. generative; needs Tier-1.5 action CRUD); **share links + present mode** (§17); **package extraction** `@musical-mycology/morgana` (§14a); **CDN/hosted asset management** (§9); **sandboxed third-party plugin runtime** (§11); **named version history** (§13); optional **lightweight hosting**. |
 | **— Non-goals** | Out of the north star | **Multi-user / realtime collaboration / CRDT**; **in-app accounts/auth as a requirement to run**; any infrastructure-specific coupling (§17). |
 
 ---
@@ -461,32 +588,30 @@ The Platform tier is intentionally **modest**. The end-state platform features a
 
 ---
 
-## 18. Open questions for the maintainer (Chris)
+## 18. Resolved questions & residual open details
 
-These are the genuine forks that a future spec will need answered. Each has a leaning, not a decision.
+The eight forks the first draft left open were **resolved on 2026-07-02** (brainstormed with Claude)
+and folded into their home sections. Recorded here as the decision log:
 
-1. **Seek-renderer retirement (§7).** Once the real engine runs in the canvas, do we *delete*
-   [`seek.ts`](../engine/authoring/seek.ts), or keep it as a fast "lo-fi scrub" fallback for very long
-   decks / low-power clients? *(Leaning: keep it during transition, delete once real-engine scrubbing
-   is proven at parity.)*
-2. **On-stage editor authoring (§4, §11).** Do bespoke editors live *in the descriptor* (each plugin
-   ships its handles) or as a *separate editor-component registry* keyed by kind? *(Leaning:
-   descriptor-owned, to keep "one definition lights up the whole editor.")*
-3. **AI assistant scope (§12).** First cut = read + safe-edit + fix-lints, or also generative
-   ("draft me a 5-beat investor intro")? And: in-app dock only, or ship the MCP server in the same
-   milestone? *(Leaning: read + safe-edit + lint-fix first, dock-only; MCP a follow-up.)*
-4. **OAuth token custody (§12).** What's the acceptable model for holding the user's Claude bearer
-   token server-side in a self-hosted single-user app — encrypted-at-rest on the volume, in-memory
-   only (re-auth per session), or both as options? *(Open — security-sensitive; specs needed.)*
-5. **Asset storage ceiling (§9).** Volume-only forever, or pluggable backends (S3/CDN) behind the
-   resolver from the start? *(Leaning: volume-first, resolver seam kept clean for later backends.)*
-6. **Fonts vs. assets pipeline (§9, §10).** One upload/registration pipeline for both fonts and
-   assets, or two purpose-built ones? *(Leaning: shared upload plumbing, distinct registration UIs.)*
-7. **Package-extraction trigger (§14a).** What signal says the deck format is "stable enough" to lift
-   `engine/` into `@musical-mycology/morgana`? *(Open — tie to a format-version freeze.)*
-8. **Version history depth (§13).** In-memory undo only, or persisted named snapshots on the volume?
-   If persisted, does that bleed into the explicitly-deferred collaboration space? *(Leaning:
-   persisted *single-user* snapshots are fine and stay clear of collaboration.)*
+| Was open | Resolution | Lives in |
+| --- | --- | --- |
+| Q1 — Seek-renderer retirement | **Retire** `seek.ts`; keep only as a transitional lo-fi fallback behind a **parity gate**, then delete. | §7 |
+| Q2 — On-stage editor authoring | **Descriptor-owned, split:** declarative metadata + an optional lazily-imported `onStageEditor` module keyed by kind. | §4, §11 |
+| Q3 — AI assistant scope | read + safe-edit + lint-fix **+ generative** from v1; **dock-only** first; **MCP a follow-up**. | §12 |
+| Q4 — OAuth token custody | **In-memory per session** by default (zero token at rest); **explicit env opt-in** for encrypted-at-rest refresh. | §12 |
+| Q5 — Asset storage ceiling | **Volume-first**; resolver kept a clean **pluggable seam** and its default **de-MM-coupled**. | §9 |
+| Q6 — Fonts vs. assets pipeline | **Shared** upload/storage plumbing; **distinct** registration UIs. | §9, §10 |
+| Q7 — Package-extraction trigger | A **`DeckDoc` format-version freeze** (published spec + version-bump policy). | §14a |
+| Q8 — Version-history depth | Persisted **single-user, linear** named snapshots; explicitly *not* collaboration. | §13 |
+
+**Residual open details.** Genuinely deferred to per-feature specs — implementation choices, not forks
+of the north star:
+
+- The sandboxed third-party plugin **runtime** mechanics (§11, Tier 3) — isolation model and capability surface.
+- The font **subsetting** toolchain (§10) — which subsetter, build-time vs. on-upload.
+- AI **rate/cost controls** — per-tool budgets and agentic-loop caps (§12).
+- The parity-gate **corpus** (§7) — which decks and times the determinism e2e asserts against.
+- The **encryption-key source** for the opt-in at-rest token on a self-hosted box (§12, Q4).
 
 ---
 
