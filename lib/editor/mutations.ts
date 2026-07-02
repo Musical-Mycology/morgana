@@ -1,6 +1,7 @@
 import type { DeckDoc } from "@/engine/deck-doc";
-import type { Beat, Scene } from "@/engine/deck/types";
+import type { Beat, Scene, Action } from "@/engine/deck/types";
 import { beatLocation } from "./flatten-beats";
+import { descriptorFor } from "./registry";
 
 export function uniqueBeatId(doc: DeckDoc): string {
   const used = new Set(doc.scenes.flatMap((s) => s.beats.map((b) => b.id)));
@@ -20,6 +21,21 @@ export function newBeat(id: string): Beat {
 
 function mapScene(doc: DeckDoc, sceneIdx: number, f: (s: Scene) => Scene): DeckDoc {
   return { ...doc, scenes: doc.scenes.map((s, i) => (i === sceneIdx ? f(s) : s)) };
+}
+
+/** Resolve `flatIdx` to a beat and apply `f`. If `f` returns the SAME beat reference
+ *  (a mutation's own no-op case), the whole doc is returned unchanged (same reference) —
+ *  mirrors moveBeatBy's boundary no-op contract so commit() records no history entry. */
+function mapBeat(doc: DeckDoc, flatIdx: number, f: (b: Beat) => Beat): DeckDoc {
+  const loc = beatLocation(doc, flatIdx);
+  if (!loc) return doc;
+  const beat = doc.scenes[loc.sceneIdx].beats[loc.beatIdx];
+  const next = f(beat);
+  if (next === beat) return doc;
+  return mapScene(doc, loc.sceneIdx, (s) => ({
+    ...s,
+    beats: s.beats.map((b, bi) => (bi === loc.beatIdx ? next : b)),
+  }));
 }
 
 export function insertBeatAfter(doc: DeckDoc, flatIdx: number): DeckDoc {
@@ -73,4 +89,48 @@ export function deleteSceneAt(doc: DeckDoc, flatIdx: number): DeckDoc {
   const loc = beatLocation(doc, flatIdx);
   if (!loc) return doc;
   return { ...doc, scenes: doc.scenes.filter((_, si) => si !== loc.sceneIdx) };
+}
+
+/** Insert a new action of `kind` after `actionIdx` (append to the end when `null`). */
+export function insertActionAfter(doc: DeckDoc, flatIdx: number, actionIdx: number | null, kind: string): DeckDoc {
+  return mapBeat(doc, flatIdx, (b) => {
+    const action = descriptorFor({ kind } as Pick<Action, "kind">).defaults();
+    const at = actionIdx == null ? b.timeline.length : actionIdx + 1;
+    return { ...b, timeline: [...b.timeline.slice(0, at), action, ...b.timeline.slice(at)] };
+  });
+}
+
+export function duplicateActionAt(doc: DeckDoc, flatIdx: number, actionIdx: number): DeckDoc {
+  return mapBeat(doc, flatIdx, (b) => {
+    if (actionIdx < 0 || actionIdx >= b.timeline.length) return b;
+    const copy = JSON.parse(JSON.stringify(b.timeline[actionIdx])) as Action;
+    return { ...b, timeline: [...b.timeline.slice(0, actionIdx + 1), copy, ...b.timeline.slice(actionIdx + 1)] };
+  });
+}
+
+export function deleteActionAt(doc: DeckDoc, flatIdx: number, actionIdx: number): DeckDoc {
+  return mapBeat(doc, flatIdx, (b) => {
+    if (actionIdx < 0 || actionIdx >= b.timeline.length) return b;
+    return { ...b, timeline: b.timeline.filter((_, i) => i !== actionIdx) };
+  });
+}
+
+/** Swap an action with its neighbour WITHIN its beat's timeline. Boundary → no-op. */
+export function moveActionBy(doc: DeckDoc, flatIdx: number, actionIdx: number, dir: -1 | 1): DeckDoc {
+  return mapBeat(doc, flatIdx, (b) => {
+    const target = actionIdx + dir;
+    if (target < 0 || target >= b.timeline.length) return b;
+    const next = b.timeline.slice();
+    [next[actionIdx], next[target]] = [next[target], next[actionIdx]];
+    return { ...b, timeline: next };
+  });
+}
+
+/** Fully replace an action with `newKind`'s defaults (no field-preservation). */
+export function convertActionKind(doc: DeckDoc, flatIdx: number, actionIdx: number, newKind: string): DeckDoc {
+  return mapBeat(doc, flatIdx, (b) => {
+    if (actionIdx < 0 || actionIdx >= b.timeline.length) return b;
+    const action = descriptorFor({ kind: newKind } as Pick<Action, "kind">).defaults();
+    return { ...b, timeline: b.timeline.map((a, i) => (i === actionIdx ? action : a)) };
+  });
 }
