@@ -17,7 +17,7 @@ notes:
 
 created_at: '2026-06-23'
 github: https://github.com/Musical-Mycology/morgana
-mm_architecture_section: null
+mm_architecture_section: MM_ARCHITECTURE.md#other-repos-tools--apps
 
 tier: tool
 status: pending
