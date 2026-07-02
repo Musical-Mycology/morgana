@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { DeckDoc } from "@/engine/deck-doc";
 import { flattenBeats, beatLocation, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
-import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt } from "./mutations";
+import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
 
 const HISTORY_CAP = 50;
 
@@ -27,6 +27,11 @@ interface EditorState {
   moveBeat: (flatIdx: number, dir: -1 | 1) => void;
   addScene: () => void;
   deleteScene: (flatIdx: number) => void;
+  addAction: (flatIdx: number, actionIdx: number | null, kind: string) => void;
+  duplicateAction: (flatIdx: number, actionIdx: number) => void;
+  deleteAction: (flatIdx: number, actionIdx: number) => void;
+  moveAction: (flatIdx: number, actionIdx: number, dir: -1 | 1) => void;
+  convertAction: (flatIdx: number, actionIdx: number, newKind: string) => void;
 }
 
 /** Record the current doc into history, swap in the produced doc, re-derive beats, bump revision.
@@ -107,4 +112,33 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!part.beats) return {};
     return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null };
   }),
+  addAction: (flatIdx, actionIdx, kind) => set((s) => {
+    if (!s.doc) return {};
+    const loc = beatLocation(s.doc, flatIdx);
+    if (!loc) return {};
+    const currentLen = s.doc.scenes[loc.sceneIdx].beats[loc.beatIdx].timeline.length;
+    const newIdx = actionIdx == null ? currentLen : actionIdx + 1;
+    const part = commit(s, (doc) => insertActionAfter(doc, flatIdx, actionIdx, kind));
+    if (!part.doc) return {};
+    return { ...part, selectedAction: newIdx };
+  }),
+  duplicateAction: (flatIdx, actionIdx) => set((s) => commit(s, (doc) => duplicateActionAt(doc, flatIdx, actionIdx))),
+  deleteAction: (flatIdx, actionIdx) => set((s) => {
+    if (!s.doc) return {};
+    const part = commit(s, (doc) => deleteActionAt(doc, flatIdx, actionIdx));
+    if (!part.doc) return {};
+    const loc = beatLocation(part.doc, flatIdx);
+    const newLen = loc ? part.doc.scenes[loc.sceneIdx].beats[loc.beatIdx].timeline.length : 0;
+    return { ...part, selectedAction: newLen === 0 ? null : Math.min(actionIdx, newLen - 1) };
+  }),
+  moveAction: (flatIdx, actionIdx, dir) => set((s) => {
+    if (!s.doc) return {};
+    const next = moveActionBy(s.doc, flatIdx, actionIdx, dir);
+    if (next === s.doc) return {};
+    return { ...commit(s, () => next), selectedAction: actionIdx + dir };
+  }),
+  convertAction: (flatIdx, actionIdx, newKind) => set((s) => ({
+    ...commit(s, (doc) => convertActionKind(doc, flatIdx, actionIdx, newKind)),
+    selectedAction: actionIdx,
+  })),
 }));
