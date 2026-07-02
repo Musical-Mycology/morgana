@@ -50,6 +50,21 @@ test("deleteAction clamps selectedAction to the new length, or null if the beat 
   expect(useEditor.getState().selectedAction).toBeNull();
 });
 
+test("deleteAction clamps against the actual current selection, not the deleted index", () => {
+  const threeActions: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [
+    { id: "s", beats: [{ id: "b", timeline: [
+      { kind: "text", value: "A", in: "fade" }, { kind: "wait", ms: 100 }, { kind: "clear" },
+    ] }] },
+  ] };
+  const s = useEditor.getState();
+  s.load(threeActions);
+  s.selectAction(0);
+  s.deleteAction(0, 2);                                        // delete the LAST action, index 2 — NOT the selected one (0)
+  const st = useEditor.getState();
+  expect(st.beats[0].beat.timeline.map((a) => a.kind)).toEqual(["text", "wait"]);
+  expect(st.selectedAction).toBe(0);                            // selection stays anchored to what was actually selected
+});
+
 test("moveAction moves selectedAction along with the action", () => {
   const s = useEditor.getState();
   s.load(doc());

@@ -129,7 +129,8 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!part.doc) return {};
     const loc = beatLocation(part.doc, flatIdx);
     const newLen = loc ? part.doc.scenes[loc.sceneIdx].beats[loc.beatIdx].timeline.length : 0;
-    return { ...part, selectedAction: newLen === 0 ? null : Math.min(actionIdx, newLen - 1) };
+    const sel = s.selectedAction ?? actionIdx;
+    return { ...part, selectedAction: newLen === 0 ? null : Math.min(sel, Math.max(0, newLen - 1)) };
   }),
   moveAction: (flatIdx, actionIdx, dir) => set((s) => {
     if (!s.doc) return {};
