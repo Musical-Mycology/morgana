@@ -1,0 +1,40 @@
+schema_version: 2
+slug: morgana
+display_name: Morgana
+
+description: >
+  Self-hostable web editor for cinematic, data-driven slide decks. Decks are
+  authored as Scene → Beat → Action JSON and played by a vendored GSAP +
+  tsParticles engine; the editor adds a filmstrip, WYSIWYG canvas,
+  schema-driven inspector, and scrubbable per-beat timeline on top of that
+  same data model. Runs as a single Node container with filesystem storage —
+  no database, no infrastructure-specific coupling.
+
+tech: [nextjs, typescript, gsap, tsparticles, docker]
+
+notes:
+  - Standalone, easy-to-deploy OSS tool — intentionally no Mycelium-specific coupling.
+
+created_at: '2026-06-23'
+github: https://github.com/Musical-Mycology/morgana
+mm_architecture_section: null
+
+tier: tool
+status: pending
+
+costs:
+  vendor: Internal-Mycelium
+  infra_monthly_usd: 0
+  token_monthly_usd: 0
+  notes: Not yet hosted anywhere; zero cost until a deployment target is chosen.
+  services: []
+
+surfaces:
+  - kind: web
+    tier: tool
+    status: pending
+    hosting_target: Self-hosted (TBD — single Node container, volume-mounted deck storage)
+    ci_pipeline: none
+    expected_kuma_monitor:
+      type: none
+      identifier: null
