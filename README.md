@@ -113,7 +113,7 @@ volume on first run, so the editor works out of the box. Your decks live as JSON
 
 ```bash
 npm ci
-npm run seed:demo   # copy the demo deck into ./data/decks/
+npm run seed:demo   # copy the bundled sample decks into ./data/decks/
 npm run dev         # http://localhost:3000/editor
 ```
 

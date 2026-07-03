@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "meta": { "id": "our-story", "title": "Our Story" },
+  "scenes": [
+    { "id": "opening", "beats": [
+      { "id": "a", "nightlight": 0, "timeline": [
+        { "kind": "text", "value": "It took me awhile", "in": "flyUp" },
+        { "kind": "wait", "ms": 200 },
+        { "kind": "text", "value": "to find my way back to music.", "in": "flyUp" },
+        { "kind": "wait", "ms": 200 },
+        { "kind": "text", "value": "Too long.", "in": "typewriter", "size": "lg", "speed": 0.25 }
+      ] },
+      { "id": "b", "timeline": [
+        { "kind": "clear" },
+        { "kind": "text", "value": "But I eventually found my way.", "in": "letterUp" },
+        { "kind": "wait", "ms": 200 }
+      ] },
+      { "id": "c", "timeline": [
+        { "kind": "clear" },
+        { "kind": "text", "value": "So we built Musical Mycology —", "in": "fade" },
+        { "kind": "wait", "ms": 200 },
+        { "kind": "text", "value": "a place for musicians to grow.", "in": "fade" }
+      ] }
+    ] }
+  ]
+}
