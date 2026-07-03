@@ -10,6 +10,7 @@ test("create, open, and delete a deck from the library", async ({ page, request 
 
   // Create via the in-place form.
   await page.getByTestId("new-deck-toggle").click();
+  await expect(page.getByTestId("new-deck-title")).toBeVisible({ timeout: 30_000 });
   await page.getByTestId("new-deck-title").fill("E2E Library");
   await page.getByTestId("new-deck-create").click();
   const card = page.getByTestId("deck-card").filter({ hasText: "E2E Library" });
