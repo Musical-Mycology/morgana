@@ -66,8 +66,12 @@ export default function Library() {
   const onCreated = (meta: DeckMeta) => setDecks((d) => [...d, meta]);
   const onDelete = async (meta: DeckMeta) => {
     if (!window.confirm(`Delete deck "${meta.title}"? This can't be undone.`)) return;
-    await deleteDeck(meta.id);
-    setDecks((d) => d.filter((m) => m.id !== meta.id));
+    try {
+      await deleteDeck(meta.id);
+      setDecks((d) => d.filter((m) => m.id !== meta.id));
+    } catch {
+      window.alert(`Couldn't delete "${meta.title}" — try again.`);
+    }
   };
 
   useEffect(() => {
