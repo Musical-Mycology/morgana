@@ -4,7 +4,7 @@ import Link from "next/link";
 import "./library.css";
 import type { DeckMeta } from "@/engine/deck-doc";
 import type { Beat } from "@/engine/deck/types";
-import { listDecks, loadDeck } from "@/lib/api/decks-client";
+import { deleteDeck, listDecks, loadDeck } from "@/lib/api/decks-client";
 import { flattenBeats } from "@/lib/editor/flatten-beats";
 import { swatchGradient } from "@/lib/library/swatch";
 import { slugify } from "@/lib/library/slugify";
@@ -64,6 +64,11 @@ export default function Library() {
   const [state, setState] = useState<LoadState>("loading");
 
   const onCreated = (meta: DeckMeta) => setDecks((d) => [...d, meta]);
+  const onDelete = async (meta: DeckMeta) => {
+    if (!window.confirm(`Delete deck "${meta.title}"? This can't be undone.`)) return;
+    await deleteDeck(meta.id);
+    setDecks((d) => d.filter((m) => m.id !== meta.id));
+  };
 
   useEffect(() => {
     listDecks()
@@ -97,6 +102,14 @@ export default function Library() {
         <div className="lib__grid" data-testid="library-grid">
           {decks.map((meta) => (
             <div className="lib__card" key={meta.id} data-testid="deck-card">
+              <button
+                className="lib__card-del"
+                title="Delete"
+                data-testid="deck-card-delete"
+                onClick={(e) => { e.preventDefault(); onDelete(meta); }}
+              >
+                ✕
+              </button>
               <Link href={`/editor?deck=${meta.id}`} className="lib__card-open">
                 <div className="lib__card-swatch" data-testid="deck-card-swatch" style={thumbs[meta.id] ? undefined : { background: swatchGradient(meta.id) }}>
                   {thumbs[meta.id] ? <BeatThumbnail beat={thumbs[meta.id]!} /> : null}
