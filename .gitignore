@@ -14,3 +14,6 @@ playwright-report
 .smoke-data*
 
 .superpowers/
+
+# Per-repo mm-beholder usage telemetry (mirrors ~/.claude/usage/tally.jsonl)
+.claude/token-tally.jsonl
