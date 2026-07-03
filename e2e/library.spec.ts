@@ -1,4 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+// Matches playwright.config.ts's DATA_DIR (resolve("./data")), which both the
+// test process and the servers share via MORGANA_DATA_DIR.
+const DECKS_DIR = resolve("./data/decks");
 
 test("create, open, and delete a deck from the library", async ({ page, request }) => {
   const id = "e2e-library";
@@ -30,4 +37,22 @@ test("create, open, and delete a deck from the library", async ({ page, request 
   await expect(page.getByTestId("deck-card").filter({ hasText: "E2E Library" })).toHaveCount(0);
 
   await request.delete(`/api/decks/${id}`).catch(() => {});
+});
+
+test("shows the empty state when no decks exist", async ({ page }) => {
+  const holding = mkdtempSync(join(tmpdir(), "morgana-e2e-empty-"));
+  const files = readdirSync(DECKS_DIR).filter((f) => f.endsWith(".deck.json"));
+  try {
+    for (const f of files) renameSync(join(DECKS_DIR, f), join(holding, f));
+
+    await page.goto("/");
+    await expect(page.getByTestId("library-empty")).toBeVisible();
+    await expect(page.getByTestId("library-empty")).toContainText("No decks yet");
+    await expect(page.getByTestId("library-grid")).not.toBeVisible();
+    // The empty state's own "+ New deck" trigger should be present.
+    await expect(page.getByTestId("library-empty").getByTestId("new-deck-toggle")).toBeVisible();
+  } finally {
+    for (const f of files) renameSync(join(holding, f), join(DECKS_DIR, f));
+    rmSync(holding, { recursive: true, force: true });
+  }
 });
