@@ -7,14 +7,63 @@ import type { Beat } from "@/engine/deck/types";
 import { listDecks, loadDeck } from "@/lib/api/decks-client";
 import { flattenBeats } from "@/lib/editor/flatten-beats";
 import { swatchGradient } from "@/lib/library/swatch";
+import { slugify } from "@/lib/library/slugify";
+import { createDeckWithRetry } from "@/lib/library/create-deck-with-retry";
 import { BeatThumbnail } from "@/components/library/BeatThumbnail";
 
 type LoadState = "loading" | "ready" | "error";
+
+function NewDeckCard({ onCreated }: { onCreated: (meta: DeckMeta) => void }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    try {
+      const doc = await createDeckWithRetry(trimmed);
+      onCreated(doc.meta);
+      setOpen(false); setTitle(""); setError(null);
+    } catch {
+      setError("Couldn't create deck — try a different title.");
+    }
+  };
+
+  if (!open) {
+    return (
+      <button className="lib__new" data-testid="new-deck-toggle" onClick={() => setOpen(true)}>
+        + New deck
+      </button>
+    );
+  }
+  return (
+    <div className="lib__new lib__new-form" data-testid="new-deck-form">
+      <input
+        className="lib__new-input"
+        placeholder="Deck title…"
+        value={title}
+        autoFocus
+        data-testid="new-deck-title"
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+      />
+      <p className="lib__new-slug">→ {slugify(title || "deck")}</p>
+      <div className="lib__new-actions">
+        <button className="lib__pill lib__pill--gold" data-testid="new-deck-create" onClick={submit}>Create</button>
+        <button className="lib__pill lib__pill--ghost" data-testid="new-deck-cancel" onClick={() => { setOpen(false); setTitle(""); setError(null); }}>Cancel</button>
+      </div>
+      {error && <p className="lib__error" data-testid="new-deck-error">{error}</p>}
+    </div>
+  );
+}
 
 export default function Library() {
   const [decks, setDecks] = useState<DeckMeta[]>([]);
   const [thumbs, setThumbs] = useState<Record<string, Beat | null>>({});
   const [state, setState] = useState<LoadState>("loading");
+
+  const onCreated = (meta: DeckMeta) => setDecks((d) => [...d, meta]);
 
   useEffect(() => {
     listDecks()
@@ -42,6 +91,7 @@ export default function Library() {
         <div className="lib__empty" data-testid="library-empty">
           <h2>No decks yet</h2>
           <p>Create your first deck to start authoring.</p>
+          <NewDeckCard onCreated={onCreated} />
         </div>
       ) : (
         <div className="lib__grid" data-testid="library-grid">
@@ -58,6 +108,7 @@ export default function Library() {
               </Link>
             </div>
           ))}
+          <NewDeckCard onCreated={onCreated} />
         </div>
       )}
     </div>
