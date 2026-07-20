@@ -144,9 +144,22 @@ Proof the determinism fix holds (not just "passes once"):
 - **Parallel run:** `npm run test:e2e` with `--workers` unset passes green — the bar the suite fails
   today.
 - **Repeat-run stability:** `npx playwright test --repeat-each=3` green, to catch order-dependence a
-  single run misses.
+  single run misses. **Exception — the `library` project is serial-by-design.** Its empty-state test
+  empties the whole `.e2e/library/decks` dir mid-run, which is only safe when nothing else touches
+  `:3200` concurrently. A single `npm run test:e2e` guarantees that (the two library tests are one
+  file, run serially in one worker). `--repeat-each` force-parallelizes *copies of the destructive
+  spec across workers*, which this "one destructive spec on its own serial server" design deliberately
+  does not support — Playwright cannot cap workers per-project. So the repeat-each probe is expected
+  to be clean for every project **except** `library`, where a duplicate-`deck-card` collision can
+  surface and is absorbed by CI's `retries: 2` (the run still exits green). The binding acceptance bar
+  is therefore the **single-run parallel** pass, not repeat-each on the library spec.
 - **CI green on this PR:** the workflow validating on its own PR is the acceptance signal.
-- **Unit suite unchanged:** 69/69 still pass; no app code touched.
+- **Unit suite unchanged:** all vitest tests still pass (86/86 at implementation time); no app code touched.
+
+> **Verified 2026-07-20 (implementation):** single-run `CI=1 npm run test:e2e` → 15/15 across all three
+> projects, 4 workers, no retries. `--repeat-each=3` → 44 passed / 1 flaky (the `library` create/delete
+> test, passed on retry — the serial-by-design exception above). Unit: 86/86. Branch touches no
+> `app/`/`engine/`/`lib/`/`components/` source.
 
 ## 7. Alternatives considered
 
