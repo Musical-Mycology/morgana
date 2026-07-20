@@ -175,19 +175,27 @@ npm run smoke:docker # build the image, run with an empty volume, assert the dem
 npm run build        # production build
 ```
 
-The e2e suite runs against **two** production servers from a single build: the regular
-`next start` server on `:3000` (all specs) and the **standalone** server on `:3100` (the
-Docker/deploy target — runs `editor.spec.ts` to guard deck-loading). Both share one seeded
-`./data` directory.
+The e2e suite runs against **three** production servers from a single build, each with its own
+isolated, freshly-seeded data directory (`.e2e/{default,standalone,library}`) so specs never
+contend on shared state:
 
-Because both servers read and write that **shared** data directory, the suite is flaky under
-Playwright's default parallel workers. The reliable invocation is a single worker:
+- the regular `next start` server on `:3000` (`.e2e/default`) — runs all specs except the
+  destructive library spec;
+- the **standalone** server on `:3100` (`.e2e/standalone`) — the Docker/deploy target, runs
+  `editor.spec.ts` to guard deck-loading;
+- a second `next start` on `:3200` (`.e2e/library`) — runs `library.spec.ts` alone, so its
+  empty-state test can empty the decks dir without racing another spec.
+
+Each server is considered ready only once `GET /api/decks` responds. Because state is isolated
+per server, the suite passes under Playwright's **default** parallel workers — `--workers=1` is
+a safety net, not a requirement:
 
 ```bash
-CI=1 npm run test:e2e -- --workers=1
+npm run test:e2e
 ```
 
-*(There is no CI pipeline yet; these run locally as the regression guards.)*
+CI runs the unit and e2e suites on every push and pull request via
+[GitHub Actions](.github/workflows/ci.yml). (`npm run smoke:docker` stays a manual local check.)
 
 ---
 

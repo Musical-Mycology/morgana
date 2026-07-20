@@ -3,9 +3,10 @@ import { mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-// Matches playwright.config.ts's DATA_DIR (resolve("./data")), which both the
-// test process and the servers share via MORGANA_DATA_DIR.
-const DECKS_DIR = resolve("./data/decks");
+// The `library` project runs alone on :3200 against MORGANA_DATA_DIR=.e2e/library
+// (playwright.config.ts). This spec owns that dir, so emptying it in the empty-state
+// test can never race another spec.
+const DECKS_DIR = resolve("./.e2e/library/decks");
 
 test("create, open, and delete a deck from the library", async ({ page, request }) => {
   const id = "e2e-library";
@@ -39,6 +40,9 @@ test("create, open, and delete a deck from the library", async ({ page, request 
   await request.delete(`/api/decks/${id}`).catch(() => {});
 });
 
+// Serial-by-design: this test empties the whole decks dir, so the `library` project runs alone
+// on :3200. It can flake under `--repeat-each` (which force-parallelizes the destructive spec) —
+// that's accepted and explained in docs/superpowers/specs/2026-07-20-e2e-determinism-ci-design.md §6.
 test("shows the empty state when no decks exist", async ({ page }) => {
   const holding = mkdtempSync(join(tmpdir(), "morgana-e2e-empty-"));
   const files = readdirSync(DECKS_DIR).filter((f) => f.endsWith(".deck.json"));
