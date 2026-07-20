@@ -40,6 +40,9 @@ test("create, open, and delete a deck from the library", async ({ page, request 
   await request.delete(`/api/decks/${id}`).catch(() => {});
 });
 
+// Serial-by-design: this test empties the whole decks dir, so the `library` project runs alone
+// on :3200. It can flake under `--repeat-each` (which force-parallelizes the destructive spec) —
+// that's accepted and explained in docs/superpowers/specs/2026-07-20-e2e-determinism-ci-design.md §6.
 test("shows the empty state when no decks exist", async ({ page }) => {
   const holding = mkdtempSync(join(tmpdir(), "morgana-e2e-empty-"));
   const files = readdirSync(DECKS_DIR).filter((f) => f.endsWith(".deck.json"));
