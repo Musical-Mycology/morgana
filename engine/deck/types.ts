@@ -177,6 +177,50 @@ export interface PanelSpec {
  *  Same coordinate space as note-emit anchors (PANEL_ANCHORS). */
 export interface StagePoint { x: number; y: number }
 
+/** Rotation/scale origin for an object's transform. */
+export type ObjectAnchor = "center" | "top-left";
+
+/** An object's placement on the fixed 16:9 stage, normalized 0–1 (same space as StagePoint). */
+export interface ObjectTransform {
+  x: number; y: number;   // top-left, 0–1 fraction of stage
+  w: number; h: number;   // size, 0–1 fraction of stage (w,h > 0)
+  rot?: number;           // degrees clockwise, default 0
+  anchor?: ObjectAnchor;  // rotation/scale origin, default "center"
+}
+
+/** Fields shared by every first-class object kind. */
+export interface ObjectBase {
+  id: string;             // unique within its Scene (including nested children)
+  name?: string;          // author-facing label shown in the layers panel
+  transform: ObjectTransform;
+  opacity?: number;       // 0–1, default 1
+  hidden?: boolean;       // author-time editor hide (does NOT affect playback); persisted
+  locked?: boolean;       // author-time editor lock; persisted
+}
+
+export type ObjectShapeKind = "rect" | "ellipse" | "line";
+
+/** Stroke for a shape object. `width` is a fraction of stage height. */
+export interface Stroke { color: string; width: number }
+
+/** Text styling for a text object — reuses the engine's existing text vocabulary. */
+export interface TextObjectStyle {
+  size?: TextSize;
+  align?: TextAlign;
+  color?: string;
+  bold?: boolean;
+  italic?: boolean;
+}
+
+/** A persistent, scene-level, directly-manipulable object. Referenced by id from timeline
+ *  actions in sub-project #3. Declared on `Scene.objects`, painted back-to-front in
+ *  depth-first document order (index 0 = backmost). */
+export type SceneObject =
+  | (ObjectBase & { kind: "text"; text: string; style?: TextObjectStyle })
+  | (ObjectBase & { kind: "image"; src: string; fit?: "contain" | "cover"; round?: boolean })
+  | (ObjectBase & { kind: "shape"; shape: ObjectShapeKind; fill?: string; stroke?: Stroke; radius?: number })
+  | (ObjectBase & { kind: "group"; children: SceneObject[] });
+
 /** One user-gated advance. Its timeline auto-plays on entry; then arrows pulse. */
 export interface Beat {
   id: string;
@@ -195,6 +239,9 @@ export interface Scene {
   id: string;
   /** Applies one visual treatment to every beat in this scene (investor deck). Omit for /story. */
   treatment?: SlideTreatment;
+  /** First-class persistent objects, painted back-to-front in depth-first order.
+   *  Optional & additive: object-less decks are unchanged. (Sub-project #1.) */
+  objects?: SceneObject[];
   beats: Beat[];
 }
 
