@@ -1,8 +1,12 @@
 import { create } from "zustand";
 import type { DeckDoc } from "@/engine/deck-doc";
+import type { SceneObject } from "@/engine/deck/types";
 import { flattenBeats, beatLocation, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
 import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
+import { addObject as mAddObject, updateObject as mUpdateObject, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject } from "./object-mutations";
+import { uniqueObjectId, type ObjectPath } from "./object-tree";
+import { descriptorForObject } from "./object-registry";
 
 const HISTORY_CAP = 50;
 
@@ -32,6 +36,13 @@ interface EditorState {
   deleteAction: (flatIdx: number, actionIdx: number) => void;
   moveAction: (flatIdx: number, actionIdx: number, dir: -1 | 1) => void;
   convertAction: (flatIdx: number, actionIdx: number, newKind: string) => void;
+  addObject: (sceneId: string, kind: SceneObject["kind"], parentPath?: ObjectPath, index?: number) => void;
+  updateObject: (sceneId: string, path: ObjectPath, fieldKey: string, value: unknown) => void;
+  deleteObject: (sceneId: string, path: ObjectPath) => void;
+  reorderObject: (sceneId: string, path: ObjectPath, dir: -1 | 1) => void;
+  groupObjects: (sceneId: string, paths: ObjectPath[]) => void;
+  ungroupObject: (sceneId: string, path: ObjectPath) => void;
+  reparentObject: (sceneId: string, from: ObjectPath, toParent: ObjectPath, toIndex: number) => void;
 }
 
 /** Record the current doc into history, swap in the produced doc, re-derive beats, bump revision.
@@ -142,4 +153,18 @@ export const useEditor = create<EditorState>((set, get) => ({
     ...commit(s, (doc) => convertActionKind(doc, flatIdx, actionIdx, newKind)),
     selectedAction: actionIdx,
   })),
+  addObject: (sceneId, kind, parentPath, index) => set((s) => {
+    if (!s.doc) return {};
+    const object: SceneObject = { ...descriptorForObject({ kind }).defaults(), id: uniqueObjectId(s.doc, sceneId) };
+    return commit(s, (doc) => mAddObject(doc, sceneId, object, parentPath, index));
+  }),
+  updateObject: (sceneId, path, fieldKey, value) => set((s) => commit(s, (doc) => mUpdateObject(doc, sceneId, path, fieldKey, value))),
+  deleteObject: (sceneId, path) => set((s) => commit(s, (doc) => mDeleteObject(doc, sceneId, path))),
+  reorderObject: (sceneId, path, dir) => set((s) => commit(s, (doc) => mReorderObject(doc, sceneId, path, dir))),
+  groupObjects: (sceneId, paths) => set((s) => {
+    if (!s.doc) return {};
+    return commit(s, (doc) => mGroupObjects(doc, sceneId, paths, uniqueObjectId(doc, sceneId)));
+  }),
+  ungroupObject: (sceneId, path) => set((s) => commit(s, (doc) => mUngroupObject(doc, sceneId, path))),
+  reparentObject: (sceneId, from, toParent, toIndex) => set((s) => commit(s, (doc) => mReparentObject(doc, sceneId, from, toParent, toIndex))),
 }));
