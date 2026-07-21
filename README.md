@@ -90,6 +90,10 @@ JSON for now.)*
 inputs render as text/textarea/number/select/range/checkbox based on the schema. Toggle
 **Deck settings** to edit deck-level `meta` (title, splash tagline/logo, footer wordmark).
 
+**Export.** The **Export** toolbar button opens a panel with the deck serialized to a TS module
+(`export const scenes: Scene[]`), with **Copy** and **Download** — the same `deckDocToModule`
+bridge, now reachable from the UI. (Emits `scenes` only; import/round-trip is on the roadmap.)
+
 **Undo/redo.** Toolbar buttons plus ⌘Z / Ctrl+Z (⇧ to redo); a 50-step history.
 
 **Autosave.** Edits persist automatically, ~700ms after you stop typing, via the deck API to
