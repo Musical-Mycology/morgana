@@ -19,8 +19,8 @@ test("getObjectAt resolves root and nested paths", () => {
 });
 
 test("getObjectListAt returns the sibling list for a parent path", () => {
-  expect(getObjectListAt(tree(), []).map((o) => o.id)).toEqual(["a", "g"]);
-  expect(getObjectListAt(tree(), [1]).map((o) => o.id)).toEqual(["b", "c"]);
+  expect(getObjectListAt(tree(), [])!.map((o) => o.id)).toEqual(["a", "g"]);
+  expect(getObjectListAt(tree(), [1])!.map((o) => o.id)).toEqual(["b", "c"]);
 });
 
 test("mapChildList transforms a list immutably without touching the input", () => {
