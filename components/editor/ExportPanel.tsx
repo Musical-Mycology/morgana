@@ -1,11 +1,12 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useEditor } from "@/lib/editor/store";
 import { deckDocToModule } from "@/lib/bridge/export-ts";
 
 export function ExportPanel() {
   const doc = useEditor((s) => s.doc);
   const [copyLabel, setCopyLabel] = useState("Copy");
+  const codeRef = useRef<HTMLTextAreaElement>(null);
   const code = useMemo(() => (doc ? deckDocToModule(doc) : ""), [doc]);
 
   if (!doc) {
@@ -23,7 +24,7 @@ export function ExportPanel() {
       setTimeout(() => setCopyLabel("Copy"), 1500);
     } catch {
       // Fallback for insecure context / denied permission: select the text so the user can ⌘C.
-      document.querySelector<HTMLTextAreaElement>('[data-testid="export-code"]')?.select();
+      codeRef.current?.select();
       setCopyLabel("Copy failed — select + ⌘C");
       setTimeout(() => setCopyLabel("Copy"), 2500);
     }
@@ -46,6 +47,7 @@ export function ExportPanel() {
       <div style={{ fontFamily: "var(--ed-disp)", fontSize: 14, marginBottom: 11 }}>Export</div>
       <textarea
         data-testid="export-code"
+        ref={codeRef}
         readOnly
         value={code}
         style={{ width: "100%", height: 260, fontFamily: "var(--ed-mono)", fontSize: 12, resize: "vertical" }}
