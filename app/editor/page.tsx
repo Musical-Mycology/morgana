@@ -9,6 +9,7 @@ import { Filmstrip } from "@/components/editor/Filmstrip";
 import { Timeline } from "@/components/editor/Timeline";
 import { Inspector } from "@/components/editor/Inspector";
 import { DeckSettings } from "@/components/editor/DeckSettings";
+import { ExportPanel } from "@/components/editor/ExportPanel";
 
 const STATUS_LABEL: Record<SaveStatus, string> = { idle: "", saving: "Saving…", saved: "Saved", error: "Save failed" };
 
@@ -24,7 +25,9 @@ export default function Editor() {
   const canRedo = useEditor((s) => s.future.length > 0);
   const canvasRef = useRef<CanvasHandle>(null);
   const [time, setTime] = useState({ t: 0, duration: 0 });
-  const [showSettings, setShowSettings] = useState(false);
+  type Panel = "inspector" | "settings" | "export";
+  const [panel, setPanel] = useState<Panel>("inspector");
+  const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? "inspector" : p));
   const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<SaveStatus>("idle");
 
@@ -58,13 +61,14 @@ export default function Editor() {
         <span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? (loadError ? "couldn't load deck" : "no deck")}</span>
         <button className="ed__pill ed__pill--ghost" data-testid="undo" disabled={!canUndo} onClick={() => undo()}>↶ Undo</button>
         <button className="ed__pill ed__pill--ghost" data-testid="redo" disabled={!canRedo} onClick={() => redo()}>↷ Redo</button>
-        <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => setShowSettings(v => !v)}>Deck settings</button>
+        <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => togglePanel("settings")}>Deck settings</button>
+        <button className="ed__pill ed__pill--ghost" data-testid="export-toggle" onClick={() => togglePanel("export")}>Export</button>
         <span data-testid="save-status" style={{ marginLeft: "auto", color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
       </div>
       <Filmstrip />
       <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} /></div>
       <Timeline canvasRef={canvasRef} time={time} />
-      {showSettings ? <DeckSettings /> : <Inspector />}
+      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : <Inspector />}
     </div>
   );
 }
