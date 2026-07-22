@@ -113,6 +113,18 @@ export function ungroupObject(doc: DeckDoc, sceneId: string, path: ObjectPath): 
     mapChildList(objects, parent, (l) => [...l.slice(0, idx), ...kids, ...l.slice(idx + 1)]));
 }
 
+/** Merge a partial transform patch onto the object at `path` (batched multi-field edit,
+ *  one commit). Unknown scene/path → same doc reference. */
+export function updateObjectTransform(doc: DeckDoc, sceneId: string, path: ObjectPath, patch: Partial<ObjectTransform>): DeckDoc {
+  return mapSceneObjects(doc, sceneId, (objects) => {
+    if (!getObjectAt(objects, path)) return objects;
+    const parent = path.slice(0, -1);
+    const idx = path[path.length - 1];
+    return mapChildList(objects, parent, (list) =>
+      list.map((o, i) => (i === idx ? { ...o, transform: { ...o.transform, ...patch } } : o)));
+  });
+}
+
 /** Move the node at `from` into the list at `toParent`, at `toIndex`. Refuses to move a group
  *  into its own subtree; unknown source/target → no-op. */
 export function reparentObject(doc: DeckDoc, sceneId: string, from: ObjectPath, toParent: ObjectPath, toIndex: number): DeckDoc {

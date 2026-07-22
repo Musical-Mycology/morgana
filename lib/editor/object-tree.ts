@@ -53,3 +53,16 @@ export function isPrefix(prefix: ObjectPath, path: ObjectPath): boolean {
   if (prefix.length > path.length) return false;
   return prefix.every((v, i) => v === path[i]);
 }
+
+/** Depth-first path to the object with `id`, or null if absent. */
+export function findObjectPath(objects: SceneObject[], id: string): ObjectPath | null {
+  for (let i = 0; i < objects.length; i++) {
+    const o = objects[i];
+    if (o.id === id) return [i];
+    if (o.kind === "group") {
+      const sub = findObjectPath(o.children, id);
+      if (sub) return [i, ...sub];
+    }
+  }
+  return null;
+}

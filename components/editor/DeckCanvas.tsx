@@ -6,6 +6,7 @@ import { useEditor } from "@/lib/editor/store";
 import { descriptorFor } from "@/lib/editor/registry";
 import { getPath } from "@/lib/editor/paths";
 import type { FlatBeat } from "@/lib/editor/flatten-beats";
+import { ObjectsLayer } from "./ObjectsLayer";
 
 export interface CanvasHandle { seek: (t: number) => void; play: () => void; pause: () => void; }
 
@@ -43,6 +44,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
         <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />
         <div className="cin"><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
         <PosHandle hostRef={host} redraw={draw} />
+        <ObjectsLayer hostRef={host} />
       </div>
     );
   },
