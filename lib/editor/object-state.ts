@@ -39,19 +39,36 @@ export const FLY_DY = 0.05;   // flyUp rise, stage-height fraction
 export const SIDE_DX = 0.03;  // fadeSide slide, stage-width fraction
 export const POP_FROM = 0.8;  // pop starting scale
 
-/** Leaf move (group handling added in Task 4). Interpolates present axes current→to. */
-function applyMove(map: ObjectStateMap, a: Extract<Action, { kind: "obj_move" }>, p: number): void {
+/** Move a leaf or group target. Interpolates present axes current→to. For a group target
+ *  (kids.length > 0), x/y deltas are also applied to every descendant; w/h/rot apply to the
+ *  group box only, leaving descendant sizes/rotation untouched. */
+function applyMove(
+  map: ObjectStateMap,
+  a: Extract<Action, { kind: "obj_move" }>,
+  p: number,
+  descendants: Map<string, string[]>,
+): void {
   const st = map.get(a.target); if (!st) return;
   const to = a.to;
-  if (to.x != null) st.x = lerp(st.x, to.x, p);
-  if (to.y != null) st.y = lerp(st.y, to.y, p);
-  if (to.w != null) st.w = lerp(st.w, to.w, p);
-  if (to.h != null) st.h = lerp(st.h, to.h, p);
-  if (to.rot != null) st.rot = lerp(st.rot, to.rot, p);
+  const kids = descendants.get(a.target) ?? [];
+  if (kids.length) {
+    // group: translate box + descendants by the x/y delta; w/h/rot on the box only
+    if (to.x != null) { const nx = lerp(st.x, to.x, p); const dx = nx - st.x; st.x = nx; for (const id of kids) { const c = map.get(id); if (c) c.x += dx; } }
+    if (to.y != null) { const ny = lerp(st.y, to.y, p); const dy = ny - st.y; st.y = ny; for (const id of kids) { const c = map.get(id); if (c) c.y += dy; } }
+    if (to.w != null) st.w = lerp(st.w, to.w, p);
+    if (to.h != null) st.h = lerp(st.h, to.h, p);
+    if (to.rot != null) st.rot = lerp(st.rot, to.rot, p);
+  } else {
+    if (to.x != null) st.x = lerp(st.x, to.x, p);
+    if (to.y != null) st.y = lerp(st.y, to.y, p);
+    if (to.w != null) st.w = lerp(st.w, to.w, p);
+    if (to.h != null) st.h = lerp(st.h, to.h, p);
+    if (to.rot != null) st.rot = lerp(st.rot, to.rot, p);
+  }
 }
 
 /** Apply one obj_* action to the map at local progress p (0..1). Mutates map. */
-function applyActionAtProgress(map: ObjectStateMap, a: Action, p: number): void {
+function applyActionAtProgress(map: ObjectStateMap, a: Action, p: number, descendants: Map<string, string[]>): void {
   if (a.kind === "obj_reveal") {
     const st = map.get(a.target); if (!st) return;
     st.visible = true;
@@ -62,7 +79,7 @@ function applyActionAtProgress(map: ObjectStateMap, a: Action, p: number): void 
     else if (inKind === "pop") st.scale = POP_FROM + (1 - POP_FROM) * p;
     // "fade" → opacity only
   } else if (a.kind === "obj_move") {
-    applyMove(map, a, p);
+    applyMove(map, a, p, descendants);
   } else if (a.kind === "obj_out") {
     const st = map.get(a.target); if (!st) return;
     st.opacity = clamp01(1 - p);
@@ -74,12 +91,15 @@ function applyActionAtProgress(map: ObjectStateMap, a: Action, p: number): void 
  *  seconds into that beat). Seeds declared transform/opacity, visibility gated by whether an
  *  obj_reveal anywhere in the scene targets the object (hidden until revealed), then interpolates
  *  the current beat's obj_reveal/obj_move/obj_out actions at local progress. Entrance-variant
- *  math, group semantics, and cross-beat folding land in later tasks (3, 4, 5). */
+ *  math and group obj_move semantics are in place (Tasks 3, 4); cross-beat folding lands in
+ *  Task 5. */
 export function objectStateAt(scene: Scene, beatIndex: number, tLocal: number): ObjectStateMap {
   const gated = revealedObjectIds(scene);
   const map: ObjectStateMap = new Map();
-  for (const { obj } of flattenObjects(scene.objects ?? [])) {
+  const descendants = new Map<string, string[]>();
+  for (const { obj, descendantIds } of flattenObjects(scene.objects ?? [])) {
     map.set(obj.id, seed(obj.transform, obj.opacity, !gated.has(obj.id)));
+    if (descendantIds.length) descendants.set(obj.id, descendantIds);
   }
   const beat = scene.beats[beatIndex];
   if (!beat) return map;
@@ -88,7 +108,7 @@ export function objectStateAt(scene: Scene, beatIndex: number, tLocal: number): 
     if (start > tLocal) continue;                       // window not reached
     const dur = end - start;
     const p = dur <= 0 ? 1 : clamp01((tLocal - start) / dur);
-    applyActionAtProgress(map, action, p);
+    applyActionAtProgress(map, action, p, descendants);
   }
   return map;
 }
