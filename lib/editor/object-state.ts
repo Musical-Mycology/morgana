@@ -75,12 +75,25 @@ function applyActionAtProgress(map: ObjectStateMap, a: Action, p: number, descen
     else if (inKind === "fadeSide") st.x += (1 - p) * SIDE_DX;
     else if (inKind === "pop") st.scale = POP_FROM + (1 - POP_FROM) * p;
     // "fade" → opacity only
+    // Groups paint nothing themselves (renderContent draws only flattened leaves) — cascade
+    // visible/opacity to every descendant so a group-targeted reveal is actually observable.
+    for (const id of descendants.get(a.target) ?? []) {
+      const c = map.get(id); if (!c) continue;
+      c.visible = true;
+      c.opacity = st.opacity;
+    }
   } else if (a.kind === "obj_move") {
     applyMove(map, a, p, descendants);
   } else if (a.kind === "obj_out") {
     const st = map.get(a.target); if (!st) return;
     st.opacity = clamp01(1 - p);
     if (p >= 1) st.visible = false;
+    // Mirror obj_reveal's cascade: a group has no visual of its own, so fade/hide descendants.
+    for (const id of descendants.get(a.target) ?? []) {
+      const c = map.get(id); if (!c) continue;
+      c.opacity = st.opacity;
+      if (p >= 1) c.visible = false;
+    }
   }
 }
 
