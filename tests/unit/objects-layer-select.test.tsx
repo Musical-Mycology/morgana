@@ -40,3 +40,11 @@ test("no deselect catcher exists when nothing is selected", () => {
   render(<ObjectsLayer hostRef={createRef<HTMLDivElement>()} />);
   expect(screen.queryByTestId("objects-deselect")).toBeNull();
 });
+
+test("a selected, unlocked object mounts the resize/rotate overlay", () => {
+  useEditor.getState().selectObject([0]);
+  render(<ObjectsLayer hostRef={createRef<HTMLDivElement>()} />);
+  expect(screen.getByTestId("obj-selection")).toBeTruthy();
+  expect(screen.getByTestId("obj-handle-se")).toBeTruthy();
+  expect(screen.getByTestId("obj-handle-rotate")).toBeTruthy();
+});
