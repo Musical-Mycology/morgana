@@ -1,4 +1,4 @@
-import type { ObjectPath } from "./object-tree";
+import { isPrefix, type ObjectPath } from "./object-tree";
 
 /** Value-equality for two ObjectPaths (null/undefined are never equal to anything). */
 export function pathsEqual(a: ObjectPath | null | undefined, b: ObjectPath | null | undefined): boolean {
@@ -28,4 +28,13 @@ export function sameParentSiblings(paths: ObjectPath[]): boolean {
   return paths.every(
     (p) => p.length === paths[0].length && p.slice(0, -1).every((v, i) => v === parent[i])
   );
+}
+
+/** Group-as-unit hit resolution. Given the leaf `hitPath` under the cursor and the
+ *  currently-entered group (null = root context), return the path to actually select:
+ *  the direct child of the entered context that contains the hit. When the hit is not
+ *  inside the entered group, resolve at the root (top-level ancestor). */
+export function resolveCanvasSelection(hitPath: ObjectPath, enteredGroupPath: ObjectPath | null): ObjectPath {
+  const ctx = enteredGroupPath && isPrefix(enteredGroupPath, hitPath) ? enteredGroupPath.length : 0;
+  return hitPath.slice(0, Math.min(ctx + 1, hitPath.length));
 }
