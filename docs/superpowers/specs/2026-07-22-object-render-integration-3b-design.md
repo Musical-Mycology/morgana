@@ -134,6 +134,14 @@ Keeps the real engine truthful for downstream sequencing, exercised in-repo via 
 - On beat change the master rebuilds (existing behavior); `ObjectStage` re-derives from the reducer. No id-keyed persistence Map needed.
 - The **static/reduced-motion path** in `CinematicSlide` (and BeatStage `animate=false`) renders objects at their **settled end-state** for the beat: `objectStateAt(scene, beatIndex, +∞)` (i.e., all current-beat windows at `p=1`).
 
+### 6.1 Known limitations (added post-implementation, final review)
+
+**The "proxy rides the master timeline" claim above was not fully realized by the shipped implementation.** As implemented (`engine/authoring/BeatStage.tsx`), the proxy tween is its own independent `gsap.timeline()` created at mount and driven by wall-clock time (`duration: span`) — it is **not** attached to any persistent master timeline on `CinematicSlide`. This is because `CinematicSlide` does not have a single persistent master timeline to attach to: it splits a beat's timeline into segments at `click_gate` boundaries, plays one segment at a time, and pauses indefinitely between segments awaiting `runtime.onGate` (user input). There is no `masterRef`/segment state exposed outside `CinematicSlide` for the proxy to hook into.
+
+**Consequence:** for a beat that combines a `click_gate` with `obj_*` actions scheduled after the gate, the proxy tween keeps advancing on its fixed real-time schedule while `CinematicSlide` sits paused waiting for the click. The object's reveal/move/out will visibly desync from the actual gated segment — it does not pause with the gate and does not resume in sync when the user clicks through.
+
+**Scope decision:** the correct fix — attaching the proxy tween to each of `CinematicSlide`'s segment timelines — requires exposing `masterRef`/segment state outside `CinematicSlide`, a materially larger architectural change. This is out of scope for 3b and is deferred alongside north-star §7's "real GSAP transport surface" work (§0.1), which this click_gate interaction is adjacent to. The limitation is documented here and via a code comment directly above the proxy-tween creation in `BeatStage.tsx`, rather than fixed in this pass.
+
 ## 7. Testing — 3b's definition of done
 
 **Unit (vitest) — the pure core (the MM determinism gate):**
