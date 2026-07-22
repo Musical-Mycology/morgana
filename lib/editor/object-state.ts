@@ -88,8 +88,9 @@ function applyActionAtProgress(map: ObjectStateMap, a: Action, p: number, descen
  *  seconds into that beat). Seeds declared transform/opacity, visibility gated by whether an
  *  obj_reveal anywhere in the scene targets the object (hidden until revealed), then interpolates
  *  the current beat's obj_reveal/obj_move/obj_out actions at local progress. Entrance-variant
- *  math and group obj_move semantics are in place (Tasks 3, 4); cross-beat folding lands in
- *  Task 5. */
+ *  math and group obj_move semantics are in place (Tasks 3, 4). Prior beats (0..beatIndex-1)
+ *  are folded to their settled end-state (p=1, document order) before the current beat is
+ *  interpolated, giving correct cross-beat persistence, gating, and re-reveal-after-out. */
 export function objectStateAt(scene: Scene, beatIndex: number, tLocal: number): ObjectStateMap {
   const gated = revealedObjectIds(scene);
   const map: ObjectStateMap = new Map();
@@ -98,6 +99,17 @@ export function objectStateAt(scene: Scene, beatIndex: number, tLocal: number): 
     map.set(obj.id, seed(obj.transform, obj.opacity, !gated.has(obj.id)));
     if (descendantIds.length) descendants.set(obj.id, descendantIds);
   }
+  // Fold prior beats to settled end-state → the current beat's entry snapshot.
+  for (let bi = 0; bi < beatIndex; bi++) {
+    const prior = scene.beats[bi];
+    if (!prior) continue;
+    for (const action of prior.timeline) {
+      if (action.kind === "obj_reveal" || action.kind === "obj_move" || action.kind === "obj_out") {
+        applyActionAtProgress(map, action, 1, descendants);
+      }
+    }
+  }
+
   const beat = scene.beats[beatIndex];
   if (!beat) return map;
   for (const { action, start, end } of beatTimeline(beat.timeline)) {
