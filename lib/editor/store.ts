@@ -8,6 +8,7 @@ import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTra
 import { uniqueObjectId, findObjectPath, getObjectAt, type ObjectPath } from "./object-tree";
 import { descriptorForObject } from "./object-registry";
 import { togglePath, sameParentSiblings } from "./selection";
+import { buildObjectAnimation, insertActionAt, type ObjectVerbKind } from "./object-actions";
 
 const HISTORY_CAP = 50;
 
@@ -40,6 +41,7 @@ interface EditorState {
   addScene: () => void;
   deleteScene: (flatIdx: number) => void;
   addAction: (flatIdx: number, actionIdx: number | null, kind: string) => void;
+  addObjectAnimation: (flatIdx: number, objectId: string, kind: ObjectVerbKind) => void;
   duplicateAction: (flatIdx: number, actionIdx: number) => void;
   deleteAction: (flatIdx: number, actionIdx: number) => void;
   moveAction: (flatIdx: number, actionIdx: number, dir: -1 | 1) => void;
@@ -155,6 +157,16 @@ export const useEditor = create<EditorState>((set, get) => ({
     const part = commit(s, (doc) => insertActionAfter(doc, flatIdx, actionIdx, kind));
     if (!part.doc) return {};
     return { ...part, selectedAction: newIdx, selectedObjectPaths: [], enteredGroupPath: null };
+  }),
+  addObjectAnimation: (flatIdx, objectId, kind) => set((s) => {
+    if (!s.doc) return {};
+    const loc = beatLocation(s.doc, flatIdx);
+    if (!loc) return {};
+    const scene = s.doc.scenes[loc.sceneIdx];
+    const action = buildObjectAnimation(scene, objectId, kind);
+    const index = scene.beats[loc.beatIdx].timeline.length;
+    const part = commit(s, (doc) => insertActionAt(doc, flatIdx, index, action));
+    return { ...part, selectedAction: index, selectedObjectPaths: [], enteredGroupPath: null };
   }),
   duplicateAction: (flatIdx, actionIdx) => set((s) => commit(s, (doc) => duplicateActionAt(doc, flatIdx, actionIdx))),
   deleteAction: (flatIdx, actionIdx) => set((s) => {
