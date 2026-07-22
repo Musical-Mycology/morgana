@@ -23,6 +23,8 @@
 .ed__inspector { grid-area: inspector; overflow: auto; background: var(--ed-bg-1); border-left: 1px solid var(--ed-line); padding: 12px; }
 .ed__timeline { grid-area: timeline; background: var(--ed-bg-2); border-top: 1px solid var(--ed-line); padding: 12px 14px; }
 .ed__lbl { font-family: var(--ed-disp); letter-spacing: 0.06em; font-size: 11px; color: var(--ed-fg-muted); text-transform: uppercase; padding: 9px 12px 4px; }
+.ed__layer-toolbar { display: flex; gap: 2px; align-items: center; padding: 2px 8px 6px; flex-wrap: wrap; }
+.ed__layer-add { font-size: 11px; margin-left: auto; }
 .ed__pill { font-family: var(--ed-disp); letter-spacing: 0.04em; font-size: 12px; border-radius: var(--ed-radius-pill); padding: 7px 15px; border: 1.5px solid transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .ed__pill--gold { background: var(--ed-accent); color: #3a2318; }
 .ed__pill--ghost { background: transparent; color: var(--ed-fg); border-color: var(--ed-line-2); }

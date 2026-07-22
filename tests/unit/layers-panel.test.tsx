@@ -79,3 +79,42 @@ test("double-clicking a row name commits a rename on Enter", () => {
   fireEvent.keyDown(input, { key: "Enter" });
   expect(useEditor.getState().doc!.scenes[0].objects![0].name).toBe("Backdrop");
 });
+
+test("raise moves the primary up in z (reorderObject +1)", () => {
+  render(<LayersPanel />);
+  fireEvent.click(rowFor("a"));                       // path [0], backmost
+  fireEvent.click(screen.getByTestId("layer-raise"));
+  // 'a' swaps with 'g' -> objects order becomes [g, a, b]
+  expect(useEditor.getState().doc!.scenes[0].objects!.map((o) => o.id)).toEqual(["g", "a", "b"]);
+});
+
+test("Group is disabled unless >=2 same-parent siblings are selected", () => {
+  render(<LayersPanel />);
+  fireEvent.click(rowFor("a"));
+  expect((screen.getByTestId("layer-group") as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(rowFor("b"), { shiftKey: true });   // [0] + [2], same parent
+  expect((screen.getByTestId("layer-group") as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("Group wraps the selection into a group", () => {
+  render(<LayersPanel />);
+  fireEvent.click(rowFor("a"));
+  fireEvent.click(rowFor("b"), { shiftKey: true });
+  fireEvent.click(screen.getByTestId("layer-group"));
+  const kinds = useEditor.getState().doc!.scenes[0].objects!.map((o) => o.kind);
+  expect(kinds.filter((k) => k === "group")).toHaveLength(2); // pre-existing 'g' + new group
+});
+
+test("Ungroup is enabled only for a single selected group and splices it", () => {
+  render(<LayersPanel />);
+  fireEvent.click(rowFor("g"));
+  expect((screen.getByTestId("layer-ungroup") as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByTestId("layer-ungroup"));
+  expect(useEditor.getState().doc!.scenes[0].objects!.some((o) => o.id === "c0")).toBe(true);
+});
+
+test("the add control appends a new object", () => {
+  render(<LayersPanel />);
+  fireEvent.change(screen.getByTestId("layer-object-add"), { target: { value: "text" } });
+  expect(useEditor.getState().doc!.scenes[0].objects!.some((o) => o.kind === "text" && o.id !== "c0")).toBe(true);
+});

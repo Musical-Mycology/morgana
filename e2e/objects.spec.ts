@@ -9,7 +9,7 @@ test("add an object → it renders, is selected, editable, and deletable", async
 
   await page.goto(`/editor?deck=${id}`);
   // add a text object from the bar
-  await page.getByTestId("object-add").selectOption("text");
+  await page.getByTestId("layer-object-add").selectOption("text");
   const obj = page.locator('[data-obj-id]').first();
   await expect(obj).toBeVisible();
   // it's selected → inspector shows an object with a text field

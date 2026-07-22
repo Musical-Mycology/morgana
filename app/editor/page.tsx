@@ -10,7 +10,6 @@ import { LayersPanel } from "@/components/editor/LayersPanel";
 import { Timeline } from "@/components/editor/Timeline";
 import { Inspector } from "@/components/editor/Inspector";
 import { DeckSettings } from "@/components/editor/DeckSettings";
-import { OBJECT_REGISTRY } from "@/lib/editor/object-registry";
 import { ExportPanel } from "@/components/editor/ExportPanel";
 import { primaryPath } from "@/lib/editor/selection";
 
@@ -26,7 +25,6 @@ export default function Editor() {
   const redo = useEditor((s) => s.redo);
   const canUndo = useEditor((s) => s.past.length > 0);
   const canRedo = useEditor((s) => s.future.length > 0);
-  const addObject = useEditor((s) => s.addObject);
   const deleteObject = useEditor((s) => s.deleteObject);
   const selectedObjectPaths = useEditor((s) => s.selectedObjectPaths);
   const selectedObjectPath = primaryPath(selectedObjectPaths);
@@ -76,17 +74,6 @@ export default function Editor() {
         <button className="ed__pill ed__pill--ghost" data-testid="redo" disabled={!canRedo} onClick={() => redo()}>↷ Redo</button>
         <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => togglePanel("settings")}>Deck settings</button>
         <button className="ed__pill ed__pill--ghost" data-testid="export-toggle" onClick={() => togglePanel("export")}>Export</button>
-        <select
-          data-testid="object-add"
-          value=""
-          onChange={(e) => { if (e.target.value && sceneId) { addObject(sceneId, e.target.value as "text" | "image" | "shape"); setPanel("inspector"); } }}
-          style={{ fontSize: 12 }}
-        >
-          <option value="">＋ Add object…</option>
-          {(["text", "image", "shape"] as const).map((k) => (
-            <option key={k} value={k}>{OBJECT_REGISTRY[k].label}</option>
-          ))}
-        </select>
         <span data-testid="save-status" style={{ marginLeft: "auto", color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
       </div>
       <div className="ed__leftdock">
