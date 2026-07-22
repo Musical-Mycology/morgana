@@ -55,16 +55,13 @@ function applyMove(
     // group: translate box + descendants by the x/y delta; w/h/rot on the box only
     if (to.x != null) { const nx = lerp(st.x, to.x, p); const dx = nx - st.x; st.x = nx; for (const id of kids) { const c = map.get(id); if (c) c.x += dx; } }
     if (to.y != null) { const ny = lerp(st.y, to.y, p); const dy = ny - st.y; st.y = ny; for (const id of kids) { const c = map.get(id); if (c) c.y += dy; } }
-    if (to.w != null) st.w = lerp(st.w, to.w, p);
-    if (to.h != null) st.h = lerp(st.h, to.h, p);
-    if (to.rot != null) st.rot = lerp(st.rot, to.rot, p);
   } else {
     if (to.x != null) st.x = lerp(st.x, to.x, p);
     if (to.y != null) st.y = lerp(st.y, to.y, p);
-    if (to.w != null) st.w = lerp(st.w, to.w, p);
-    if (to.h != null) st.h = lerp(st.h, to.h, p);
-    if (to.rot != null) st.rot = lerp(st.rot, to.rot, p);
   }
+  if (to.w != null) st.w = lerp(st.w, to.w, p);
+  if (to.h != null) st.h = lerp(st.h, to.h, p);
+  if (to.rot != null) st.rot = lerp(st.rot, to.rot, p);
 }
 
 /** Apply one obj_* action to the map at local progress p (0..1). Mutates map. */
