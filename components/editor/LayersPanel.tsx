@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useEditor } from "@/lib/editor/store";
 import { flattenForPanel, pathInList, primaryPath, sameParentSiblings } from "@/lib/editor/selection";
 import { getObjectAt, getObjectListAt, type ObjectPath } from "@/lib/editor/object-tree";
+import { isGated } from "@/lib/editor/object-gating";
 import type { SceneObject } from "@/engine/deck/types";
 
 const glyph = (kind: SceneObject["kind"]): string => ({ text: "T", image: "▣", shape: "◆", group: "❏" }[kind]);
@@ -25,7 +26,8 @@ export function LayersPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const sceneId = beats[selected]?.sceneId;
-  const objects = doc?.scenes.find((sc) => sc.id === sceneId)?.objects ?? [];
+  const scene = doc?.scenes.find((sc) => sc.id === sceneId);
+  const objects = scene?.objects ?? [];
   const primary = primaryPath(selectedObjectPaths);
   const rows = flattenForPanel(objects, collapsed);
   const primaryObj = primary ? getObjectAt(objects, primary) : undefined;
@@ -107,6 +109,9 @@ export function LayersPanel() {
             ) : (
               <span className="ed__layer-name" data-testid="layer-name"
                 onDoubleClick={(e) => { e.stopPropagation(); setEditingId(obj.id); }}>{label}</span>
+            )}
+            {scene && isGated(scene, obj.id) && (
+              <span data-testid="gated-badge" title="Hidden until revealed" style={{ fontSize: 9, opacity: 0.7, marginLeft: 4 }}>⏱</span>
             )}
             <span className="ed__layer-toggles">
               <button className="ed__icon" data-testid="layer-hide" title={obj.hidden ? "Show" : "Hide"}
