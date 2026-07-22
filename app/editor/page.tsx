@@ -6,6 +6,7 @@ import { loadDeck } from "@/lib/api/decks-client";
 import { useAutosave, type SaveStatus } from "@/lib/editor/use-autosave";
 import { DeckCanvas, type CanvasHandle } from "@/components/editor/DeckCanvas";
 import { Filmstrip } from "@/components/editor/Filmstrip";
+import { LayersPanel } from "@/components/editor/LayersPanel";
 import { Timeline } from "@/components/editor/Timeline";
 import { Inspector } from "@/components/editor/Inspector";
 import { DeckSettings } from "@/components/editor/DeckSettings";
@@ -88,7 +89,10 @@ export default function Editor() {
         </select>
         <span data-testid="save-status" style={{ marginLeft: "auto", color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
       </div>
-      <Filmstrip />
+      <div className="ed__leftdock">
+        <div className="ed__leftdock-film"><Filmstrip /></div>
+        <div className="ed__leftdock-layers"><LayersPanel /></div>
+      </div>
       <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} /></div>
       <Timeline canvasRef={canvasRef} time={time} />
       {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : <Inspector />}
