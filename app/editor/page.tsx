@@ -11,6 +11,7 @@ import { Inspector } from "@/components/editor/Inspector";
 import { DeckSettings } from "@/components/editor/DeckSettings";
 import { OBJECT_REGISTRY } from "@/lib/editor/object-registry";
 import { ExportPanel } from "@/components/editor/ExportPanel";
+import { primaryPath } from "@/lib/editor/selection";
 
 const STATUS_LABEL: Record<SaveStatus, string> = { idle: "", saving: "Saving…", saved: "Saved", error: "Save failed" };
 
@@ -26,7 +27,8 @@ export default function Editor() {
   const canRedo = useEditor((s) => s.future.length > 0);
   const addObject = useEditor((s) => s.addObject);
   const deleteObject = useEditor((s) => s.deleteObject);
-  const selectedObjectPath = useEditor((s) => s.selectedObjectPath);
+  const selectedObjectPaths = useEditor((s) => s.selectedObjectPaths);
+  const selectedObjectPath = primaryPath(selectedObjectPaths);
   const canvasRef = useRef<CanvasHandle>(null);
   const [time, setTime] = useState({ t: 0, duration: 0 });
   type Panel = "inspector" | "settings" | "export";

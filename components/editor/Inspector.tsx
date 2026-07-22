@@ -4,6 +4,7 @@ import { descriptorFor, REGISTRY } from "@/lib/editor/registry";
 import { descriptorForObject } from "@/lib/editor/object-registry";
 import { getObjectAt } from "@/lib/editor/object-tree";
 import { getPath } from "@/lib/editor/paths";
+import { primaryPath } from "@/lib/editor/selection";
 import { Field } from "./Field";
 
 const CONVERT_KIND_OPTIONS = Object.values(REGISTRY).map((d) => ({ value: d.kind, label: d.label }));
@@ -13,7 +14,8 @@ export function Inspector() {
   const beats = useEditor((s) => s.beats);
   const selected = useEditor((s) => s.selected);
   const selectedAction = useEditor((s) => s.selectedAction);
-  const selectedObjectPath = useEditor((s) => s.selectedObjectPath);
+  const selectedObjectPaths = useEditor((s) => s.selectedObjectPaths);
+  const selectedObjectPath = primaryPath(selectedObjectPaths);
   const updateAction = useEditor((s) => s.updateAction);
   const convertAction = useEditor((s) => s.convertAction);
   const updateObject = useEditor((s) => s.updateObject);

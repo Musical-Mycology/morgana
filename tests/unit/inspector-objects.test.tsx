@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Inspector } from "@/components/editor/Inspector";
 import { useEditor } from "@/lib/editor/store";
+import { primaryPath } from "@/lib/editor/selection";
 import type { DeckDoc } from "@/engine/deck-doc";
 
 const doc = (): DeckDoc => ({ version: 1, meta: { id: "d", title: "D" }, scenes: [
@@ -25,7 +26,7 @@ test("the object delete button removes it and clears selection", () => {
   render(<Inspector />);
   fireEvent.click(screen.getByTestId("object-delete"));
   expect(useEditor.getState().doc!.scenes[0].objects ?? []).toHaveLength(0);
-  expect(useEditor.getState().selectedObjectPath).toBeNull();
+  expect(primaryPath(useEditor.getState().selectedObjectPaths)).toBeNull();
 });
 
 test("with nothing selected, it shows the empty state", () => {

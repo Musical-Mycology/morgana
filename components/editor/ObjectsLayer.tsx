@@ -7,6 +7,7 @@ import { getObjectAt } from "@/lib/editor/object-tree";
 import { pointerFraction, round3, transformChanged } from "@/lib/editor/object-drag";
 import { usePointerDrag } from "@/lib/editor/usePointerDrag";
 import { SelectionOverlay } from "./SelectionOverlay";
+import { primaryPath } from "@/lib/editor/selection";
 
 const SIZE_PX: Record<NonNullable<TextObjectStyle["size"]>, number> = { lg: 34, md: 22, sm: 15 };
 
@@ -28,7 +29,8 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
   const doc = useEditor((s) => s.doc);
   const selected = useEditor((s) => s.selected);
   const beats = useEditor((s) => s.beats);
-  const selectedObjectPath = useEditor((s) => s.selectedObjectPath);
+  const selectedObjectPaths = useEditor((s) => s.selectedObjectPaths);
+  const selectedObjectPath = primaryPath(selectedObjectPaths);
   const selectObject = useEditor((s) => s.selectObject);
   const updateObjectTransform = useEditor((s) => s.updateObjectTransform);
   const startDrag = usePointerDrag(hostRef);
