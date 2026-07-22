@@ -5,7 +5,7 @@ import { flattenBeats, beatLocation, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
 import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
 import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTransform as mUpdateObjectTransform, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject } from "./object-mutations";
-import { uniqueObjectId, type ObjectPath } from "./object-tree";
+import { uniqueObjectId, findObjectPath, type ObjectPath } from "./object-tree";
 import { descriptorForObject } from "./object-registry";
 
 const HISTORY_CAP = 50;
@@ -15,12 +15,14 @@ interface EditorState {
   beats: FlatBeat[];
   selected: number;
   selectedAction: number | null;
+  selectedObjectPath: ObjectPath | null;
   past: DeckDoc[];
   future: DeckDoc[];
   revision: number;
   load: (doc: DeckDoc) => void;
   select: (i: number) => void;
   selectAction: (i: number | null) => void;
+  selectObject: (path: ObjectPath | null) => void;
   updateAction: (beatIdx: number, actionIdx: number, path: string, value: unknown) => void;
   updateMeta: (path: string, value: unknown) => void;
   undo: () => void;
@@ -66,15 +68,17 @@ export const useEditor = create<EditorState>((set, get) => ({
   beats: [],
   selected: 0,
   selectedAction: null,
+  selectedObjectPath: null,
   past: [],
   future: [],
   revision: 0,
-  load: (doc) => set({ doc, beats: flattenBeats(doc), selected: 0, selectedAction: null, past: [], future: [], revision: 0 }),
+  load: (doc) => set({ doc, beats: flattenBeats(doc), selected: 0, selectedAction: null, selectedObjectPath: null, past: [], future: [], revision: 0 }),
   select: (i) => {
     const last = Math.max(0, get().beats.length - 1);
-    set({ selected: Math.min(last, Math.max(0, i)), selectedAction: null });
+    set({ selected: Math.min(last, Math.max(0, i)), selectedAction: null, selectedObjectPath: null });
   },
-  selectAction: (i) => set({ selectedAction: i }),
+  selectAction: (i) => set({ selectedAction: i, selectedObjectPath: null }),
+  selectObject: (path) => set({ selectedObjectPath: path, selectedAction: null }),
   updateAction: (beatIdx, actionIdx, path, value) => set((s) => {
     if (!s.doc) return {};
     const loc = beatLocation(s.doc, beatIdx);
@@ -95,13 +99,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!s.past.length || !s.doc) return {};
     const doc = s.past[s.past.length - 1];
     const beats = flattenBeats(doc);
-    return { doc, beats, past: s.past.slice(0, -1), future: [s.doc, ...s.future].slice(0, HISTORY_CAP), revision: s.revision + 1, selected: Math.min(s.selected, Math.max(0, beats.length - 1)), selectedAction: null };
+    return { doc, beats, past: s.past.slice(0, -1), future: [s.doc, ...s.future].slice(0, HISTORY_CAP), revision: s.revision + 1, selected: Math.min(s.selected, Math.max(0, beats.length - 1)), selectedAction: null, selectedObjectPath: null };
   }),
   redo: () => set((s) => {
     if (!s.future.length || !s.doc) return {};
     const doc = s.future[0];
     const beats = flattenBeats(doc);
-    return { doc, beats, future: s.future.slice(1), past: [...s.past, s.doc].slice(-HISTORY_CAP), revision: s.revision + 1, selected: Math.min(s.selected, Math.max(0, beats.length - 1)), selectedAction: null };
+    return { doc, beats, future: s.future.slice(1), past: [...s.past, s.doc].slice(-HISTORY_CAP), revision: s.revision + 1, selected: Math.min(s.selected, Math.max(0, beats.length - 1)), selectedAction: null, selectedObjectPath: null };
   }),
   addBeat: (flatIdx) => set((s) => commit(s, (doc) => insertBeatAfter(doc, flatIdx))),
   duplicateBeat: (flatIdx) => set((s) => commit(s, (doc) => duplicateBeatAt(doc, flatIdx))),
@@ -157,11 +161,18 @@ export const useEditor = create<EditorState>((set, get) => ({
   addObject: (sceneId, kind, parentPath, index) => set((s) => {
     if (!s.doc) return {};
     const object: SceneObject = { ...descriptorForObject({ kind }).defaults(), id: uniqueObjectId(s.doc, sceneId) };
-    return commit(s, (doc) => mAddObject(doc, sceneId, object, parentPath, index));
+    const part = commit(s, (doc) => mAddObject(doc, sceneId, object, parentPath, index));
+    if (!part.doc) return {};
+    const scene = part.doc.scenes.find((sc) => sc.id === sceneId);
+    return { ...part, selectedObjectPath: scene ? findObjectPath(scene.objects ?? [], object.id) : null, selectedAction: null };
   }),
   updateObject: (sceneId, path, fieldKey, value) => set((s) => commit(s, (doc) => mUpdateObject(doc, sceneId, path, fieldKey, value))),
   updateObjectTransform: (sceneId, path, patch) => set((s) => commit(s, (doc) => mUpdateObjectTransform(doc, sceneId, path, patch))),
-  deleteObject: (sceneId, path) => set((s) => commit(s, (doc) => mDeleteObject(doc, sceneId, path))),
+  deleteObject: (sceneId, path) => set((s) => {
+    const part = commit(s, (doc) => mDeleteObject(doc, sceneId, path));
+    if (!part.doc) return {};
+    return { ...part, selectedObjectPath: null };
+  }),
   reorderObject: (sceneId, path, dir) => set((s) => commit(s, (doc) => mReorderObject(doc, sceneId, path, dir))),
   groupObjects: (sceneId, paths) => set((s) => {
     if (!s.doc) return {};
