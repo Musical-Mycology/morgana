@@ -23,6 +23,17 @@ export function Inspector() {
   const sceneId = beats[selected]?.sceneId;
 
   // Object selection takes precedence (mutually exclusive with action selection).
+  if (selectedObjectPaths.length > 1 && sceneId) {
+    return (
+      <div className="ed__inspector" data-testid="inspector">
+        <div data-testid="inspector-multi" style={{ fontFamily: "var(--ed-disp)", fontSize: 14, marginBottom: 8 }}>
+          {selectedObjectPaths.length} objects selected
+        </div>
+        <p style={{ opacity: 0.6, fontSize: 12 }}>Group or ungroup from the Layers panel toolbar.</p>
+      </div>
+    );
+  }
+
   if (selectedObjectPath && sceneId) {
     const objects = doc?.scenes.find((sc) => sc.id === sceneId)?.objects ?? [];
     const obj = getObjectAt(objects, selectedObjectPath);

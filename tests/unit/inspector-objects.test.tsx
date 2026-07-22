@@ -33,3 +33,15 @@ test("with nothing selected, it shows the empty state", () => {
   render(<Inspector />);
   expect(screen.getByTestId("inspector").textContent).toMatch(/select/i);
 });
+
+test("with multiple objects selected, the inspector shows a multi-select summary", () => {
+  useEditor.getState().load({ version: 1, meta: { id: "d", title: "D" }, scenes: [
+    { id: "s1", objects: [
+      { id: "o-1", kind: "text", text: "Hi", transform: { x: 0.1, y: 0.1, w: 0.3, h: 0.2 } },
+      { id: "o-2", kind: "text", text: "Yo", transform: { x: 0.5, y: 0.5, w: 0.3, h: 0.2 } },
+    ], beats: [{ id: "b1", timeline: [] }] },
+  ] });
+  useEditor.getState().setObjectSelection([[0], [1]]);
+  render(<Inspector />);
+  expect(screen.getByTestId("inspector-multi").textContent).toMatch(/2 objects selected/i);
+});
