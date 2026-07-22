@@ -26,13 +26,13 @@ export function usePointerDrag(hostRef: RefObject<HTMLDivElement | null>) {
     e.preventDefault();
     e.stopPropagation();
     const rect0 = hostRef.current?.getBoundingClientRect();
-    if (!rect0 || rect0.width === 0) return;
+    if (!rect0 || rect0.width === 0 || rect0.height === 0) return;
     const startX = e.clientX, startY = e.clientY;
     handlers.onStart?.({ rect: rect0, clientX: e.clientX, clientY: e.clientY, e });
 
     const move = (ev: PointerEvent) => {
       const rect = hostRef.current?.getBoundingClientRect();
-      if (!rect || rect.width === 0) return;
+      if (!rect || rect.width === 0 || rect.height === 0) return;
       handlers.onMove({ rect, clientX: ev.clientX, clientY: ev.clientY, e: ev });
     };
     const up = (ev: PointerEvent) => {

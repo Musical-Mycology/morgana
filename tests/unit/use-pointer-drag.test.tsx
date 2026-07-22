@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import { createRef, useRef } from "react";
+import { useRef } from "react";
 import { usePointerDrag, type DragHandlers } from "@/lib/editor/usePointerDrag";
 
 afterEach(cleanup);
