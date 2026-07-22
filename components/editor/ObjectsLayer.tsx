@@ -80,7 +80,12 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
                 const r = hostRef.current?.getBoundingClientRect();
                 if (r && r.width > 0) {
                   const f = pointerFraction(r, ev.clientX, ev.clientY);
-                  updateObjectTransform(sceneId!, path, { x: Number((f.x - off.x).toFixed(3)), y: Number((f.y - off.y).toFixed(3)) });
+                  const nx = Number((f.x - off.x).toFixed(3));
+                  const ny = Number((f.y - off.y).toFixed(3));
+                  // a pure click (no net movement) must not create a history entry / autosave
+                  if (nx !== t.x || ny !== t.y) {
+                    updateObjectTransform(sceneId!, path, { x: nx, y: ny });
+                  }
                 }
                 setDrag(null);
               };

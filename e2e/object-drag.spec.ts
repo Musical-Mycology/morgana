@@ -30,5 +30,9 @@ test("dragging an object body moves it and commits one undoable change", async (
 
   // one undo returns it near its origin
   await page.getByTestId("undo").click();
+  await expect.poll(async () => {
+    const vals = await xField.evaluateAll((els) => els.map((e) => Number((e as HTMLInputElement).value)));
+    return Math.max(...vals);
+  }).toBeLessThan(0.2);
   await request.delete(`/api/decks/${id}`);
 });
