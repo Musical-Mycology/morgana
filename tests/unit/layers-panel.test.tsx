@@ -88,6 +88,20 @@ test("raise moves the primary up in z (reorderObject +1)", () => {
   expect(useEditor.getState().doc!.scenes[0].objects!.map((o) => o.id)).toEqual(["g", "a", "b"]);
 });
 
+test("raise is disabled at the top of the sibling list, lower stays enabled", () => {
+  render(<LayersPanel />);
+  fireEvent.click(rowFor("b"));                        // path [2], topmost z (front-of-z first row)
+  expect((screen.getByTestId("layer-raise") as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByTestId("layer-lower") as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("lower is disabled at the bottom of the sibling list, raise stays enabled", () => {
+  render(<LayersPanel />);
+  fireEvent.click(rowFor("a"));                        // path [0], backmost z
+  expect((screen.getByTestId("layer-lower") as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByTestId("layer-raise") as HTMLButtonElement).disabled).toBe(false);
+});
+
 test("Group is disabled unless >=2 same-parent siblings are selected", () => {
   render(<LayersPanel />);
   fireEvent.click(rowFor("a"));

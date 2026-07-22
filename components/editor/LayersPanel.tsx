@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useEditor } from "@/lib/editor/store";
 import { flattenForPanel, pathInList, primaryPath, sameParentSiblings } from "@/lib/editor/selection";
-import { getObjectAt, type ObjectPath } from "@/lib/editor/object-tree";
+import { getObjectAt, getObjectListAt, type ObjectPath } from "@/lib/editor/object-tree";
 import type { SceneObject } from "@/engine/deck/types";
 
 const glyph = (kind: SceneObject["kind"]): string => ({ text: "T", image: "▣", shape: "◆", group: "❏" }[kind]);
@@ -31,7 +31,10 @@ export function LayersPanel() {
   const primaryObj = primary ? getObjectAt(objects, primary) : undefined;
   const canGroup = sameParentSiblings(selectedObjectPaths);
   const canUngroup = selectedObjectPaths.length === 1 && primaryObj?.kind === "group";
-  const canReorder = !!primary;
+  const primaryList = primary ? getObjectListAt(objects, primary.slice(0, -1)) : undefined;
+  const primaryIdx = primary ? primary[primary.length - 1] : -1;
+  const canRaise = !!primary && primaryList != null && primaryIdx < primaryList.length - 1;
+  const canLower = !!primary && primaryList != null && primaryIdx > 0;
 
   const clickRow = (path: ObjectPath) => (e: React.MouseEvent) => {
     if (e.shiftKey || e.metaKey || e.ctrlKey) toggleObjectSelection(path);
@@ -47,9 +50,9 @@ export function LayersPanel() {
     <div className="ed__layers" data-testid="layers-panel">
       <div className="ed__lbl">Layers</div>
       <div className="ed__layer-toolbar">
-        <button className="ed__icon" data-testid="layer-raise" title="Raise" disabled={!canReorder}
+        <button className="ed__icon" data-testid="layer-raise" title="Raise" disabled={!canRaise}
           onClick={() => primary && sceneId && reorderObject(sceneId, primary, 1)}>↑</button>
-        <button className="ed__icon" data-testid="layer-lower" title="Lower" disabled={!canReorder}
+        <button className="ed__icon" data-testid="layer-lower" title="Lower" disabled={!canLower}
           onClick={() => primary && sceneId && reorderObject(sceneId, primary, -1)}>↓</button>
         <button className="ed__icon" data-testid="layer-group" title="Group" disabled={!canGroup}
           onClick={() => sceneId && groupObjects(sceneId, selectedObjectPaths)}>❏</button>
