@@ -26,6 +26,7 @@ export default function Editor() {
   const canUndo = useEditor((s) => s.past.length > 0);
   const canRedo = useEditor((s) => s.future.length > 0);
   const deleteObject = useEditor((s) => s.deleteObject);
+  const exitGroup = useEditor((s) => s.exitGroup);
   const selectedObjectPaths = useEditor((s) => s.selectedObjectPaths);
   const selectedObjectPath = primaryPath(selectedObjectPaths);
   const canvasRef = useRef<CanvasHandle>(null);
@@ -59,10 +60,13 @@ export default function Editor() {
         e.preventDefault();
         deleteObject(sceneId, selectedObjectPath);
       }
+      if (e.key === "Escape" && (selectedObjectPaths.length > 0)) {
+        exitGroup();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, selectedObjectPath, sceneId, deleteObject]);
+  }, [undo, redo, selectedObjectPath, sceneId, deleteObject, exitGroup, selectedObjectPaths]);
 
   const onTime = useCallback((t: number, duration: number) => setTime({ t, duration }), []);
   return (
