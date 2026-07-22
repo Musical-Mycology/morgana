@@ -37,6 +37,7 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
   const exitGroup = useEditor((s) => s.exitGroup);
   const toggleObjectSelection = useEditor((s) => s.toggleObjectSelection);
   const updateObjectTransform = useEditor((s) => s.updateObjectTransform);
+  const translateObjectBy = useEditor((s) => s.translateObjectBy);
   const startDrag = usePointerDrag(hostRef);
   const [preview, setPreview] = useState<Preview>(null);
   const sceneId = beats[selected]?.sceneId;
@@ -61,8 +62,13 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
       onCommit: (c) => {
         if (c.moved) {
           const f = pointerFraction(c.rect, c.clientX, c.clientY);
-          const patch = { x: round3(f.x - off.x), y: round3(f.y - off.y) };
-          if (transformChanged(t, patch)) updateObjectTransform(sceneId!, targetPath, patch);
+          const nx = round3(f.x - off.x), ny = round3(f.y - off.y);
+          if (targetObj.kind === "group") {
+            const dx = round3(nx - t.x), dy = round3(ny - t.y);
+            if (dx !== 0 || dy !== 0) translateObjectBy(sceneId!, targetPath, dx, dy);
+          } else if (transformChanged(t, { x: nx, y: ny })) {
+            updateObjectTransform(sceneId!, targetPath, { x: nx, y: ny });
+          }
         }
         setPreview(null);
       },
