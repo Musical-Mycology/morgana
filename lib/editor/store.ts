@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import type { DeckDoc } from "@/engine/deck-doc";
-import type { SceneObject } from "@/engine/deck/types";
+import type { ObjectTransform, SceneObject } from "@/engine/deck/types";
 import { flattenBeats, beatLocation, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
 import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
-import { addObject as mAddObject, updateObject as mUpdateObject, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject } from "./object-mutations";
+import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTransform as mUpdateObjectTransform, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject } from "./object-mutations";
 import { uniqueObjectId, type ObjectPath } from "./object-tree";
 import { descriptorForObject } from "./object-registry";
 
@@ -38,6 +38,7 @@ interface EditorState {
   convertAction: (flatIdx: number, actionIdx: number, newKind: string) => void;
   addObject: (sceneId: string, kind: SceneObject["kind"], parentPath?: ObjectPath, index?: number) => void;
   updateObject: (sceneId: string, path: ObjectPath, fieldKey: string, value: unknown) => void;
+  updateObjectTransform: (sceneId: string, path: ObjectPath, patch: Partial<ObjectTransform>) => void;
   deleteObject: (sceneId: string, path: ObjectPath) => void;
   reorderObject: (sceneId: string, path: ObjectPath, dir: -1 | 1) => void;
   groupObjects: (sceneId: string, paths: ObjectPath[]) => void;
@@ -159,6 +160,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     return commit(s, (doc) => mAddObject(doc, sceneId, object, parentPath, index));
   }),
   updateObject: (sceneId, path, fieldKey, value) => set((s) => commit(s, (doc) => mUpdateObject(doc, sceneId, path, fieldKey, value))),
+  updateObjectTransform: (sceneId, path, patch) => set((s) => commit(s, (doc) => mUpdateObjectTransform(doc, sceneId, path, patch))),
   deleteObject: (sceneId, path) => set((s) => commit(s, (doc) => mDeleteObject(doc, sceneId, path))),
   reorderObject: (sceneId, path, dir) => set((s) => commit(s, (doc) => mReorderObject(doc, sceneId, path, dir))),
   groupObjects: (sceneId, paths) => set((s) => {
