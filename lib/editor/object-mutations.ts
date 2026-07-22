@@ -2,6 +2,7 @@ import type { DeckDoc } from "@/engine/deck-doc";
 import type { ObjectTransform, Scene, SceneObject } from "@/engine/deck/types";
 import { setPath } from "./paths";
 import { getObjectAt, getObjectListAt, mapChildList, isPrefix, type ObjectPath } from "./object-tree";
+import { round3 } from "./object-drag";
 
 /** Apply `f` to the objects tree of the named scene. If `f` returns the same array
  *  reference (a no-op), the whole doc is returned unchanged. Unknown scene → no-op. */
@@ -122,6 +123,28 @@ export function updateObjectTransform(doc: DeckDoc, sceneId: string, path: Objec
     const idx = path[path.length - 1];
     return mapChildList(objects, parent, (list) =>
       list.map((o, i) => (i === idx ? { ...o, transform: { ...o.transform, ...patch } } : o)));
+  });
+}
+
+/** Offset a single object's transform, recursing into a group's descendants (which hold
+ *  absolute coords in #1) so a whole group moves together. */
+function shift(o: SceneObject, dx: number, dy: number): SceneObject {
+  const t = o.transform;
+  const transform = { ...t, x: round3(t.x + dx), y: round3(t.y + dy) };
+  return o.kind === "group"
+    ? { ...o, transform, children: o.children.map((c) => shift(c, dx, dy)) }
+    : { ...o, transform };
+}
+
+/** Offset the node at `path` — and, for a group, all its descendants — by (dx, dy) in
+ *  stage fractions. Used for group-as-unit drag. Zero delta / unknown scene/path → same doc. */
+export function translateObjectBy(doc: DeckDoc, sceneId: string, path: ObjectPath, dx: number, dy: number): DeckDoc {
+  if (dx === 0 && dy === 0) return doc;
+  return mapSceneObjects(doc, sceneId, (objects) => {
+    if (!getObjectAt(objects, path)) return objects;
+    const parent = path.slice(0, -1);
+    const idx = path[path.length - 1];
+    return mapChildList(objects, parent, (list) => list.map((o, i) => (i === idx ? shift(o, dx, dy) : o)));
   });
 }
 
