@@ -84,3 +84,60 @@ test("resizeTransform is correct under anisotropic 16:9 scaling", () => {
   expect(round3(out.w)).toBe(0.3);
   expect(round3(out.h)).toBe(0.3);
 });
+
+test("resizeTransform n handle pins the bottom edge and grows upward", () => {
+  const out = resizeTransform(box, "n", rect, 500, 300);
+  expect(out.x).toBe(0.4);
+  expect(round3(out.y)).toBe(0.3);
+  expect(out.w).toBe(0.2);
+  expect(round3(out.h)).toBe(0.3);
+});
+
+test("resizeTransform s handle pins the top edge and grows downward", () => {
+  const out = resizeTransform(box, "s", rect, 500, 800);
+  expect(out.x).toBe(0.4);
+  expect(out.y).toBe(0.4);
+  expect(out.w).toBe(0.2);
+  expect(round3(out.h)).toBe(0.4);
+});
+
+test("resizeTransform w handle pins the right edge and grows leftward", () => {
+  const out = resizeTransform(box, "w", rect, 300, 500);
+  expect(round3(out.x)).toBe(0.3);
+  expect(out.y).toBe(0.4);
+  expect(round3(out.w)).toBe(0.3);
+  expect(out.h).toBe(0.2);
+});
+
+test("resizeTransform ne handle pins the sw corner", () => {
+  // sw corner at (0.4,0.6); drag ne pointer to (0.7,0.3)
+  const out = resizeTransform(box, "ne", rect, 700, 300);
+  expect(out.x).toBe(0.4);
+  expect(round3(out.y)).toBe(0.3);
+  expect(round3(out.w)).toBe(0.3);
+  expect(round3(out.h)).toBe(0.3);
+});
+
+test("resizeTransform sw handle pins the ne corner", () => {
+  // ne corner at (0.6,0.4); drag sw pointer to (0.3,0.7)
+  const out = resizeTransform(box, "sw", rect, 300, 700);
+  expect(round3(out.x)).toBe(0.3);
+  expect(out.y).toBe(0.4);
+  expect(round3(out.w)).toBe(0.3);
+  expect(round3(out.h)).toBe(0.3);
+});
+
+test("resizeTransform top-left anchor: se handle pins top-left and grows box", () => {
+  const tl: ObjectTransform = { x: 0.4, y: 0.4, w: 0.2, h: 0.2, anchor: "top-left" };
+  const out = resizeTransform(tl, "se", rect, 700, 700);
+  expect(out.x).toBe(0.4);
+  expect(out.y).toBe(0.4);
+  expect(round3(out.w)).toBe(0.3);
+  expect(round3(out.h)).toBe(0.3);
+});
+
+test("transformChanged handles non-numeric anchor field without throwing", () => {
+  const t: ObjectTransform = { x: 0.4, y: 0.4, w: 0.2, h: 0.2, anchor: "center" };
+  expect(transformChanged(t, { anchor: "top-left" })).toBe(true);
+  expect(transformChanged({ ...t, anchor: "center" }, { anchor: "center" })).toBe(false);
+});

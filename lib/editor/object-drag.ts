@@ -1,11 +1,11 @@
+import type { ObjectTransform } from "@/engine/deck/types";
+
 /** Map client pixel coords to a clamped 0–1 fraction of `rect` (the 16:9 stage host). */
 export function pointerFraction(rect: DOMRect, clientX: number, clientY: number): { x: number; y: number } {
   const x = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
   const y = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
   return { x, y };
 }
-
-import type { ObjectTransform } from "@/engine/deck/types";
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
@@ -20,11 +20,15 @@ function rotVec(deg: number, vx: number, vy: number): [number, number] {
   return [vx * c - vy * s, vx * s + vy * c];
 }
 
-/** true if any numeric field in `patch` differs (rounded) from `t`. */
+/** true if any field in `patch` differs from `t` (numeric fields compared rounded). */
 export function transformChanged(t: ObjectTransform, patch: Partial<ObjectTransform>): boolean {
-  return (Object.keys(patch) as (keyof ObjectTransform)[]).some(
-    (k) => round3(patch[k] as number) !== round3((t[k] as number) ?? 0),
-  );
+  return (Object.keys(patch) as (keyof ObjectTransform)[]).some((k) => {
+    const pv = patch[k], tv = t[k];
+    if (typeof pv === "number" && (typeof tv === "number" || tv === undefined)) {
+      return round3(pv) !== round3(tv ?? 0);
+    }
+    return pv !== tv;
+  });
 }
 
 type Rect = { left: number; top: number; width: number; height: number };
