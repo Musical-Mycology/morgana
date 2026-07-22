@@ -5,9 +5,9 @@ import { flattenBeats, beatLocation, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
 import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
 import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTransform as mUpdateObjectTransform, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject } from "./object-mutations";
-import { uniqueObjectId, findObjectPath, type ObjectPath } from "./object-tree";
+import { uniqueObjectId, findObjectPath, getObjectAt, type ObjectPath } from "./object-tree";
 import { descriptorForObject } from "./object-registry";
-import { primaryPath, togglePath } from "./selection";
+import { primaryPath, togglePath, sameParentSiblings } from "./selection";
 
 const HISTORY_CAP = 50;
 
@@ -193,9 +193,25 @@ export const useEditor = create<EditorState>((set, get) => ({
   }),
   reorderObject: (sceneId, path, dir) => set((s) => commit(s, (doc) => mReorderObject(doc, sceneId, path, dir))),
   groupObjects: (sceneId, paths) => set((s) => {
-    if (!s.doc) return {};
-    return commit(s, (doc) => mGroupObjects(doc, sceneId, paths, uniqueObjectId(doc, sceneId)));
+    if (!s.doc || !sameParentSiblings(paths)) return {};
+    const groupId = uniqueObjectId(s.doc, sceneId);
+    const part = commit(s, (doc) => mGroupObjects(doc, sceneId, paths, groupId));
+    if (!part.doc) return {};
+    const scene = part.doc.scenes.find((sc) => sc.id === sceneId);
+    const p = scene ? findObjectPath(scene.objects ?? [], groupId) : null;
+    return { ...part, selectedObjectPaths: p ? [p] : [], enteredGroupPath: null, selectedAction: null };
   }),
-  ungroupObject: (sceneId, path) => set((s) => commit(s, (doc) => mUngroupObject(doc, sceneId, path))),
+  ungroupObject: (sceneId, path) => set((s) => {
+    if (!s.doc) return {};
+    const before = s.doc.scenes.find((sc) => sc.id === sceneId)?.objects ?? [];
+    const target = getObjectAt(before, path);
+    const n = target && target.kind === "group" ? target.children.length : 0;
+    const part = commit(s, (doc) => mUngroupObject(doc, sceneId, path));
+    if (!part.doc) return {};
+    const slot = path[path.length - 1];
+    const parent = path.slice(0, -1);
+    const kids: ObjectPath[] = Array.from({ length: n }, (_, i) => [...parent, slot + i]);
+    return { ...part, selectedObjectPaths: kids, enteredGroupPath: null, selectedAction: null };
+  }),
   reparentObject: (sceneId, from, toParent, toIndex) => set((s) => commit(s, (doc) => mReparentObject(doc, sceneId, from, toParent, toIndex))),
 }));
