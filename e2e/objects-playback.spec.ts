@@ -70,3 +70,60 @@ test("gated object stays hidden at rest and reveals under scrub/play", async ({ 
 
   await request.delete(`/api/decks/${id}`);
 });
+
+// Proves obj_move and obj_out (position change + disappearance) also work end-to-end through
+// the real editor UI, extending the obj_reveal-only coverage above. A single object carries all
+// three verbs in sequence: reveal (0-0.6s) -> move (0.6-1.4s) -> out (1.4-1.9s).
+test("obj_move animates position and obj_out fades the object out, both through the real editor", async ({ page, request }) => {
+  const id = "e2e-objects-playback-move-out";
+  await request.delete(`/api/decks/${id}`).catch(() => {});
+  const doc = {
+    version: 1,
+    meta: { id, title: "Obj Move/Out" },
+    scenes: [{ id: "s", beats: [{ id: "a", timeline: [] }] }],
+  };
+  await request.post("/api/decks", { data: { id, title: "Obj Move/Out" } });
+  await request.put(`/api/decks/${id}`, { data: doc });
+
+  await page.goto(`/editor?deck=${id}`);
+  await page.waitForTimeout(300);
+
+  // Add a shape object (adds + selects it) and give it an entrance.
+  await page.getByTestId("layer-object-add").selectOption("shape");
+  await page.getByTestId("add-entrance").click();
+
+  const layerRow = page.getByTestId("layer-row").first();
+  const stage = page.getByTestId("object-stage");
+  const obj = stage.locator("[data-obj-id]").first();
+
+  // addObjectAnimation selects the newly-added action (deselecting the object), so re-select
+  // the object from the Layers panel before adding the next verb — mirrors how a real author
+  // would click back to the object between animation additions.
+  await layerRow.click();
+  await page.getByTestId("add-emphasis").click();
+
+  // The obj_move action was just added and is now selected in the Inspector; its `to` defaults
+  // to the object's current position, so give it a distinct X to make the move observable.
+  await page.getByLabel("To X").fill("0.8");
+
+  await layerRow.click();
+  await page.getByTestId("add-exit").click();
+
+  // End of the reveal window (0.6s): object fully visible at its declared position.
+  await setRange(page, "scrub", 0.6);
+  await expect(obj).toBeVisible();
+  const leftAtReveal = await obj.evaluate((el) => el.style.left);
+
+  // End of the move window (1.4s, i.e. right before obj_out starts): position has changed.
+  await setRange(page, "scrub", 1.39);
+  const leftAtMoveEnd = await obj.evaluate((el) => el.style.left);
+  expect(leftAtMoveEnd).not.toBe(leftAtReveal);
+  expect(parseFloat(leftAtMoveEnd)).toBeCloseTo(80, 0); // to.x = 0.8 -> 80%
+
+  // Past the end of the obj_out window (1.9s): the object has faded out and is hidden.
+  await setRange(page, "scrub", 1.9);
+  await expect(obj).toBeHidden();
+  await expect(obj).toHaveCSS("display", "none");
+
+  await request.delete(`/api/decks/${id}`);
+});
