@@ -68,13 +68,18 @@ test("a handle drag does not move the object body", async ({ page, request }) =>
   await obj.click();
   const readLeft = () => obj.evaluate((el) => parseFloat((el as HTMLElement).style.left));
   const left0 = await readLeft();
+  const readW = () => obj.evaluate((el) => parseFloat((el as HTMLElement).style.width));
+  const w0 = await readW();
 
   const se = (await page.getByTestId("obj-handle-se").boundingBox())!;
   await page.mouse.move(se.x + se.width / 2, se.y + se.height / 2);
   await page.mouse.down();
-  await page.mouse.move(se.x + 60, se.y + 60, { steps: 6 });
+  await page.mouse.move(se.x + 80, se.y + 80, { steps: 6 });
   await page.mouse.up();
 
+  // resize actually happened (handle engaged) -- otherwise the left-unchanged
+  // assertion below would pass vacuously if the se handle no-ops.
+  await expect.poll(readW).toBeGreaterThan(w0);
   // se-resize pins the nw corner => left (x) must not change
   await expect.poll(readLeft).toBeCloseTo(left0, 0);
   await request.delete(`/api/decks/${id}`);
