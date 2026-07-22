@@ -3,10 +3,11 @@ import { useState, type RefObject } from "react";
 import { useEditor } from "@/lib/editor/store";
 import type { SceneObject, TextObjectStyle, ObjectTransform } from "@/engine/deck/types";
 import type { ObjectPath } from "@/lib/editor/object-tree";
-import { getObjectAt } from "@/lib/editor/object-tree";
+import { getObjectAt, isPrefix } from "@/lib/editor/object-tree";
 import { pointerFraction, round3, transformChanged } from "@/lib/editor/object-drag";
 import { usePointerDrag } from "@/lib/editor/usePointerDrag";
 import { SelectionOverlay } from "./SelectionOverlay";
+import { primaryPath, pathInList, resolveCanvasSelection } from "@/lib/editor/selection";
 
 const SIZE_PX: Record<NonNullable<TextObjectStyle["size"]>, number> = { lg: 34, md: 22, sm: 15 };
 
@@ -28,9 +29,15 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
   const doc = useEditor((s) => s.doc);
   const selected = useEditor((s) => s.selected);
   const beats = useEditor((s) => s.beats);
-  const selectedObjectPath = useEditor((s) => s.selectedObjectPath);
+  const selectedObjectPaths = useEditor((s) => s.selectedObjectPaths);
+  const selectedObjectPath = primaryPath(selectedObjectPaths);
   const selectObject = useEditor((s) => s.selectObject);
+  const enteredGroupPath = useEditor((s) => s.enteredGroupPath);
+  const enterGroup = useEditor((s) => s.enterGroup);
+  const exitGroup = useEditor((s) => s.exitGroup);
+  const toggleObjectSelection = useEditor((s) => s.toggleObjectSelection);
   const updateObjectTransform = useEditor((s) => s.updateObjectTransform);
+  const translateObjectBy = useEditor((s) => s.translateObjectBy);
   const startDrag = usePointerDrag(hostRef);
   const [preview, setPreview] = useState<Preview>(null);
   const sceneId = beats[selected]?.sceneId;
@@ -42,17 +49,28 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
 
   const bodyDown = (obj: SceneObject, path: ObjectPath) => (e: React.PointerEvent) => {
     if (obj.locked) return;
-    selectObject(path);
-    const t = obj.transform;
+    const resolved = resolveCanvasSelection(path, enteredGroupPath);
+    if (e.shiftKey || e.metaKey || e.ctrlKey) { toggleObjectSelection(resolved); return; }
+    const stayEntered = !!enteredGroupPath && isPrefix(enteredGroupPath, resolved) && resolved.length > enteredGroupPath.length;
+    selectObject(resolved);
+    if (stayEntered && enteredGroupPath) enterGroup(enteredGroupPath);
+    const targetPath = resolved;
+    const targetObj = getObjectAt(objects, targetPath) ?? obj;
+    const t = targetObj.transform;
     let off = { x: 0, y: 0 };
     startDrag(e, {
       onStart: (c) => { const f = pointerFraction(c.rect, c.clientX, c.clientY); off = { x: f.x - t.x, y: f.y - t.y }; },
-      onMove: (c) => { const f = pointerFraction(c.rect, c.clientX, c.clientY); setPreview({ path, patch: { x: round3(f.x - off.x), y: round3(f.y - off.y) } }); },
+      onMove: (c) => { const f = pointerFraction(c.rect, c.clientX, c.clientY); setPreview({ path: targetPath, patch: { x: round3(f.x - off.x), y: round3(f.y - off.y) } }); },
       onCommit: (c) => {
         if (c.moved) {
           const f = pointerFraction(c.rect, c.clientX, c.clientY);
-          const patch = { x: round3(f.x - off.x), y: round3(f.y - off.y) };
-          if (transformChanged(t, patch)) updateObjectTransform(sceneId!, path, patch);
+          const nx = round3(f.x - off.x), ny = round3(f.y - off.y);
+          if (targetObj.kind === "group") {
+            const dx = round3(nx - t.x), dy = round3(ny - t.y);
+            if (dx !== 0 || dy !== 0) translateObjectBy(sceneId!, targetPath, dx, dy);
+          } else if (transformChanged(t, { x: nx, y: ny })) {
+            updateObjectTransform(sceneId!, targetPath, { x: nx, y: ny });
+          }
         }
         setPreview(null);
       },
@@ -60,23 +78,23 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
   };
 
   const selObj = selectedObjectPath ? getObjectAt(objects, selectedObjectPath) : undefined;
-  const showOverlay = selObj && !selObj.locked && !selObj.hidden && selectedObjectPath;
+  const showOverlay = selectedObjectPaths.length === 1 && selObj && !selObj.locked && !selObj.hidden;
 
   return (
     <div className="ed__objects" style={{ position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>
-      {selectedObjectPath && (
+      {(selectedObjectPaths.length > 0 || enteredGroupPath) && (
         <div
           data-testid="objects-deselect"
           style={{ position: "absolute", inset: 0, pointerEvents: "auto" }}
-          onPointerDown={() => selectObject(null)}
+          onPointerDown={() => exitGroup()}
         />
       )}
       {flatten(objects).map(({ obj, path }) => {
         if (obj.hidden) return null;
-        if (obj.kind === "group" && !pathEq(selectedObjectPath, path)) return null;
+        if (obj.kind === "group" && !pathInList(selectedObjectPaths, path) && !pathEq(enteredGroupPath, path)) return null;
         const t = obj.transform;
         const eff = effOf(t, path);
-        const selectedCls = pathEq(selectedObjectPath, path) ? " ed__obj--selected" : "";
+        const selectedCls = pathInList(selectedObjectPaths, path) ? " ed__obj--selected" : "";
         const style: React.CSSProperties = {
           position: "absolute", left: `${eff.x * 100}%`, top: `${eff.y * 100}%`, width: `${eff.w * 100}%`, height: `${eff.h * 100}%`,
           transform: eff.rot ? `rotate(${eff.rot}deg)` : undefined, transformOrigin: eff.anchor === "top-left" ? "0 0" : "50% 50%",
@@ -89,6 +107,12 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
             data-obj-id={obj.id}
             className={`ed__obj ed__obj--${obj.kind}${selectedCls}`}
             onPointerDown={bodyDown(obj, path)}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              const resolved = resolveCanvasSelection(path, enteredGroupPath);
+              const ro = getObjectAt(objects, resolved);
+              if (ro?.kind === "group") { selectObject(path); enterGroup(resolved); }
+            }}
             style={{ ...style, pointerEvents: obj.locked ? "none" : "auto", cursor: "move" }}
           >
             {renderContent(obj)}

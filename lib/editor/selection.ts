@@ -1,0 +1,65 @@
+import { isPrefix, type ObjectPath } from "./object-tree";
+import type { SceneObject } from "@/engine/deck/types";
+
+/** Value-equality for two ObjectPaths (null/undefined are never equal to anything). */
+export function pathsEqual(a: ObjectPath | null | undefined, b: ObjectPath | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** True if `p` is present in `list` (by value). */
+export function pathInList(list: ObjectPath[], p: ObjectPath): boolean {
+  return list.some((q) => pathsEqual(q, p));
+}
+
+/** The primary selection = the last path, or null when the set is empty. */
+export function primaryPath(paths: ObjectPath[]): ObjectPath | null {
+  return paths.length ? paths[paths.length - 1] : null;
+}
+
+/** Add `p` if absent (it becomes the new primary), else remove it. Order preserved. */
+export function togglePath(list: ObjectPath[], p: ObjectPath): ObjectPath[] {
+  return pathInList(list, p) ? list.filter((q) => !pathsEqual(q, p)) : [...list, p];
+}
+
+/** True when >=2 paths share exactly one parent (the `groupObjects` precondition). */
+export function sameParentSiblings(paths: ObjectPath[]): boolean {
+  if (paths.length < 2) return false;
+  const parent = paths[0].slice(0, -1);
+  return paths.every(
+    (p) => p.length === paths[0].length && p.slice(0, -1).every((v, i) => v === parent[i])
+  );
+}
+
+/** Group-as-unit hit resolution. Given the leaf `hitPath` under the cursor and the
+ *  currently-entered group (null = root context), return the path to actually select:
+ *  the direct child of the entered context that contains the hit. When the hit is not
+ *  inside the entered group, resolve at the root (top-level ancestor). */
+export function resolveCanvasSelection(hitPath: ObjectPath, enteredGroupPath: ObjectPath | null): ObjectPath {
+  const ctx = enteredGroupPath && isPrefix(enteredGroupPath, hitPath) ? enteredGroupPath.length : 0;
+  return hitPath.slice(0, Math.min(ctx + 1, hitPath.length));
+}
+
+export interface PanelRow { obj: SceneObject; path: ObjectPath; depth: number }
+
+/** Rows for the layers panel: depth-first, per-level reversed (front-of-z first —
+ *  Photoshop order), skipping the children of collapsed groups. A group header row is
+ *  emitted directly above its (indented) children. Paths remain canonical document
+ *  indices; only display order is reversed. */
+export function flattenForPanel(
+  objects: SceneObject[],
+  collapsed: Set<string>,
+  base: ObjectPath = [],
+  depth = 0,
+): PanelRow[] {
+  const out: PanelRow[] = [];
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    const path = [...base, i];
+    out.push({ obj, path, depth });
+    if (obj.kind === "group" && !collapsed.has(obj.id)) {
+      out.push(...flattenForPanel(obj.children, collapsed, path, depth + 1));
+    }
+  }
+  return out;
+}

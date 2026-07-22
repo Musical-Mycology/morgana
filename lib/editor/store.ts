@@ -4,9 +4,10 @@ import type { ObjectTransform, SceneObject } from "@/engine/deck/types";
 import { flattenBeats, beatLocation, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
 import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
-import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTransform as mUpdateObjectTransform, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject } from "./object-mutations";
-import { uniqueObjectId, findObjectPath, type ObjectPath } from "./object-tree";
+import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTransform as mUpdateObjectTransform, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject, translateObjectBy as mTranslateObjectBy } from "./object-mutations";
+import { uniqueObjectId, findObjectPath, getObjectAt, type ObjectPath } from "./object-tree";
 import { descriptorForObject } from "./object-registry";
+import { togglePath, sameParentSiblings } from "./selection";
 
 const HISTORY_CAP = 50;
 
@@ -15,7 +16,8 @@ interface EditorState {
   beats: FlatBeat[];
   selected: number;
   selectedAction: number | null;
-  selectedObjectPath: ObjectPath | null;
+  selectedObjectPaths: ObjectPath[];
+  enteredGroupPath: ObjectPath | null;
   past: DeckDoc[];
   future: DeckDoc[];
   revision: number;
@@ -23,6 +25,10 @@ interface EditorState {
   select: (i: number) => void;
   selectAction: (i: number | null) => void;
   selectObject: (path: ObjectPath | null) => void;
+  toggleObjectSelection: (path: ObjectPath) => void;
+  setObjectSelection: (paths: ObjectPath[]) => void;
+  enterGroup: (path: ObjectPath) => void;
+  exitGroup: () => void;
   updateAction: (beatIdx: number, actionIdx: number, path: string, value: unknown) => void;
   updateMeta: (path: string, value: unknown) => void;
   undo: () => void;
@@ -41,6 +47,7 @@ interface EditorState {
   addObject: (sceneId: string, kind: SceneObject["kind"], parentPath?: ObjectPath, index?: number) => void;
   updateObject: (sceneId: string, path: ObjectPath, fieldKey: string, value: unknown) => void;
   updateObjectTransform: (sceneId: string, path: ObjectPath, patch: Partial<ObjectTransform>) => void;
+  translateObjectBy: (sceneId: string, path: ObjectPath, dx: number, dy: number) => void;
   deleteObject: (sceneId: string, path: ObjectPath) => void;
   reorderObject: (sceneId: string, path: ObjectPath, dir: -1 | 1) => void;
   groupObjects: (sceneId: string, paths: ObjectPath[]) => void;
@@ -68,17 +75,28 @@ export const useEditor = create<EditorState>((set, get) => ({
   beats: [],
   selected: 0,
   selectedAction: null,
-  selectedObjectPath: null,
+  selectedObjectPaths: [],
+  enteredGroupPath: null,
   past: [],
   future: [],
   revision: 0,
-  load: (doc) => set({ doc, beats: flattenBeats(doc), selected: 0, selectedAction: null, selectedObjectPath: null, past: [], future: [], revision: 0 }),
+  load: (doc) => set({ doc, beats: flattenBeats(doc), selected: 0, selectedAction: null, selectedObjectPaths: [], enteredGroupPath: null, past: [], future: [], revision: 0 }),
   select: (i) => {
     const last = Math.max(0, get().beats.length - 1);
-    set({ selected: Math.min(last, Math.max(0, i)), selectedAction: null, selectedObjectPath: null });
+    set({ selected: Math.min(last, Math.max(0, i)), selectedAction: null, selectedObjectPaths: [], enteredGroupPath: null });
   },
-  selectAction: (i) => set({ selectedAction: i, selectedObjectPath: null }),
-  selectObject: (path) => set({ selectedObjectPath: path, selectedAction: null }),
+  selectAction: (i) => set({ selectedAction: i, selectedObjectPaths: [], enteredGroupPath: null }),
+  selectObject: (path) => set({ selectedObjectPaths: path ? [path] : [], enteredGroupPath: null, selectedAction: null }),
+  toggleObjectSelection: (path) => set((s) => ({ selectedObjectPaths: togglePath(s.selectedObjectPaths, path), selectedAction: null })),
+  setObjectSelection: (paths) => set({ selectedObjectPaths: paths, selectedAction: null }),
+  enterGroup: (path) => set({ enteredGroupPath: path }),
+  exitGroup: () => set((s) => {
+    if (s.enteredGroupPath && s.enteredGroupPath.length > 0) {
+      const up = s.enteredGroupPath.slice(0, -1);
+      return { enteredGroupPath: up.length ? up : null };
+    }
+    return { selectedObjectPaths: [], enteredGroupPath: null };
+  }),
   updateAction: (beatIdx, actionIdx, path, value) => set((s) => {
     if (!s.doc) return {};
     const loc = beatLocation(s.doc, beatIdx);
@@ -99,13 +117,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!s.past.length || !s.doc) return {};
     const doc = s.past[s.past.length - 1];
     const beats = flattenBeats(doc);
-    return { doc, beats, past: s.past.slice(0, -1), future: [s.doc, ...s.future].slice(0, HISTORY_CAP), revision: s.revision + 1, selected: Math.min(s.selected, Math.max(0, beats.length - 1)), selectedAction: null, selectedObjectPath: null };
+    return { doc, beats, past: s.past.slice(0, -1), future: [s.doc, ...s.future].slice(0, HISTORY_CAP), revision: s.revision + 1, selected: Math.min(s.selected, Math.max(0, beats.length - 1)), selectedAction: null, selectedObjectPaths: [], enteredGroupPath: null };
   }),
   redo: () => set((s) => {
     if (!s.future.length || !s.doc) return {};
     const doc = s.future[0];
     const beats = flattenBeats(doc);
-    return { doc, beats, future: s.future.slice(1), past: [...s.past, s.doc].slice(-HISTORY_CAP), revision: s.revision + 1, selected: Math.min(s.selected, Math.max(0, beats.length - 1)), selectedAction: null, selectedObjectPath: null };
+    return { doc, beats, future: s.future.slice(1), past: [...s.past, s.doc].slice(-HISTORY_CAP), revision: s.revision + 1, selected: Math.min(s.selected, Math.max(0, beats.length - 1)), selectedAction: null, selectedObjectPaths: [], enteredGroupPath: null };
   }),
   addBeat: (flatIdx) => set((s) => commit(s, (doc) => insertBeatAfter(doc, flatIdx))),
   duplicateBeat: (flatIdx) => set((s) => commit(s, (doc) => duplicateBeatAt(doc, flatIdx))),
@@ -113,7 +131,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!s.doc) return {};
     const part = commit(s, (doc) => deleteBeatAt(doc, flatIdx));
     if (!part.beats) return {};
-    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null, selectedObjectPath: null };
+    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null, selectedObjectPaths: [], enteredGroupPath: null };
   }),
   moveBeat: (flatIdx, dir) => set((s) => {
     if (!s.doc) return {};
@@ -126,7 +144,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!s.doc) return {};
     const part = commit(s, (doc) => deleteSceneAt(doc, flatIdx));
     if (!part.beats) return {};
-    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null, selectedObjectPath: null };
+    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null, selectedObjectPaths: [], enteredGroupPath: null };
   }),
   addAction: (flatIdx, actionIdx, kind) => set((s) => {
     if (!s.doc) return {};
@@ -136,7 +154,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const newIdx = actionIdx == null ? currentLen : actionIdx + 1;
     const part = commit(s, (doc) => insertActionAfter(doc, flatIdx, actionIdx, kind));
     if (!part.doc) return {};
-    return { ...part, selectedAction: newIdx, selectedObjectPath: null };
+    return { ...part, selectedAction: newIdx, selectedObjectPaths: [], enteredGroupPath: null };
   }),
   duplicateAction: (flatIdx, actionIdx) => set((s) => commit(s, (doc) => duplicateActionAt(doc, flatIdx, actionIdx))),
   deleteAction: (flatIdx, actionIdx) => set((s) => {
@@ -164,20 +182,38 @@ export const useEditor = create<EditorState>((set, get) => ({
     const part = commit(s, (doc) => mAddObject(doc, sceneId, object, parentPath, index));
     if (!part.doc) return {};
     const scene = part.doc.scenes.find((sc) => sc.id === sceneId);
-    return { ...part, selectedObjectPath: scene ? findObjectPath(scene.objects ?? [], object.id) : null, selectedAction: null };
+    const p = scene ? findObjectPath(scene.objects ?? [], object.id) : null;
+    return { ...part, selectedObjectPaths: p ? [p] : [], enteredGroupPath: null, selectedAction: null };
   }),
   updateObject: (sceneId, path, fieldKey, value) => set((s) => commit(s, (doc) => mUpdateObject(doc, sceneId, path, fieldKey, value))),
   updateObjectTransform: (sceneId, path, patch) => set((s) => commit(s, (doc) => mUpdateObjectTransform(doc, sceneId, path, patch))),
+  translateObjectBy: (sceneId, path, dx, dy) => set((s) => commit(s, (doc) => mTranslateObjectBy(doc, sceneId, path, dx, dy))),
   deleteObject: (sceneId, path) => set((s) => {
     const part = commit(s, (doc) => mDeleteObject(doc, sceneId, path));
     if (!part.doc) return {};
-    return { ...part, selectedObjectPath: null };
+    return { ...part, selectedObjectPaths: [], enteredGroupPath: null };
   }),
   reorderObject: (sceneId, path, dir) => set((s) => commit(s, (doc) => mReorderObject(doc, sceneId, path, dir))),
   groupObjects: (sceneId, paths) => set((s) => {
-    if (!s.doc) return {};
-    return commit(s, (doc) => mGroupObjects(doc, sceneId, paths, uniqueObjectId(doc, sceneId)));
+    if (!s.doc || !sameParentSiblings(paths)) return {};
+    const groupId = uniqueObjectId(s.doc, sceneId);
+    const part = commit(s, (doc) => mGroupObjects(doc, sceneId, paths, groupId));
+    if (!part.doc) return {};
+    const scene = part.doc.scenes.find((sc) => sc.id === sceneId);
+    const p = scene ? findObjectPath(scene.objects ?? [], groupId) : null;
+    return { ...part, selectedObjectPaths: p ? [p] : [], enteredGroupPath: null, selectedAction: null };
   }),
-  ungroupObject: (sceneId, path) => set((s) => commit(s, (doc) => mUngroupObject(doc, sceneId, path))),
+  ungroupObject: (sceneId, path) => set((s) => {
+    if (!s.doc) return {};
+    const before = s.doc.scenes.find((sc) => sc.id === sceneId)?.objects ?? [];
+    const target = getObjectAt(before, path);
+    const n = target && target.kind === "group" ? target.children.length : 0;
+    const part = commit(s, (doc) => mUngroupObject(doc, sceneId, path));
+    if (!part.doc) return {};
+    const slot = path[path.length - 1];
+    const parent = path.slice(0, -1);
+    const kids: ObjectPath[] = Array.from({ length: n }, (_, i) => [...parent, slot + i]);
+    return { ...part, selectedObjectPaths: kids, enteredGroupPath: null, selectedAction: null };
+  }),
   reparentObject: (sceneId, from, toParent, toIndex) => set((s) => commit(s, (doc) => mReparentObject(doc, sceneId, from, toParent, toIndex))),
 }));
