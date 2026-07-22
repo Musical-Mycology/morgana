@@ -7,6 +7,7 @@ import { getPath } from "@/lib/editor/paths";
 import { primaryPath } from "@/lib/editor/selection";
 import { objectRefOptions } from "@/lib/editor/object-gating";
 import { Field } from "./Field";
+import { AnimationsPanel } from "./AnimationsPanel";
 
 const CONVERT_KIND_OPTIONS = Object.values(REGISTRY).map((d) => ({ value: d.kind, label: d.label }));
 
@@ -49,6 +50,7 @@ export function Inspector() {
           {d.schema.map((f) => (
             <Field key={f.key} spec={f} value={getPath(obj, f.key)} onChange={(v) => updateObject(sceneId, selectedObjectPath, f.key, v)} />
           ))}
+          <AnimationsPanel sceneId={sceneId} objectPath={selectedObjectPath} />
         </div>
       );
     }
