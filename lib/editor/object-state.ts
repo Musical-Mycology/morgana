@@ -35,6 +35,10 @@ function seed(t: ObjectTransform, opacity: number | undefined, visible: boolean)
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
 
+export const FLY_DY = 0.05;   // flyUp rise, stage-height fraction
+export const SIDE_DX = 0.03;  // fadeSide slide, stage-width fraction
+export const POP_FROM = 0.8;  // pop starting scale
+
 /** Leaf move (group handling added in Task 4). Interpolates present axes current→to. */
 function applyMove(map: ObjectStateMap, a: Extract<Action, { kind: "obj_move" }>, p: number): void {
   const st = map.get(a.target); if (!st) return;
@@ -51,7 +55,12 @@ function applyActionAtProgress(map: ObjectStateMap, a: Action, p: number): void 
   if (a.kind === "obj_reveal") {
     const st = map.get(a.target); if (!st) return;
     st.visible = true;
-    st.opacity = clamp01(p);            // entrance offsets added in Task 3
+    st.opacity = clamp01(p);
+    const inKind = a.in ?? "fade";
+    if (inKind === "flyUp") st.y += (1 - p) * FLY_DY;
+    else if (inKind === "fadeSide") st.x += (1 - p) * SIDE_DX;
+    else if (inKind === "pop") st.scale = POP_FROM + (1 - POP_FROM) * p;
+    // "fade" → opacity only
   } else if (a.kind === "obj_move") {
     applyMove(map, a, p);
   } else if (a.kind === "obj_out") {
