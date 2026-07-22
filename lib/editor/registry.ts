@@ -1,6 +1,6 @@
 import type { Action, TextIn } from "@/engine/deck/types";
 
-export type FieldType = "text" | "textarea" | "number" | "select" | "range" | "checkbox";
+export type FieldType = "text" | "textarea" | "number" | "select" | "range" | "checkbox" | "objectRef";
 export interface Field { key: string; label: string; type: FieldType; options?: { value: string; label: string }[]; min?: number; max?: number; step?: number; }
 export interface EffectDescriptor { kind: string; label: string; icon: string; schema: Field[]; seekable: boolean; defaults(): Action; }
 
@@ -78,6 +78,24 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
     { key: "to.y", label: "To Y", type: "number", min: 0, max: 1, step: 0.01 },
     { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
   ], defaults: () => ({ kind: "media_move", id: "m-1", to: { x: 0.5, y: 0.5 } }) },
+  obj_reveal: { kind: "obj_reveal", label: "Reveal object", icon: "ti-eye", seekable: true, schema: [
+    { key: "target", label: "Object", type: "objectRef" },
+    { key: "in", label: "Entrance", type: "select", options: MEDIA_INS.map((v) => ({ value: v, label: v })) },
+    { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
+  ], defaults: () => ({ kind: "obj_reveal", target: "", in: "fade" }) },
+  obj_move: { kind: "obj_move", label: "Move object", icon: "ti-arrows-move", seekable: true, schema: [
+    { key: "target", label: "Object", type: "objectRef" },
+    { key: "to.x", label: "To X", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "to.y", label: "To Y", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "to.w", label: "To W", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "to.h", label: "To H", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "to.rot", label: "To rotation°", type: "number", step: 1 },
+    { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
+  ], defaults: () => ({ kind: "obj_move", target: "", to: {} }) },
+  obj_out: { kind: "obj_out", label: "Remove object", icon: "ti-square-rounded-x", seekable: true, schema: [
+    { key: "target", label: "Object", type: "objectRef" },
+    { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
+  ], defaults: () => ({ kind: "obj_out", target: "" }) },
 };
 
 const GENERIC = (kind: string): EffectDescriptor => ({

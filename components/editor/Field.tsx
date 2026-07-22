@@ -22,8 +22,8 @@ export function Field({ spec, value, onChange }: { spec: FieldSpec; value: unkno
           value={String(value ?? "")}
           onChange={(e) => onChange(e.target.value)}
         />
-      ) : spec.type === "select" ? (
-        <select style={base} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}>
+      ) : spec.type === "select" || spec.type === "objectRef" ? (
+        <select data-testid={`field-${spec.key}`} style={base} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)}>
           {spec.options?.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}

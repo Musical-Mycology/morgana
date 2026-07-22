@@ -37,6 +37,9 @@ export function actionDuration(a: Action): number {
     case "media": return (a.durationMs ?? 600) / 1000;
     case "media_move": return (a.durationMs ?? 800) / 1000;
     case "media_out": return (a.durationMs ?? 500) / 1000;
+    case "obj_reveal": return (a.durationMs ?? 600) / 1000;
+    case "obj_move": return (a.durationMs ?? 800) / 1000;
+    case "obj_out": return (a.durationMs ?? 500) / 1000;
     default: return 0; // art / notes / nightlight / clear / gates: instantaneous side-effects
   }
 }

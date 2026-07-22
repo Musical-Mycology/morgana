@@ -5,7 +5,9 @@ import { descriptorForObject } from "@/lib/editor/object-registry";
 import { getObjectAt } from "@/lib/editor/object-tree";
 import { getPath } from "@/lib/editor/paths";
 import { primaryPath } from "@/lib/editor/selection";
+import { objectRefOptions } from "@/lib/editor/object-gating";
 import { Field } from "./Field";
+import { AnimationsPanel } from "./AnimationsPanel";
 
 const CONVERT_KIND_OPTIONS = Object.values(REGISTRY).map((d) => ({ value: d.kind, label: d.label }));
 
@@ -48,6 +50,7 @@ export function Inspector() {
           {d.schema.map((f) => (
             <Field key={f.key} spec={f} value={getPath(obj, f.key)} onChange={(v) => updateObject(sceneId, selectedObjectPath, f.key, v)} />
           ))}
+          <AnimationsPanel sceneId={sceneId} objectPath={selectedObjectPath} />
         </div>
       );
     }
@@ -72,9 +75,12 @@ export function Inspector() {
         </select>
       </div>
       {d.schema.length === 0 && <p style={{ opacity: 0.6, fontSize: 12 }}>No editable fields.</p>}
-      {d.schema.map((f) => (
-        <Field key={f.key} spec={f} value={getPath(action, f.key)} onChange={(v) => updateAction(selected, selectedAction!, f.key, v)} />
-      ))}
+      {d.schema.map((f) => {
+        const spec = f.type === "objectRef"
+          ? { ...f, options: objectRefOptions(doc?.scenes.find((sc) => sc.id === sceneId)) }
+          : f;
+        return <Field key={f.key} spec={spec} value={getPath(action, f.key)} onChange={(v) => updateAction(selected, selectedAction!, f.key, v)} />;
+      })}
     </div>
   );
 }
