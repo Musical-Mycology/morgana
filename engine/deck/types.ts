@@ -157,6 +157,13 @@ export type Action =
   | { kind: "media"; id: string; pos: StagePoint; src?: string; label?: string; width?: number; in?: MediaIn; round?: boolean; durationMs?: number; panel?: PanelSpec }
   | { kind: "media_move"; id: string; to: StagePoint; scale?: number; durationMs?: number }
   | { kind: "media_out"; id?: string; durationMs?: number }
+  // Object animation verbs (sub-project #3a). Each targets a Scene.objects node by its
+  // scene-unique `id`. reveal = entrance, move = emphasis (move/scale/rotate), out = exit.
+  // An object referenced by an obj_reveal anywhere in the scene starts hidden until that
+  // reveal fires; an object no obj_reveal targets is visible from scene start.
+  | { kind: "obj_reveal"; target: string; in?: MediaIn; durationMs?: number }
+  | { kind: "obj_move"; target: string; to: ObjectMoveTarget; durationMs?: number }
+  | { kind: "obj_out"; target: string; out?: ObjectOut; durationMs?: number }
   // Reveal the closing "Watch again" button. The fin beat keeps it hidden until
   // this fires (mirrors reveal_arrows).
   | { kind: "reveal_again" };
@@ -187,6 +194,13 @@ export interface ObjectTransform {
   rot?: number;           // degrees clockwise, default 0
   anchor?: ObjectAnchor;  // rotation/scale origin, default "center"
 }
+
+/** Partial object transform for obj_move: unspecified axes are left unchanged.
+ *  x,y,w,h are 0–1 fractions of the stage; rot is degrees clockwise. */
+export interface ObjectMoveTarget { x?: number; y?: number; w?: number; h?: number; rot?: number }
+
+/** How an object exits (obj_out). Single member for now; extensible. */
+export type ObjectOut = "fade";
 
 /** Fields shared by every first-class object kind. */
 export interface ObjectBase {
