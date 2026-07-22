@@ -17,7 +17,7 @@ describe("objectStateAt — seed & gating at t=0", () => {
   });
 
   it("seeds a gated object (targeted by an obj_reveal anywhere) hidden at t=0 before its reveal", () => {
-    const s = scene([obj("a")], [[{ kind: "obj_reveal", target: "a" }]]);
+    const s = scene([obj("a")], [[{ kind: "wait", ms: 500 }, { kind: "obj_reveal", target: "a" }]]);
     expect(objectStateAt(s, 0, 0).get("a")!.visible).toBe(false);
   });
 
