@@ -1,4 +1,5 @@
 import { isPrefix, type ObjectPath } from "./object-tree";
+import type { SceneObject } from "@/engine/deck/types";
 
 /** Value-equality for two ObjectPaths (null/undefined are never equal to anything). */
 export function pathsEqual(a: ObjectPath | null | undefined, b: ObjectPath | null | undefined): boolean {
@@ -37,4 +38,28 @@ export function sameParentSiblings(paths: ObjectPath[]): boolean {
 export function resolveCanvasSelection(hitPath: ObjectPath, enteredGroupPath: ObjectPath | null): ObjectPath {
   const ctx = enteredGroupPath && isPrefix(enteredGroupPath, hitPath) ? enteredGroupPath.length : 0;
   return hitPath.slice(0, Math.min(ctx + 1, hitPath.length));
+}
+
+export interface PanelRow { obj: SceneObject; path: ObjectPath; depth: number }
+
+/** Rows for the layers panel: depth-first, per-level reversed (front-of-z first —
+ *  Photoshop order), skipping the children of collapsed groups. A group header row is
+ *  emitted directly above its (indented) children. Paths remain canonical document
+ *  indices; only display order is reversed. */
+export function flattenForPanel(
+  objects: SceneObject[],
+  collapsed: Set<string>,
+  base: ObjectPath = [],
+  depth = 0,
+): PanelRow[] {
+  const out: PanelRow[] = [];
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    const path = [...base, i];
+    out.push({ obj, path, depth });
+    if (obj.kind === "group" && !collapsed.has(obj.id)) {
+      out.push(...flattenForPanel(obj.children, collapsed, path, depth + 1));
+    }
+  }
+  return out;
 }

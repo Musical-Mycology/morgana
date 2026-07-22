@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 import { pathsEqual, pathInList, primaryPath, togglePath, sameParentSiblings } from "@/lib/editor/selection";
 import { resolveCanvasSelection } from "@/lib/editor/selection";
+import { flattenForPanel } from "@/lib/editor/selection";
+import type { SceneObject } from "@/engine/deck/types";
 
 test("pathsEqual compares by value and handles null/undefined", () => {
   expect(pathsEqual([0, 1], [0, 1])).toBe(true);
@@ -52,4 +54,28 @@ test("resolveCanvasSelection inside an entered group selects that group's direct
 test("resolveCanvasSelection ignores an entered group the hit is not inside", () => {
   // entered [1] but hit is under root object [2] -> resolve at root
   expect(resolveCanvasSelection([2, 0], [1])).toEqual([2]);
+});
+
+const T = { x: 0, y: 0, w: 0.1, h: 0.1 };
+const tree = (): SceneObject[] => [
+  { id: "A", kind: "shape", shape: "rect", transform: { ...T } },
+  { id: "G", kind: "group", transform: { ...T }, children: [
+    { id: "c0", kind: "shape", shape: "rect", transform: { ...T } },
+    { id: "c1", kind: "shape", shape: "rect", transform: { ...T } },
+  ] },
+  { id: "B", kind: "shape", shape: "rect", transform: { ...T } },
+];
+
+test("flattenForPanel is front-of-z first with the group header above its children", () => {
+  const rows = flattenForPanel(tree(), new Set());
+  expect(rows.map((r) => r.obj.id)).toEqual(["B", "G", "c1", "c0", "A"]);
+  // paths stay canonical (document indices), depth reflects nesting
+  expect(rows.find((r) => r.obj.id === "c1")!.path).toEqual([1, 1]);
+  expect(rows.find((r) => r.obj.id === "c1")!.depth).toBe(1);
+  expect(rows.find((r) => r.obj.id === "G")!.depth).toBe(0);
+});
+
+test("flattenForPanel skips a collapsed group's children", () => {
+  const rows = flattenForPanel(tree(), new Set(["G"]));
+  expect(rows.map((r) => r.obj.id)).toEqual(["B", "G", "A"]);
 });
