@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState, type RefObject } from "react";
+import { useState, type RefObject } from "react";
 import { useEditor } from "@/lib/editor/store";
 import type { SceneObject, TextObjectStyle, ObjectTransform } from "@/engine/deck/types";
 import type { ObjectPath } from "@/lib/editor/object-tree";
