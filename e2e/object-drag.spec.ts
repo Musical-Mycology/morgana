@@ -21,18 +21,13 @@ test("dragging an object body moves it and commits one undoable change", async (
   await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.6, { steps: 8 });
   await page.mouse.up();
 
-  // inspector now shows the object's transform.x > 0.5 (X field is the 3rd number input after w/h ordering may vary — assert via any input reflecting > 0.5)
-  const xField = page.getByTestId("inspector").locator('input[type="number"]');
-  await expect.poll(async () => {
-    const vals = await xField.evaluateAll((els) => els.map((e) => Number((e as HTMLInputElement).value)));
-    return Math.max(...vals);
-  }).toBeGreaterThan(0.5);
+  // the object div's inline `left` reflects the committed transform.x (as a percentage),
+  // set from ObjectsLayer's `style.left = ${eff.x * 100}%` after pointer-up commits the drag.
+  const readLeftPct = () => obj.evaluate((el) => parseFloat((el as HTMLElement).style.left));
+  await expect.poll(readLeftPct).toBeGreaterThan(50);
 
-  // one undo returns it near its origin
+  // one undo returns it near its seeded origin (x: 0.1 -> "10%")
   await page.getByTestId("undo").click();
-  await expect.poll(async () => {
-    const vals = await xField.evaluateAll((els) => els.map((e) => Number((e as HTMLInputElement).value)));
-    return Math.max(...vals);
-  }).toBeLessThan(0.2);
+  await expect.poll(readLeftPct).toBeLessThan(20);
   await request.delete(`/api/decks/${id}`);
 });

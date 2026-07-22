@@ -83,7 +83,8 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
                   const nx = Number((f.x - off.x).toFixed(3));
                   const ny = Number((f.y - off.y).toFixed(3));
                   // a pure click (no net movement) must not create a history entry / autosave
-                  if (nx !== t.x || ny !== t.y) {
+                  // (round both sides the same way so a >3-decimal stored transform can't spuriously commit)
+                  if (nx !== Number(t.x.toFixed(3)) || ny !== Number(t.y.toFixed(3))) {
                     updateObjectTransform(sceneId!, path, { x: nx, y: ny });
                   }
                 }
