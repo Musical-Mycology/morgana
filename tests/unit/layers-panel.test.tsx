@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { LayersPanel } from "@/components/editor/LayersPanel";
 import { useEditor } from "@/lib/editor/store";
 import { primaryPath } from "@/lib/editor/selection";
@@ -49,4 +49,33 @@ test("the primary row is aria-current", () => {
   render(<LayersPanel />);
   fireEvent.click(rowFor("a"));
   expect(rowFor("a").getAttribute("aria-current")).toBe("true");
+});
+
+const toggleIn = (id: string, testid: string) => fireEvent.click(within(rowFor(id)).getByTestId(testid));
+
+test("the hide toggle flips the object's hidden flag", () => {
+  render(<LayersPanel />);
+  toggleIn("a", "layer-hide");
+  expect(useEditor.getState().doc!.scenes[0].objects![0].hidden).toBe(true);
+});
+
+test("the lock toggle flips the object's locked flag", () => {
+  render(<LayersPanel />);
+  toggleIn("a", "layer-lock");
+  expect(useEditor.getState().doc!.scenes[0].objects![0].locked).toBe(true);
+});
+
+test("collapsing a group hides its children in the tree", () => {
+  render(<LayersPanel />);
+  toggleIn("g", "layer-collapse");
+  expect(rows().map((r) => r.getAttribute("data-obj-id"))).toEqual(["b", "g", "a"]);
+});
+
+test("double-clicking a row name commits a rename on Enter", () => {
+  render(<LayersPanel />);
+  fireEvent.doubleClick(within(rowFor("a")).getByTestId("layer-name"));
+  const input = screen.getByTestId("layer-rename-input") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "Backdrop" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(useEditor.getState().doc!.scenes[0].objects![0].name).toBe("Backdrop");
 });
