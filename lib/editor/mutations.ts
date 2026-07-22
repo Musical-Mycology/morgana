@@ -100,6 +100,14 @@ export function insertActionAfter(doc: DeckDoc, flatIdx: number, actionIdx: numb
   });
 }
 
+/** Insert a pre-built action at `index` in the flat beat's timeline. */
+export function insertActionAt(doc: DeckDoc, flatIdx: number, index: number, action: Action): DeckDoc {
+  return mapBeat(doc, flatIdx, (b) => {
+    const at = Math.max(0, Math.min(index, b.timeline.length));
+    return { ...b, timeline: [...b.timeline.slice(0, at), action, ...b.timeline.slice(at)] };
+  });
+}
+
 export function duplicateActionAt(doc: DeckDoc, flatIdx: number, actionIdx: number): DeckDoc {
   return mapBeat(doc, flatIdx, (b) => {
     if (actionIdx < 0 || actionIdx >= b.timeline.length) return b;
