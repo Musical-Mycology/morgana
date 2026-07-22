@@ -7,7 +7,7 @@ import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene
 import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTransform as mUpdateObjectTransform, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject, translateObjectBy as mTranslateObjectBy } from "./object-mutations";
 import { uniqueObjectId, findObjectPath, getObjectAt, type ObjectPath } from "./object-tree";
 import { descriptorForObject } from "./object-registry";
-import { primaryPath, togglePath, sameParentSiblings } from "./selection";
+import { togglePath, sameParentSiblings } from "./selection";
 
 const HISTORY_CAP = 50;
 
