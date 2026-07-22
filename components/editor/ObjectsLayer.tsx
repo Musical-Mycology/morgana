@@ -25,12 +25,20 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
   const selected = useEditor((s) => s.selected);
   const beats = useEditor((s) => s.beats);
   const selectedObjectPath = useEditor((s) => s.selectedObjectPath);
+  const selectObject = useEditor((s) => s.selectObject);
   const sceneId = beats[selected]?.sceneId;
   const objects = doc?.scenes.find((sc) => sc.id === sceneId)?.objects ?? [];
   if (!objects.length) return null;
 
   return (
     <div className="ed__objects" style={{ position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>
+      {selectedObjectPath && (
+        <div
+          data-testid="objects-deselect"
+          style={{ position: "absolute", inset: 0, pointerEvents: "auto" }}
+          onPointerDown={() => selectObject(null)}
+        />
+      )}
       {flatten(objects).map(({ obj, path }) => {
         if (obj.hidden) return null;
         if (obj.kind === "group" && !pathEq(selectedObjectPath, path)) return null; // groups draw only when selected
@@ -42,7 +50,14 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
           opacity: obj.opacity ?? 1,
         };
         return (
-          <div key={obj.id} data-testid="obj" data-obj-id={obj.id} className={`ed__obj ed__obj--${obj.kind}${selectedCls}`} style={style}>
+          <div
+            key={obj.id}
+            data-testid="obj"
+            data-obj-id={obj.id}
+            className={`ed__obj ed__obj--${obj.kind}${selectedCls}`}
+            onPointerDown={(e) => { if (obj.locked) return; e.stopPropagation(); selectObject(path); }}
+            style={{ ...style, pointerEvents: obj.locked ? "none" : "auto", cursor: "move" }}
+          >
             {renderContent(obj)}
           </div>
         );
