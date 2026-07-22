@@ -113,7 +113,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!s.doc) return {};
     const part = commit(s, (doc) => deleteBeatAt(doc, flatIdx));
     if (!part.beats) return {};
-    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null };
+    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null, selectedObjectPath: null };
   }),
   moveBeat: (flatIdx, dir) => set((s) => {
     if (!s.doc) return {};
@@ -126,7 +126,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!s.doc) return {};
     const part = commit(s, (doc) => deleteSceneAt(doc, flatIdx));
     if (!part.beats) return {};
-    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null };
+    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null, selectedObjectPath: null };
   }),
   addAction: (flatIdx, actionIdx, kind) => set((s) => {
     if (!s.doc) return {};
@@ -136,7 +136,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     const newIdx = actionIdx == null ? currentLen : actionIdx + 1;
     const part = commit(s, (doc) => insertActionAfter(doc, flatIdx, actionIdx, kind));
     if (!part.doc) return {};
-    return { ...part, selectedAction: newIdx };
+    return { ...part, selectedAction: newIdx, selectedObjectPath: null };
   }),
   duplicateAction: (flatIdx, actionIdx) => set((s) => commit(s, (doc) => duplicateActionAt(doc, flatIdx, actionIdx))),
   deleteAction: (flatIdx, actionIdx) => set((s) => {

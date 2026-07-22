@@ -61,6 +61,7 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
             className={`ed__obj ed__obj--${obj.kind}${selectedCls}`}
             onPointerDown={(e) => {
               if (obj.locked) return;
+              e.preventDefault();
               e.stopPropagation();
               selectObject(path);
               const rect = hostRef.current?.getBoundingClientRect();
@@ -115,7 +116,7 @@ function renderContent(obj: SceneObject) {
       );
     case "image":
       return obj.src
-        ? <img src={obj.src} alt="" style={{ width: "100%", height: "100%", objectFit: obj.fit ?? "contain", borderRadius: obj.round ? "50%" : 0 }} />
+        ? <img src={obj.src} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: obj.fit ?? "contain", borderRadius: obj.round ? "50%" : 0 }} />
         : <span className="ed__obj-ph">image</span>;
     case "shape": {
       const stroke = obj.stroke ? `${Math.max(1, obj.stroke.width * 400)}px solid ${obj.stroke.color}` : undefined;

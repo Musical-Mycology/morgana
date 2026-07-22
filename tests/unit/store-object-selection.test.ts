@@ -41,3 +41,22 @@ test("load clears object selection", () => {
   useEditor.getState().load(base());
   expect(useEditor.getState().selectedObjectPath).toBeNull();
 });
+
+test("addAction clears selectedObjectPath", () => {
+  useEditor.getState().selectObject([0]);
+  useEditor.getState().addAction(0, null, "text");
+  expect(useEditor.getState().selectedObjectPath).toBeNull();
+  expect(useEditor.getState().selectedAction).not.toBeNull();
+});
+
+test("deleteBeat clears selectedObjectPath", () => {
+  useEditor.getState().selectObject([0]);
+  useEditor.getState().deleteBeat(0);
+  expect(useEditor.getState().selectedObjectPath).toBeNull();
+});
+
+test("deleteScene clears selectedObjectPath", () => {
+  useEditor.getState().selectObject([0]);
+  useEditor.getState().deleteScene(0);
+  expect(useEditor.getState().selectedObjectPath).toBeNull();
+});
