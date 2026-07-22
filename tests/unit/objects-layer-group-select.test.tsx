@@ -10,6 +10,7 @@ const doc = (): DeckDoc => ({ version: 1, meta: { id: "d", title: "D" }, scenes:
   { id: "s1", objects: [
     { id: "g", kind: "group", transform: { x: 0.1, y: 0.1, w: 0.4, h: 0.4 }, children: [
       { id: "c0", kind: "shape", shape: "rect", transform: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 } },
+      { id: "c1", kind: "shape", shape: "rect", transform: { x: 0.2, y: 0.2, w: 0.1, h: 0.1 } },
     ] },
     { id: "solo", kind: "shape", shape: "rect", transform: { x: 0.7, y: 0.7, w: 0.1, h: 0.1 } },
   ], beats: [{ id: "b1", timeline: [] }] },
@@ -40,4 +41,13 @@ test("the resize/rotate overlay is suppressed while multiple objects are selecte
   useEditor.getState().setObjectSelection([[0], [1]]);
   render(<ObjectsLayer hostRef={createRef<HTMLDivElement>()} />);
   expect(screen.queryByTestId("obj-selection")).toBeNull();
+});
+
+test("single-clicking a sibling child inside an entered group keeps the group context entered", () => {
+  useEditor.getState().setObjectSelection([[0, 0]]);
+  useEditor.getState().enterGroup([0]);
+  render(<ObjectsLayer hostRef={createRef<HTMLDivElement>()} />);
+  fireEvent.pointerDown(boxFor("c1"));
+  expect(useEditor.getState().enteredGroupPath).toEqual([0]);
+  expect(primaryPath(useEditor.getState().selectedObjectPaths)).toEqual([0, 1]);
 });

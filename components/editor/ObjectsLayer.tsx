@@ -3,7 +3,7 @@ import { useState, type RefObject } from "react";
 import { useEditor } from "@/lib/editor/store";
 import type { SceneObject, TextObjectStyle, ObjectTransform } from "@/engine/deck/types";
 import type { ObjectPath } from "@/lib/editor/object-tree";
-import { getObjectAt } from "@/lib/editor/object-tree";
+import { getObjectAt, isPrefix } from "@/lib/editor/object-tree";
 import { pointerFraction, round3, transformChanged } from "@/lib/editor/object-drag";
 import { usePointerDrag } from "@/lib/editor/usePointerDrag";
 import { SelectionOverlay } from "./SelectionOverlay";
@@ -51,7 +51,9 @@ export function ObjectsLayer({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
     if (obj.locked) return;
     const resolved = resolveCanvasSelection(path, enteredGroupPath);
     if (e.shiftKey || e.metaKey || e.ctrlKey) { toggleObjectSelection(resolved); return; }
+    const stayEntered = !!enteredGroupPath && isPrefix(enteredGroupPath, resolved) && resolved.length > enteredGroupPath.length;
     selectObject(resolved);
+    if (stayEntered && enteredGroupPath) enterGroup(enteredGroupPath);
     const targetPath = resolved;
     const targetObj = getObjectAt(objects, targetPath) ?? obj;
     const t = targetObj.transform;
