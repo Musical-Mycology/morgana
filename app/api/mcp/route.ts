@@ -1,6 +1,6 @@
 import { dispatch } from "@/lib/mcp/dispatch";
 import { verifyToken } from "@/lib/store/mcp-auth";
-import { errorResponse, INVALID_REQUEST, PARSE_ERROR, type JsonRpcRequest } from "@/lib/mcp/jsonrpc";
+import { errorResponse, INTERNAL_ERROR, INVALID_REQUEST, PARSE_ERROR, type JsonRpcRequest } from "@/lib/mcp/jsonrpc";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,8 +31,12 @@ export async function POST(req: Request) {
       responses.push(errorResponse(msg?.id ?? null, INVALID_REQUEST, "invalid JSON-RPC message"));
       continue;
     }
-    const res = await dispatch(msg);
-    if (res) responses.push(res);
+    try {
+      const res = await dispatch(msg);
+      if (res) responses.push(res);
+    } catch (err) {
+      responses.push(errorResponse(msg?.id ?? null, INTERNAL_ERROR, err instanceof Error ? err.message : String(err)));
+    }
   }
 
   if (responses.length === 0) return new Response(null, { status: 202 });
