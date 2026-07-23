@@ -380,6 +380,14 @@ third-party plugin runtime is **Tier 3**.
 
 ## 12. In-app AI assistant (authenticated, tool-driven)
 
+> **Superseded 2026-07-23** — see [`docs/superpowers/specs/2026-07-23-morgana-mcp-server-design.md`](superpowers/specs/2026-07-23-morgana-mcp-server-design.md).
+> The auth model this section assumed ("Log in with Claude" OAuth for third-party apps) does not
+> exist as a public Anthropic product. The shipped design instead makes Morgana an MCP server that
+> the user's own Claude client (claude.ai/Desktop) connects to directly — no Anthropic credential
+> ever passes through Morgana. The rest of this section is kept for its guardrail/UX thinking
+> (batched undo, confirm-gated destructive ops), which may still be relevant if a public third-party
+> Claude sign-in product appears and an in-app docked assistant becomes buildable.
+
 **Vision.** A **docked AI assistant** inside the editor — no window-switching — that can help while
 you author: answer questions about the current deck, draft and restructure beats, write and
 choreograph timelines, suggest effects, and fix validation issues. It operates **only through the
