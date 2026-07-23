@@ -27,9 +27,8 @@ Given that, and given the explicit preference to have **no Anthropic credential 
 ### 1.1 In scope
 
 1. A Streamable HTTP MCP server mounted in the Next.js app, exposing:
-   - A read tool for current deck state.
-   - One MCP tool per existing pure mutation in `lib/editor/mutations.ts` and the relevant `store.ts` update methods.
-   - A deck-selection tool (list/switch), since Morgana already supports multiple decks.
+   - A read tool for current deck state, plus a `list_decks` tool.
+   - One MCP tool per existing pure mutation in `lib/editor/mutations.ts` and the relevant `store.ts` update methods. Since the server is stateless per HTTP request (no session tying a connection to "the current deck"), every tool takes a `deck_id` argument directly rather than modeling deck switching as server-side state — simpler than the "switch_deck" sketch below and needs no new backend concept beyond what `list_decks` already exposes.
 2. Bearer-token auth for the MCP endpoint: generated on first run, viewable/regenerable from a settings panel, required on every MCP request.
 3. A minimal settings/status panel in the editor UI: server URL + token display, regenerate action, connection status if the transport exposes it. **Not** a chat UI.
 4. MCP tool annotations (`destructiveHint` etc.) on destructive tools so the connecting host (claude.ai/Desktop) applies its own confirmation UX.
@@ -66,12 +65,12 @@ Given that, and given the explicit preference to have **no Anthropic credential 
                     │       ▼                         │
                     │  Existing editor UI              │
                     │  (filmstrip/canvas/timeline)      │
-                    │  — re-renders on the same store   │
-                    │    change, no new sync layer       │
+                    │  — reloads when it polls and       │
+                    │    notices the file changed        │
                     └─────────────────────────────┘
 ```
 
-Key property: **the MCP tool handlers are a second caller of the exact same mutation functions the UI already calls.** There is no parallel data path, no new persistence format, no new validation rules — an MCP-driven edit is indistinguishable, at the data layer, from a human clicking the same button.
+Key property: **the MCP tool handlers are a second caller of the exact same mutation functions the UI already calls**, but against the *persisted* `DeckDoc` (`lib/store/deck-store.ts`), not the browser's in-memory `useEditor` Zustand store — that store is browser-only, loaded once on mount, with no existing mechanism to notice an external file write. There is no parallel mutation path or new persistence format, but there **is** a small new sync mechanism: the editor polls the deck's on-disk mtime and offers a non-destructive "reload?" prompt when it moves without a matching local save (§6). This was not obvious going in — an earlier draft of this spec assumed the browser would "just" pick up external edits, which isn't true given how `app/editor/page.tsx` loads a deck.
 
 ## 3. Tool surface
 
@@ -79,8 +78,8 @@ Each tool wraps one existing pure function. `input_schema` is generated from the
 
 | Tool | Wraps | Notes |
 | --- | --- | --- |
-| `read_deck` | current `DeckDoc` (via store) | Full JSON; a later refinement could add scoped `get_scene`/`get_beat` if payload size becomes an issue — not needed for the initial deck sizes Morgana targets. |
-| `list_decks` / `switch_deck` | existing deck-switcher backend | Multi-deck support already exists (Tier 1.5). |
+| `read_deck` | current `DeckDoc` (via store), given `deck_id` | Full JSON; a later refinement could add scoped `get_scene`/`get_beat` if payload size becomes an issue — not needed for the initial deck sizes Morgana targets. |
+| `list_decks` | existing deck listing | Every other tool also takes `deck_id` directly (see §2) — there's no separate "switch" tool or server-side current-deck state. |
 | `insert_beat_after`, `duplicate_beat_at`, `delete_beat_at`, `move_beat_by` | `mutations.ts` | |
 | `append_scene`, `delete_scene_at` | `mutations.ts` | `delete_scene_at` marked `destructiveHint`. |
 | `insert_action_after`, `insert_action_at`, `duplicate_action_at`, `delete_action_at`, `move_action_by`, `convert_action_kind` | `mutations.ts` | `delete_action_at` marked `destructiveHint`. |
@@ -108,7 +107,7 @@ A new settings section (not a new top-level page) showing:
 - Bearer token, masked by default, with reveal/copy/regenerate
 - A short "how to connect" blurb linking to the in-repo guide (§8)
 
-No chat transcript, no message history, no streaming — Claude's own client is where the conversation happens. The editor's existing live-update behavior (Zustand store → re-render) is the only "sync" mechanism, and it's unchanged from today.
+No chat transcript, no message history, no streaming — Claude's own client is where the conversation happens. What **is** new: since the browser's editor state doesn't otherwise notice an MCP-driven edit landing on disk, the open tab polls the deck's mtime (a small new endpoint, `GET /api/decks/[id]/meta`) and shows a "deck changed externally — reload?" banner rather than silently clobbering either side. This is deliberately non-destructive rather than an auto-reload, so a human mid-edit in the browser is never silently overwritten by a Claude-driven change landing at the same time.
 
 ## 7. Testing
 
