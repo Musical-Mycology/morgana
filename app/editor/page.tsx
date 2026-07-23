@@ -11,6 +11,7 @@ import { Timeline } from "@/components/editor/Timeline";
 import { Inspector } from "@/components/editor/Inspector";
 import { DeckSettings } from "@/components/editor/DeckSettings";
 import { ExportPanel } from "@/components/editor/ExportPanel";
+import { McpPanel } from "@/components/editor/McpPanel";
 import { primaryPath } from "@/lib/editor/selection";
 
 const STATUS_LABEL: Record<SaveStatus, string> = { idle: "", saving: "Saving…", saved: "Saved", error: "Save failed" };
@@ -31,7 +32,7 @@ export default function Editor() {
   const selectedObjectPath = primaryPath(selectedObjectPaths);
   const canvasRef = useRef<CanvasHandle>(null);
   const [time, setTime] = useState({ t: 0, duration: 0 });
-  type Panel = "inspector" | "settings" | "export";
+  type Panel = "inspector" | "settings" | "export" | "mcp";
   const [panel, setPanel] = useState<Panel>("inspector");
   const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? "inspector" : p));
   const [loadError, setLoadError] = useState(false);
@@ -78,6 +79,7 @@ export default function Editor() {
         <button className="ed__pill ed__pill--ghost" data-testid="redo" disabled={!canRedo} onClick={() => redo()}>↷ Redo</button>
         <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => togglePanel("settings")}>Deck settings</button>
         <button className="ed__pill ed__pill--ghost" data-testid="export-toggle" onClick={() => togglePanel("export")}>Export</button>
+        <button className="ed__pill ed__pill--ghost" data-testid="mcp-toggle" onClick={() => togglePanel("mcp")}>Connect Claude</button>
         <span data-testid="save-status" style={{ marginLeft: "auto", color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
       </div>
       <div className="ed__leftdock">
@@ -86,7 +88,7 @@ export default function Editor() {
       </div>
       <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} /></div>
       <Timeline canvasRef={canvasRef} time={time} />
-      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : <Inspector />}
+      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : <Inspector />}
     </div>
   );
 }
