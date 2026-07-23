@@ -11,7 +11,9 @@ import { Timeline } from "@/components/editor/Timeline";
 import { Inspector } from "@/components/editor/Inspector";
 import { DeckSettings } from "@/components/editor/DeckSettings";
 import { ExportPanel } from "@/components/editor/ExportPanel";
+import { McpPanel } from "@/components/editor/McpPanel";
 import { primaryPath } from "@/lib/editor/selection";
+import { useExternalChangePoll } from "@/lib/editor/use-external-change-poll";
 
 const STATUS_LABEL: Record<SaveStatus, string> = { idle: "", saving: "Saving…", saved: "Saved", error: "Save failed" };
 
@@ -31,18 +33,24 @@ export default function Editor() {
   const selectedObjectPath = primaryPath(selectedObjectPaths);
   const canvasRef = useRef<CanvasHandle>(null);
   const [time, setTime] = useState({ t: 0, duration: 0 });
-  type Panel = "inspector" | "settings" | "export";
+  type Panel = "inspector" | "settings" | "export" | "mcp";
   const [panel, setPanel] = useState<Panel>("inspector");
   const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? "inspector" : p));
   const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<SaveStatus>("idle");
 
+  const [deckId, setDeckId] = useState<string | null>(null);
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("deck") ?? "demo";
+    setDeckId(id);
     loadDeck(id).then(load).catch((e) => { console.error("failed to load deck", e); setLoadError(true); });
   }, [load]);
 
-  const onStatus = useCallback((s: SaveStatus) => setStatus(s), []);
+  const externalChange = useExternalChangePoll(deckId);
+  const onStatus = useCallback((s: SaveStatus) => {
+    setStatus(s);
+    if (s === "saved") externalChange.resync();
+  }, [externalChange]);
   useAutosave(doc, revision, onStatus);
 
   const selectedFlat = beats[selected] ?? null;
@@ -69,8 +77,19 @@ export default function Editor() {
   }, [undo, redo, selectedObjectPath, sceneId, deleteObject, exitGroup, selectedObjectPaths]);
 
   const onTime = useCallback((t: number, duration: number) => setTime({ t, duration }), []);
+  const onReloadExternal = useCallback(() => {
+    if (!deckId) return;
+    loadDeck(deckId).then(load).then(() => externalChange.resync());
+  }, [deckId, load, externalChange]);
   return (
     <div className="ed">
+      {externalChange.changed && (
+        <div className="ed__pill ed__pill--ghost" data-testid="external-change-banner" style={{ position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 10 }}>
+          Deck changed externally.{" "}
+          <button data-testid="external-change-reload" onClick={onReloadExternal}>Reload</button>{" "}
+          <button data-testid="external-change-dismiss" onClick={externalChange.dismiss}>Dismiss</button>
+        </div>
+      )}
       <div className="ed__bar">
         <span className="ed__brand">Morgana</span>
         <span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? (loadError ? "couldn't load deck" : "no deck")}</span>
@@ -78,6 +97,7 @@ export default function Editor() {
         <button className="ed__pill ed__pill--ghost" data-testid="redo" disabled={!canRedo} onClick={() => redo()}>↷ Redo</button>
         <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => togglePanel("settings")}>Deck settings</button>
         <button className="ed__pill ed__pill--ghost" data-testid="export-toggle" onClick={() => togglePanel("export")}>Export</button>
+        <button className="ed__pill ed__pill--ghost" data-testid="mcp-toggle" onClick={() => togglePanel("mcp")}>Connect Claude</button>
         <span data-testid="save-status" style={{ marginLeft: "auto", color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
       </div>
       <div className="ed__leftdock">
@@ -86,7 +106,7 @@ export default function Editor() {
       </div>
       <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} /></div>
       <Timeline canvasRef={canvasRef} time={time} />
-      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : <Inspector />}
+      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : <Inspector />}
     </div>
   );
 }

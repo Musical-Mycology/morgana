@@ -30,3 +30,13 @@ test("createDeck writes an empty deck and refuses duplicates", async () => {
   expect(created.scenes).toEqual([]);
   await expect(store.createDeck({ id: "fresh", title: "Dup" })).rejects.toThrow();
 });
+
+test("statDeck reports the file's mtime and updates it on save", async () => {
+  await store.saveDeck(doc);
+  const first = await store.statDeck("demo");
+  expect(typeof first.mtimeMs).toBe("number");
+  await new Promise((r) => setTimeout(r, 5));
+  await store.saveDeck({ ...doc, meta: { ...doc.meta, title: "Demo 2" } });
+  const second = await store.statDeck("demo");
+  expect(second.mtimeMs).toBeGreaterThan(first.mtimeMs);
+});
