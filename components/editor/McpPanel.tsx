@@ -3,11 +3,13 @@ import { useEffect, useState } from "react";
 
 async function fetchToken(): Promise<string> {
   const res = await fetch("/api/mcp-token");
+  if (!res.ok) throw new Error(`Failed to fetch token: ${res.status}`);
   return (await res.json()).token as string;
 }
 
 async function regenerateToken(): Promise<string> {
   const res = await fetch("/api/mcp-token", { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to regenerate token: ${res.status}`);
   return (await res.json()).token as string;
 }
 
@@ -15,14 +17,25 @@ export function McpPanel() {
   const [token, setToken] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [copyLabel, setCopyLabel] = useState("Copy");
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { fetchToken().then(setToken); }, []);
+  useEffect(() => {
+    fetchToken()
+      .then((t) => { setToken(t); setError(null); })
+      .catch(() => setError("Couldn't load token"));
+  }, []);
 
   const url = typeof window !== "undefined" ? `${window.location.origin}/api/mcp` : "/api/mcp";
 
   const onRegenerate = async () => {
-    setToken(await regenerateToken());
-    setRevealed(true);
+    try {
+      const t = await regenerateToken();
+      setToken(t);
+      setRevealed(true);
+      setError(null);
+    } catch {
+      setError("Couldn't regenerate token");
+    }
   };
 
   const onCopy = async () => {
@@ -54,6 +67,11 @@ export function McpPanel() {
         <button className="ed__pill ed__pill--ghost" data-testid="mcp-copy" onClick={onCopy}>{copyLabel}</button>
         <button className="ed__pill ed__pill--ghost" data-testid="mcp-regenerate" onClick={onRegenerate}>Regenerate</button>
       </div>
+      {error && (
+        <p style={{ fontSize: 12, color: "#d33", marginTop: 8 }} data-testid="mcp-error">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

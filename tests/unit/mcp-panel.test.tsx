@@ -43,3 +43,22 @@ test("Copy writes the current token to the clipboard", async () => {
   fireEvent.click(screen.getByTestId("mcp-copy"));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith("initial-token"));
 });
+
+test("shows an error when the initial token fetch fails", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) }) as Response));
+  render(<McpPanel />);
+  await waitFor(() => expect(screen.getByTestId("mcp-error").textContent).toBe("Couldn't load token"));
+  expect((screen.getByTestId("mcp-token") as HTMLInputElement).value).toBe("");
+});
+
+test("shows an error when regenerate fails, without clearing the loaded token", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") return { ok: false, json: async () => ({}) } as Response;
+    return { ok: true, json: async () => ({ token: "initial-token" }) } as Response;
+  }));
+  render(<McpPanel />);
+  await waitFor(() => expect((screen.getByTestId("mcp-token") as HTMLInputElement).value).toBe("initial-token"));
+  fireEvent.click(screen.getByTestId("mcp-regenerate"));
+  await waitFor(() => expect(screen.getByTestId("mcp-error").textContent).toBe("Couldn't regenerate token"));
+  expect((screen.getByTestId("mcp-token") as HTMLInputElement).value).toBe("initial-token");
+});
