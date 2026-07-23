@@ -144,6 +144,7 @@ One JSON document per deck on the data volume:
 ```
 <MORGANA_DATA_DIR>/
   decks/      <id>.deck.json     # one file per deck (gitignored; never committed)
+  mcp-token.json                 # bearer token for the MCP server (gitignored; never committed)
 ```
 
 > The design also reserves an `assets/` directory for future local-asset support, but asset
@@ -158,6 +159,7 @@ The deck API is filesystem-backed ([`lib/store/deck-store.ts`](lib/store/deck-st
 | `GET /api/decks/[id]` | Load a deck document. |
 | `PUT /api/decks/[id]` | Save a deck (validated; autosave uses this). |
 | `DELETE /api/decks/[id]` | Delete a deck. |
+| `GET /api/decks/[id]/meta` | Deck file's on-disk `mtimeMs` (used to detect external changes). |
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
@@ -167,6 +169,35 @@ The deck API is filesystem-backed ([`lib/store/deck-store.ts`](lib/store/deck-st
 In Docker the data dir is the mounted volume (`/data`). On first run the demo deck is seeded
 **only if** no `*.deck.json` already exists — existing decks are never overwritten
 ([`docker-entrypoint.sh`](docker-entrypoint.sh)).
+
+---
+
+## Connect Claude (MCP)
+
+Morgana exposes its editing API as an MCP server at `/api/mcp` (Streamable HTTP, JSON-RPC 2.0),
+so your own Claude — claude.ai (Connectors) or Claude Desktop — can read and edit a deck directly,
+using your own Claude subscription. Morgana never calls the Anthropic API and never stores an
+Anthropic credential: the only secret involved is a bearer token Morgana generates for itself, to
+decide who's allowed to hit `/api/mcp`.
+
+1. Open a deck in the editor and click **Connect Claude** in the toolbar.
+2. Copy the **Server URL** and **Token** shown there (regenerate the token any time — this
+   immediately invalidates the old one).
+3. In claude.ai, add a connector pointing at the server URL, using the token as its bearer
+   credential (Claude Desktop: add it under MCP servers, same URL + token). Consult Anthropic's
+   current documentation for the exact steps in your client, since connector UI changes over time.
+4. Ask Claude to read or edit the deck — e.g. "read the deck and summarize its beats" or "add a new
+   scene." Every edit lands as one ordinary undo entry, exactly like a change made in the UI, and is
+   validated the same way; destructive actions (deleting a scene or action) are flagged to your
+   Claude client so it can confirm with you before applying them.
+5. If you have the deck open in a browser tab while Claude edits it, Morgana polls for the change
+   and offers a "reload" prompt rather than overwriting either side silently.
+
+Tool surface: `list_decks`, `read_deck`, beat operations (`insert_beat_after`, `duplicate_beat_at`,
+`delete_beat_at`, `move_beat_by`), scene operations (`append_scene`, `delete_scene_at`), and action
+operations (`insert_action_after`, `duplicate_action_at`, `delete_action_at`, `move_action_by`,
+`convert_action_kind`, `update_action`, `update_meta`) — see [`lib/mcp/tool-defs.ts`](lib/mcp/tool-defs.ts)
+for the exact schemas.
 
 ---
 
