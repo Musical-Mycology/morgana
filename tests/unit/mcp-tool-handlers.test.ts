@@ -65,3 +65,70 @@ test("a mutation that would invalidate the deck is rejected before saving", asyn
   await expect(callTool("update_meta", { deck_id: "demo", path: "id", value: "BAD ID" })).rejects.toThrow(ToolCallError);
   expect((await loadDeck("demo")).meta.id).toBe("demo");
 });
+
+test("update_action rejects path 'kind' — use convert_action_kind instead", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await callTool("append_scene", { deck_id: "demo" });
+  await callTool("insert_action_after", { deck_id: "demo", beat_index: 0, action_index: null, kind: "wait" });
+
+  await expect(
+    callTool("update_action", { deck_id: "demo", beat_index: 0, action_index: 1, path: "kind", value: "text" })
+  ).rejects.toThrow(ToolCallError);
+  expect((await loadDeck("demo")).scenes[0].beats[0].timeline[1]).toMatchObject({ kind: "wait" });
+});
+
+test("update_action rejects a path containing __proto__", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await callTool("append_scene", { deck_id: "demo" });
+  await callTool("insert_action_after", { deck_id: "demo", beat_index: 0, action_index: null, kind: "wait" });
+
+  await expect(
+    callTool("update_action", { deck_id: "demo", beat_index: 0, action_index: 1, path: "__proto__.polluted", value: "x" })
+  ).rejects.toThrow(ToolCallError);
+  expect((await loadDeck("demo")).scenes[0].beats[0].timeline[1]).toEqual({ kind: "wait", ms: 500 });
+});
+
+test("update_meta rejects a path containing __proto__", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await expect(
+    callTool("update_meta", { deck_id: "demo", path: "__proto__.polluted", value: "x" })
+  ).rejects.toThrow(ToolCallError);
+  expect((await loadDeck("demo")).meta.id).toBe("demo");
+});
+
+test("insert_beat_after, duplicate_beat_at, delete_beat_at, and move_beat_by mutate and persist", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await callTool("append_scene", { deck_id: "demo" });
+
+  const afterInsert = await callTool("insert_beat_after", { deck_id: "demo", beat_index: 0 }) as DeckDoc;
+  expect(afterInsert.scenes[0].beats.length).toBe(2);
+
+  const afterDuplicate = await callTool("duplicate_beat_at", { deck_id: "demo", beat_index: 0 }) as DeckDoc;
+  expect(afterDuplicate.scenes[0].beats.length).toBe(3);
+
+  const idsBeforeMove = afterDuplicate.scenes[0].beats.map((b) => b.id);
+  const afterMove = await callTool("move_beat_by", { deck_id: "demo", beat_index: 0, dir: 1 }) as DeckDoc;
+  expect(afterMove.scenes[0].beats.map((b) => b.id)).toEqual([idsBeforeMove[1], idsBeforeMove[0], idsBeforeMove[2]]);
+
+  const afterDelete = await callTool("delete_beat_at", { deck_id: "demo", beat_index: 0 }) as DeckDoc;
+  expect(afterDelete.scenes[0].beats.length).toBe(2);
+  expect((await loadDeck("demo")).scenes[0].beats.length).toBe(2);
+});
+
+test("duplicate_action_at, move_action_by, and delete_action_at mutate and persist", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await callTool("append_scene", { deck_id: "demo" });
+  await callTool("insert_action_after", { deck_id: "demo", beat_index: 0, action_index: null, kind: "wait" });
+
+  const afterDuplicate = await callTool("duplicate_action_at", { deck_id: "demo", beat_index: 0, action_index: 1 }) as DeckDoc;
+  expect(afterDuplicate.scenes[0].beats[0].timeline.length).toBe(3);
+  expect(afterDuplicate.scenes[0].beats[0].timeline[2]).toMatchObject({ kind: "wait" });
+
+  const afterMove = await callTool("move_action_by", { deck_id: "demo", beat_index: 0, action_index: 1, dir: 1 }) as DeckDoc;
+  expect(afterMove.scenes[0].beats[0].timeline[1]).toMatchObject({ kind: "wait" });
+  expect(afterMove.scenes[0].beats[0].timeline[2]).toMatchObject({ kind: "wait" });
+
+  const afterDelete = await callTool("delete_action_at", { deck_id: "demo", beat_index: 0, action_index: 2 }) as DeckDoc;
+  expect(afterDelete.scenes[0].beats[0].timeline.length).toBe(2);
+  expect((await loadDeck("demo")).scenes[0].beats[0].timeline.length).toBe(2);
+});

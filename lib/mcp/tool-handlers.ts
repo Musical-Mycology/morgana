@@ -39,6 +39,17 @@ function requireDir(a: Record<string, unknown>, key: string): -1 | 1 {
   return v;
 }
 
+const UNSAFE_PATH_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
+
+/** Guards against prototype-pollution via attacker-controlled dot-paths reaching `setPath`. */
+function assertSafePath(path: string): void {
+  for (const segment of path.split(".")) {
+    if (UNSAFE_PATH_SEGMENTS.has(segment)) {
+      throw new ToolCallError(`"${segment}" is not allowed in a path`);
+    }
+  }
+}
+
 async function mutate(deckId: string, f: (doc: DeckDoc) => DeckDoc): Promise<DeckDoc> {
   const doc = await loadDeck(deckId);
   const next = f(doc);
@@ -81,13 +92,17 @@ export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc 
       return mutate(deckId, (doc) => moveActionBy(doc, requireNumber(a, "beat_index"), requireNumber(a, "action_index"), requireDir(a, "dir")));
     case "convert_action_kind":
       return mutate(deckId, (doc) => convertActionKind(doc, requireNumber(a, "beat_index"), requireNumber(a, "action_index"), requireString(a, "new_kind")));
-    case "update_action":
+    case "update_action": {
+      const path = requireString(a, "path");
+      if (path === "kind") {
+        throw new ToolCallError("update_action cannot change an action's kind — use convert_action_kind instead");
+      }
+      assertSafePath(path);
       return mutate(deckId, (doc) => {
         const beatIndex = requireNumber(a, "beat_index");
         const actionIndex = requireNumber(a, "action_index");
         const loc = beatLocation(doc, beatIndex);
         if (!loc) throw new ToolCallError(`no beat at index ${beatIndex}`);
-        const path = requireString(a, "path");
         const value = a.value;
         return {
           ...doc,
@@ -100,8 +115,12 @@ export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc 
           }),
         };
       });
-    case "update_meta":
-      return mutate(deckId, (doc) => ({ ...doc, meta: setPath(doc.meta, requireString(a, "path"), a.value) }));
+    }
+    case "update_meta": {
+      const path = requireString(a, "path");
+      assertSafePath(path);
+      return mutate(deckId, (doc) => ({ ...doc, meta: setPath(doc.meta, path, a.value) }));
+    }
     default:
       throw new ToolCallError(`unknown tool: ${name}`);
   }
