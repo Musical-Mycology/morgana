@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, readdir, unlink, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, unlink, access, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DECK_ID_RE, validateDeckDoc, type DeckDoc, type DeckMeta } from "@/engine/deck-doc";
 
@@ -44,3 +44,8 @@ export async function createDeck(meta: { id: string; title: string; treatment?: 
 }
 
 export async function deleteDeck(id: string): Promise<void> { await unlink(fileFor(id)); }
+
+export async function statDeck(id: string): Promise<{ mtimeMs: number }> {
+  const s = await stat(fileFor(id));
+  return { mtimeMs: s.mtimeMs };
+}
