@@ -5,8 +5,9 @@ import { beatDuration, renderBeatAt } from "@/engine/authoring/seek";
 import { useEditor } from "@/lib/editor/store";
 import { descriptorFor } from "@/lib/editor/registry";
 import { getPath } from "@/lib/editor/paths";
-import type { FlatBeat } from "@/lib/editor/flatten-beats";
+import { beatLocation, type FlatBeat } from "@/lib/editor/flatten-beats";
 import { ObjectsLayer } from "./ObjectsLayer";
+import { ObjectStage, type ObjectStageHandle } from "./ObjectStage";
 
 export interface CanvasHandle { seek: (t: number) => void; play: () => void; pause: () => void; }
 
@@ -15,18 +16,28 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     const host = useRef<HTMLDivElement>(null);
     const art = useRef<ArtStageHandle>(null);
     const textHost = useRef<HTMLDivElement>(null);
+    const objStage = useRef<ObjectStageHandle>(null);
     const t = useRef(0);
     const raf = useRef<number | null>(null);
     const [night, setNight] = useState(0.6);
+    const [preview, setPreview] = useState(false);
+    const doc = useEditor((s) => s.doc);
+    const selected = useEditor((s) => s.selected);
+    const loc = doc ? beatLocation(doc, selected) : null;
+    const scene = loc && doc ? doc.scenes[loc.sceneIdx] : null;
+    const beatIndex = loc ? loc.beatIdx : 0;
     const dur = () => (flat ? beatDuration(flat.beat.timeline) : 0);
-    const draw = () => { if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight }); };
+    const draw = () => {
+      if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight });
+      if (scene) objStage.current?.renderAt(scene, beatIndex, t.current);
+    };
     const cancel = () => { if (raf.current != null) cancelAnimationFrame(raf.current); raf.current = null; };
 
     useImperativeHandle(ref, () => ({
-      seek: (to) => { cancel(); t.current = Math.max(0, Math.min(dur(), to)); draw(); onTime?.(t.current, dur()); },
+      seek: (to) => { cancel(); t.current = Math.max(0, Math.min(dur(), to)); setPreview(t.current > 0); draw(); onTime?.(t.current, dur()); },
       pause: () => cancel(),
       play: () => {
-        cancel();
+        cancel(); setPreview(true);
         let last = performance.now();
         const step = (now: number) => {
           t.current = Math.min(dur(), t.current + (now - last) / 1000); last = now;
@@ -37,14 +48,16 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
       },
     }), [flat, onTime]);
 
-    useEffect(() => { cancel(); t.current = 0; draw(); onTime?.(0, dur()); return cancel; }, [flat]);
+    useEffect(() => { cancel(); t.current = 0; setPreview(false); draw(); onTime?.(0, dur()); return cancel; }, [flat]);
+    useEffect(() => { draw(); }, [scene, beatIndex]);
 
     return (
       <div ref={host} className="ed__canvas-host" style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", maxHeight: "100%", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
         <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />
         <div className="cin"><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
+        <ObjectStage ref={objStage} scene={scene ?? { id: "", beats: [] }} active={preview} />
         <PosHandle hostRef={host} redraw={draw} />
-        <ObjectsLayer hostRef={host} />
+        {!preview && <ObjectsLayer hostRef={host} />}
       </div>
     );
   },
