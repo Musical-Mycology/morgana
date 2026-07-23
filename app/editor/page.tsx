@@ -13,6 +13,7 @@ import { DeckSettings } from "@/components/editor/DeckSettings";
 import { ExportPanel } from "@/components/editor/ExportPanel";
 import { McpPanel } from "@/components/editor/McpPanel";
 import { primaryPath } from "@/lib/editor/selection";
+import { useExternalChangePoll } from "@/lib/editor/use-external-change-poll";
 
 const STATUS_LABEL: Record<SaveStatus, string> = { idle: "", saving: "Saving…", saved: "Saved", error: "Save failed" };
 
@@ -38,12 +39,18 @@ export default function Editor() {
   const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<SaveStatus>("idle");
 
+  const [deckId, setDeckId] = useState<string | null>(null);
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("deck") ?? "demo";
+    setDeckId(id);
     loadDeck(id).then(load).catch((e) => { console.error("failed to load deck", e); setLoadError(true); });
   }, [load]);
 
-  const onStatus = useCallback((s: SaveStatus) => setStatus(s), []);
+  const externalChange = useExternalChangePoll(deckId);
+  const onStatus = useCallback((s: SaveStatus) => {
+    setStatus(s);
+    if (s === "saved") externalChange.resync();
+  }, [externalChange]);
   useAutosave(doc, revision, onStatus);
 
   const selectedFlat = beats[selected] ?? null;
@@ -70,8 +77,19 @@ export default function Editor() {
   }, [undo, redo, selectedObjectPath, sceneId, deleteObject, exitGroup, selectedObjectPaths]);
 
   const onTime = useCallback((t: number, duration: number) => setTime({ t, duration }), []);
+  const onReloadExternal = useCallback(() => {
+    if (!deckId) return;
+    loadDeck(deckId).then(load).then(() => externalChange.resync());
+  }, [deckId, load, externalChange]);
   return (
     <div className="ed">
+      {externalChange.changed && (
+        <div className="ed__pill ed__pill--ghost" data-testid="external-change-banner" style={{ position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 10 }}>
+          Deck changed externally.{" "}
+          <button data-testid="external-change-reload" onClick={onReloadExternal}>Reload</button>{" "}
+          <button data-testid="external-change-dismiss" onClick={externalChange.dismiss}>Dismiss</button>
+        </div>
+      )}
       <div className="ed__bar">
         <span className="ed__brand">Morgana</span>
         <span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? (loadError ? "couldn't load deck" : "no deck")}</span>
