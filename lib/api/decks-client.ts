@@ -2,7 +2,13 @@ import type { DeckDoc, DeckMeta } from "@/engine/deck-doc";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { method: "GET", ...init });
-  if (!res.ok) throw new Error(`${init?.method ?? "GET"} ${url} → ${res.status}`);
+  if (!res.ok) {
+    // The API answers failures with { error }. Losing it here is what left the editor
+    // showing a bare "Save failed" with no way to tell what the server objected to.
+    let detail: string | null = null;
+    try { detail = ((await res.json()) as { error?: string }).error ?? null; } catch { detail = null; }
+    throw new Error(detail ?? `${init?.method ?? "GET"} ${url} → ${res.status}`);
+  }
   return res.json() as Promise<T>;
 }
 

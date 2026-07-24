@@ -9,7 +9,7 @@ export type SaveStatus = "idle" | "saving" | "saved" | "error";
 export function useAutosave(
   doc: DeckDoc | null,
   revision: number,
-  onStatus: (s: SaveStatus) => void,
+  onStatus: (s: SaveStatus, error?: string) => void,
   delay = 700,
 ): void {
   const lastSaved = useRef(0);
@@ -21,7 +21,7 @@ export function useAutosave(
     timer.current = setTimeout(() => {
       saveDeck(doc)
         .then(() => { lastSaved.current = rev; onStatus("saved"); })
-        .catch(() => onStatus("error"));
+        .catch((e) => onStatus("error", e instanceof Error ? e.message : String(e)));
     }, delay);
     return () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
   }, [doc, revision, onStatus, delay]);

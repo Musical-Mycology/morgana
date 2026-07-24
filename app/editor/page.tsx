@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./editor.css";
 import { useEditor } from "@/lib/editor/store";
-import { loadDeck } from "@/lib/api/decks-client";
+import { loadDeck, saveDeck } from "@/lib/api/decks-client";
 import { useAutosave, type SaveStatus } from "@/lib/editor/use-autosave";
 import { DeckCanvas, type CanvasHandle } from "@/components/editor/DeckCanvas";
 import { Filmstrip } from "@/components/editor/Filmstrip";
@@ -41,6 +41,7 @@ export default function Editor() {
   const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? "inspector" : p));
   const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<SaveStatus>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const issues = useLint();
   const counts = lintCounts(issues);
 
@@ -52,11 +53,21 @@ export default function Editor() {
   }, [load]);
 
   const externalChange = useExternalChangePoll(deckId);
-  const onStatus = useCallback((s: SaveStatus) => {
+  const onStatus = useCallback((s: SaveStatus, error?: string) => {
     setStatus(s);
+    setSaveError(s === "error" ? (error ?? "unknown error") : null);
     if (s === "saved") externalChange.resync();
   }, [externalChange]);
   useAutosave(doc, revision, onStatus);
+
+  const retrySave = useCallback(() => {
+    if (!doc) return;
+    setStatus("saving");
+    setSaveError(null);
+    saveDeck(doc)
+      .then(() => { setStatus("saved"); externalChange.resync(); })
+      .catch((e) => { setStatus("error"); setSaveError(e instanceof Error ? e.message : String(e)); });
+  }, [doc, externalChange]);
 
   const selectedFlat = beats[selected] ?? null;
   const sceneId = selectedFlat?.sceneId ?? null;
@@ -111,7 +122,17 @@ export default function Editor() {
             </span>
           )}
         </button>
-        <span data-testid="save-status" style={{ marginLeft: "auto", color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
+        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          {saveError && (
+            <span data-testid="save-error" title={saveError} style={{ color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {saveError}
+            </span>
+          )}
+          {saveError && (
+            <button className="ed__pill ed__pill--ghost" data-testid="save-retry" onClick={retrySave}>Retry</button>
+          )}
+          <span data-testid="save-status" style={{ color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
+        </span>
       </div>
       <div className="ed__leftdock">
         <div className="ed__leftdock-film"><Filmstrip /></div>
