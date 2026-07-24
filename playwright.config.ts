@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
 
-// Per-server seeded data dirs (created by scripts/prepare-standalone.sh via global-setup).
+// Per-server seeded data dirs (created by scripts/prepare-standalone.sh; see the note below).
 // Isolation kills the shared-./data contention that made the suite flaky under parallel workers.
 const dataDir = (name: string) => resolve("./.e2e", name);
 
@@ -10,8 +10,11 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   // CI gets retries against genuine infra hiccups; locally real flakes stay visible.
   retries: process.env.CI ? 2 : 0,
-  // Builds once + copies standalone assets + seeds the three .e2e dirs before any server starts.
-  globalSetup: "./e2e/global-setup.ts",
+  // NOTE: the build/seed step (scripts/prepare-standalone.sh) runs from the `test:e2e` npm
+  // script, NOT from a Playwright `globalSetup`. Playwright starts `webServer` entries during
+  // plugin setup, which happens BEFORE globalSetup runs, so a globalSetup build is too late —
+  // `npm start` would fail with "Could not find a production build in the '.next' directory".
+  // Run the suite via `npm run test:e2e`; a bare `npx playwright test` assumes a prepared build.
   webServer: [
     {
       // Regular production server — runs ALL specs except the destructive library spec.

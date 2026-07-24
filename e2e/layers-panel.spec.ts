@@ -6,7 +6,12 @@ import { test, expect } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/editor?deck=demo");
+  // The panel's own markup is server-rendered, so waiting on it alone can hand back a page whose
+  // client bundle has not hydrated — the `layer-object-add` <select> is then present but its
+  // onChange is not wired, and selectOption() silently no-ops. Filmstrip beat buttons are derived
+  // from the client-side deck fetch, so their presence proves hydration ran AND the doc loaded.
   await page.getByTestId("layers-panel").waitFor();
+  await page.locator(".ed__beat").first().waitFor();
 });
 
 test("add via panel renders a row and selects it on the canvas", async ({ page }) => {
@@ -60,11 +65,34 @@ test("group two objects then ungroup", async ({ page }) => {
 });
 
 test("raise reorders the primary in the tree", async ({ page }) => {
+  const rows = page.getByTestId("layer-row");
+  const before = await rows.count();
   await page.getByTestId("layer-object-add").selectOption("shape");
   await page.getByTestId("layer-object-add").selectOption("text");
-  const first = page.getByTestId("layer-row").first();
-  const beforeId = await first.getAttribute("data-obj-id");
-  await first.click();
+  await expect(rows).toHaveCount(before + 2);
+
+  // The panel lists topmost-first (flattenForPanel walks each sibling array in reverse), so the
+  // two just-added objects are rows 0 (text, newest) and 1 (shape) whatever the baseline is.
+  // Raise therefore has to act on row 1 — it is correctly disabled on row 0, which is already
+  // the top of the sibling list (spec §4.5).
+  const secondId = await rows.nth(1).getAttribute("data-obj-id");
+
+  await rows.nth(1).click();
+  await expect(page.getByTestId("layer-raise")).toBeEnabled();
   await page.getByTestId("layer-raise").click();
-  await expect(page.getByTestId("layer-row").first()).not.toHaveAttribute("data-obj-id", beforeId!);
+
+  // Raised past the text object → it is now the topmost row.
+  // (Not asserted here: that Raise then goes disabled. reorderObject swaps the array entries but
+  // leaves selectedObjectPaths on the old index, so the toolbar's enabled state now describes the
+  // object that got swapped *down*. Selection-follows-reorder is a separate concern from this
+  // test's subject; the boundary-disable behaviour itself is covered by the next test.)
+  await expect(rows.first()).toHaveAttribute("data-obj-id", secondId!);
+});
+
+test("raise is disabled for the topmost object", async ({ page }) => {
+  await page.getByTestId("layer-object-add").selectOption("shape");
+  await page.getByTestId("layer-object-add").selectOption("text");
+  await page.getByTestId("layer-row").first().click(); // first row == top of the stack
+  await expect(page.getByTestId("layer-raise")).toBeDisabled();
+  await expect(page.getByTestId("layer-lower")).toBeEnabled();
 });

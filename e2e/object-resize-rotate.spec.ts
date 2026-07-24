@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+/** The editor-canvas node for an object. Scoping by `data-testid="obj"` matters: `data-obj-id`
+ *  is also carried by the Layers-panel row and by the playback ObjectStage node, so a bare
+ *  [data-obj-id="…"] resolves to three elements and trips Playwright's strict mode. */
+const canvasObj = (page: import("@playwright/test").Page, id: string) =>
+  page.locator(`[data-testid="obj"][data-obj-id="${id}"]`);
+
 async function seed(request: import("@playwright/test").APIRequestContext, id: string) {
   await request.delete(`/api/decks/${id}`).catch(() => {});
   const doc = { version: 1, meta: { id, title: "RR" }, scenes: [
@@ -14,7 +20,7 @@ test("resizing via the se handle grows the object and one undo reverts it", asyn
   await seed(request, id);
   await page.goto(`/editor?deck=${id}`);
   const host = page.locator(".ed__canvas-host");
-  const obj = page.locator('[data-obj-id="o-1"]');
+  const obj = canvasObj(page, "o-1");
   await expect(obj).toBeVisible();
   await obj.click(); // select -> overlay appears
   await expect(page.getByTestId("obj-handle-se")).toBeVisible();
@@ -39,7 +45,7 @@ test("rotating via the rotate handle sets a non-zero rotation, undoable in one s
   const id = "e2e-obj-rotate";
   await seed(request, id);
   await page.goto(`/editor?deck=${id}`);
-  const obj = page.locator('[data-obj-id="o-1"]');
+  const obj = canvasObj(page, "o-1");
   await expect(obj).toBeVisible();
   await obj.click();
 
@@ -63,7 +69,7 @@ test("a handle drag does not move the object body", async ({ page, request }) =>
   const id = "e2e-obj-handle-priority";
   await seed(request, id);
   await page.goto(`/editor?deck=${id}`);
-  const obj = page.locator('[data-obj-id="o-1"]');
+  const obj = canvasObj(page, "o-1");
   await expect(obj).toBeVisible();
   await obj.click();
   const readLeft = () => obj.evaluate((el) => parseFloat((el as HTMLElement).style.left));

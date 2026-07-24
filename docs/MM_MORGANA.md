@@ -101,3 +101,17 @@ CI runs in **GitHub Actions** (unit + e2e), keeping the repo free of MM infra
 coupling — mm-jenkins is intentionally *not* used here. No Kuma monitor and no
 hosting target yet (`ci_pipeline: none`, `expected_kuma_monitor: none` in
 `mm-meta.yml`) until a deployment is chosen.
+
+**Gotcha — the e2e build step must not move into a Playwright `globalSetup`.**
+The suite needs one `next build` up front (three `webServer` entries share it:
+`next start` on :3000/:3200 and the standalone server on :3100). That build runs
+from the `test:e2e` **npm script** (`scripts/prepare-standalone.sh && playwright
+test`), *not* from `globalSetup`, because Playwright launches `webServer` entries
+during plugin setup — which happens **before** `globalSetups`. A build in
+`globalSetup` is therefore always too late, and every server dies instantly with
+`Could not find a production build in the '.next' directory`. This is not
+theoretical: it was the configuration from the CI workflow's introduction
+(2026-07-20) until 2026-07-24, and CI failed on *every* run in that window,
+before a single test executed. Corollaries: run the suite as `npm run test:e2e`
+(a bare `npx playwright test` assumes a prepared build), and treat any future
+"move the build into globalSetup" tidy-up as a regression.
