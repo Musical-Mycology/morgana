@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import type { DeckDoc } from "@/engine/deck-doc";
 import type { ObjectTransform, SceneObject } from "@/engine/deck/types";
-import { flattenBeats, beatLocation, type FlatBeat } from "./flatten-beats";
+import { flattenBeats, beatLocation, flatIndexOfBeat, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
-import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
+import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAtIndex, appendBeatToScene, moveSceneBy, uniqueBeatId, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
 import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTransform as mUpdateObjectTransform, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject, translateObjectBy as mTranslateObjectBy } from "./object-mutations";
 import { uniqueObjectId, findObjectPath, getObjectAt, type ObjectPath } from "./object-tree";
 import { descriptorForObject } from "./object-registry";
@@ -39,7 +39,9 @@ interface EditorState {
   deleteBeat: (flatIdx: number) => void;
   moveBeat: (flatIdx: number, dir: -1 | 1) => void;
   addScene: () => void;
-  deleteScene: (flatIdx: number) => void;
+  deleteScene: (sceneIdx: number) => void;
+  moveScene: (sceneIdx: number, dir: -1 | 1) => void;
+  addBeatToScene: (sceneIdx: number) => void;
   addAction: (flatIdx: number, actionIdx: number | null, kind: string) => void;
   addObjectAnimation: (flatIdx: number, objectId: string, kind: ObjectVerbKind) => void;
   duplicateAction: (flatIdx: number, actionIdx: number) => void;
@@ -70,6 +72,16 @@ function commit(s: EditorState, produce: (doc: DeckDoc) => DeckDoc): Partial<Edi
     future: [],
     revision: s.revision + 1,
   };
+}
+
+/** Re-resolve `selected` after a structural edit: keep the SAME beat selected by id, or
+ *  clamp into range if it no longer exists. Clears action/object selection, matching the
+ *  existing deleteBeat/deleteScene behavior. */
+function reselect(s: EditorState, part: Partial<EditorState>, beatId: string | null): Partial<EditorState> {
+  if (!part.doc || !part.beats) return {};
+  const found = beatId ? flatIndexOfBeat(part.doc, beatId) : -1;
+  const selected = found >= 0 ? found : Math.min(s.selected, Math.max(0, part.beats.length - 1));
+  return { ...part, selected, selectedAction: null, selectedObjectPaths: [], enteredGroupPath: null };
 }
 
 export const useEditor = create<EditorState>((set, get) => ({
@@ -137,16 +149,20 @@ export const useEditor = create<EditorState>((set, get) => ({
   }),
   moveBeat: (flatIdx, dir) => set((s) => {
     if (!s.doc) return {};
+    const beatId = s.beats[flatIdx]?.beat.id ?? null;
     const next = moveBeatBy(s.doc, flatIdx, dir);
     if (next === s.doc) return {};
-    return { ...commit(s, () => next), selected: flatIdx + dir };
+    const part = commit(s, () => next);
+    const found = beatId && part.doc ? flatIndexOfBeat(part.doc, beatId) : -1;
+    return { ...part, selected: found >= 0 ? found : flatIdx };
   }),
   addScene: () => set((s) => commit(s, (doc) => appendScene(doc))),
-  deleteScene: (flatIdx) => set((s) => {
+  deleteScene: (sceneIdx) => set((s) => reselect(s, commit(s, (doc) => deleteSceneAtIndex(doc, sceneIdx)), s.beats[s.selected]?.beat.id ?? null)),
+  moveScene: (sceneIdx, dir) => set((s) => reselect(s, commit(s, (doc) => moveSceneBy(doc, sceneIdx, dir)), s.beats[s.selected]?.beat.id ?? null)),
+  addBeatToScene: (sceneIdx) => set((s) => {
     if (!s.doc) return {};
-    const part = commit(s, (doc) => deleteSceneAt(doc, flatIdx));
-    if (!part.beats) return {};
-    return { ...part, selected: Math.min(s.selected, Math.max(0, part.beats.length - 1)), selectedAction: null, selectedObjectPaths: [], enteredGroupPath: null };
+    const newId = uniqueBeatId(s.doc);                // the id appendBeatToScene will assign
+    return reselect(s, commit(s, (doc) => appendBeatToScene(doc, sceneIdx)), newId);
   }),
   addAction: (flatIdx, actionIdx, kind) => set((s) => {
     if (!s.doc) return {};
