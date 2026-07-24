@@ -11,7 +11,9 @@ test("dragging an object body moves it and commits one undoable change", async (
 
   await page.goto(`/editor?deck=${id}`);
   const host = page.locator(".ed__canvas-host");
-  const obj = page.locator('[data-obj-id="o-1"]');
+  // Scope to the editor canvas layer: `data-obj-id` is also carried by the Layers-panel row
+  // and by the playback ObjectStage node, so a bare [data-obj-id] matches three elements.
+  const obj = page.locator('[data-testid="obj"][data-obj-id="o-1"]');
   await expect(obj).toBeVisible();
 
   const box = (await host.boundingBox())!;

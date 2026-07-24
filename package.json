@@ -10,7 +10,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "bash scripts/prepare-standalone.sh && playwright test",
     "seed": "tsx tools/seed-deck.ts",
     "seed:demo": "mkdir -p data/decks && cp samples/*.deck.json data/decks/",
     "smoke:docker": "bash scripts/smoke-docker.sh"

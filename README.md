@@ -229,6 +229,12 @@ a safety net, not a requirement:
 npm run test:e2e
 ```
 
+Always go through the npm script rather than `npx playwright test` directly: the script runs
+`scripts/prepare-standalone.sh` first (one `next build`, shared by all three servers, plus the
+per-server seeds). That step cannot live in a Playwright `globalSetup`, because Playwright
+launches `webServer` entries *before* `globalSetup` runs — the servers would start against a
+missing `.next` build.
+
 CI runs the unit and e2e suites on every push and pull request via
 [GitHub Actions](.github/workflows/ci.yml). (`npm run smoke:docker` stays a manual local check.)
 

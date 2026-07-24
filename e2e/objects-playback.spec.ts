@@ -114,11 +114,14 @@ test("obj_move animates position and obj_out fades the object out, both through 
   await expect(obj).toBeVisible();
   const leftAtReveal = await obj.evaluate((el) => el.style.left);
 
-  // End of the move window (1.4s, i.e. right before obj_out starts): position has changed.
-  await setRange(page, "scrub", 1.39);
+  // End of the move window (1.4s): the move has run to completion, so the object sits exactly at
+  // `to.x`. 1.4s is also obj_out's first instant, where its progress is 0 — a no-op — so the
+  // object is still fully visible here. (Sampling *inside* the window instead, e.g. 1.39s, would
+  // be 98.75% of the way through the 0.35 -> 0.8 lerp = 79.4375%, not the endpoint.)
+  await setRange(page, "scrub", 1.4);
   const leftAtMoveEnd = await obj.evaluate((el) => el.style.left);
   expect(leftAtMoveEnd).not.toBe(leftAtReveal);
-  expect(parseFloat(leftAtMoveEnd)).toBeCloseTo(80, 0); // to.x = 0.8 -> 80%
+  expect(parseFloat(leftAtMoveEnd)).toBeCloseTo(80, 4); // to.x = 0.8 -> 80%
 
   // Past the end of the obj_out window (1.9s): the object has faded out and is hidden.
   await setRange(page, "scrub", 1.9);
