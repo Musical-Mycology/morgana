@@ -60,11 +60,11 @@ All in [`lib/editor/mutations.ts`](../../../lib/editor/mutations.ts), following 
 - **At a scene boundary:** **transfer**, not swap.
   - `dir === -1` off a scene's head → remove from that scene, **append to the previous scene's tail**.
   - `dir === +1` off a scene's tail → remove from that scene, **prepend to the next scene's head**.
-- **No-op only** at flat position 0 with `dir === -1`, and at the last flat position with `dir === +1`.
+- **No-op only** when there is no adjacent *scene* in that direction — i.e. `sceneIdx + dir` is out of range. Note this is subtly weaker than "no-op at flat position 0 / the last flat position": with a leading empty scene, the beat at flat position 0 *can* still move up, into that empty scene.
 - The adjacent scene may be **empty**; transferring into it is correct and is the intended way to fill one.
 - The source scene may be **left empty** by the transfer. That is allowed (§1.2) and is surfaced by the `scene-empty` lint (§2.2).
 
-The resulting flat index of the moved beat is `flatIdx + dir` in every case — swap and transfer alike — because the flat list is the concatenation of scenes in order.
+**Resulting flat index.** A swap moves the beat to `flatIdx + dir`. A **transfer leaves the flat index unchanged** — removing the beat from one scene's edge and re-inserting it at the adjacent scene's facing edge puts it back in the same overall position. Callers must therefore *not* compute the new selection arithmetically; the store resolves it by beat id (§1.3).
 
 ### 1.2 Empty scenes are legal and visible
 
@@ -94,11 +94,11 @@ In [`lib/editor/store.ts`](../../../lib/editor/store.ts):
 | `deleteScene(sceneIdx)` | **Re-keyed** from flat index to scene index. Safe: no UI calls it today, and the MCP path goes through the mutation layer, not the store. |
 | `moveScene(sceneIdx, dir)` | New. |
 | `addBeatToScene(sceneIdx)` | New. Selects the created beat. |
-| `moveBeat(flatIdx, dir)` | Signature unchanged; selection follows the beat to `flatIdx + dir` across a boundary exactly as it does within a scene. |
+| `moveBeat(flatIdx, dir)` | Signature unchanged. Selection now follows the beat **by id** rather than by the current `flatIdx + dir` arithmetic, which is wrong for a transfer (§1.1.1). |
 
 **Selection policy for scene operations.** Preserve the selected **beat by identity**: capture the selected beat's id before the mutation and, after it, set `selected` to that beat's new flat index. If the beat no longer exists (its scene was deleted), clamp to `[0, beats.length - 1]`. In all cases clear `selectedAction`, `selectedObjectPaths`, and `enteredGroupPath`, matching the existing `deleteBeat`/`deleteScene` behavior.
 
-The identity lookup is a small pure helper (`flatIndexOfBeat(doc, beatId)`) so it is unit-testable and reusable across the three scene actions.
+The identity lookup is a small pure helper (`flatIndexOfBeat(doc, beatId)`) so it is unit-testable and reusable across the scene actions and `moveBeat`.
 
 ### 1.4 Filmstrip UI
 
@@ -191,7 +191,7 @@ Non-modal cards rendered in the zone that owns the problem, using existing `--ed
 
 | Condition | Where | Content |
 | --- | --- | --- |
-| Deck load failed | Canvas zone, replacing the stage | `couldn't-load-deck` — "Couldn't load deck `<id>`", **Retry** (re-runs `loadDeck`) and **Back to library** (`/`). |
+| Deck load failed | Canvas zone, replacing the stage | `couldnt-load-deck` — "Couldn't load deck `<id>`", **Retry** (re-runs `loadDeck`) and **Back to library** (`/`). |
 | Deck has no scenes | Canvas zone | `empty-deck` — "No scenes yet", with a button wired to `addScene()`. |
 | Selection resolves to no beat (selected scene is empty) | Canvas zone | `empty-scene` — "This scene has no beats", pointing at the filmstrip's ＋. |
 | Beat has no art, an empty timeline, **and** the scene has no objects | Canvas zone, as a hint overlay | `empty-beat` — "This beat is empty — add an action below." |
