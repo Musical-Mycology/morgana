@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { moveSceneBy, deleteSceneAtIndex, deleteSceneAt, appendBeatToScene } from "@/lib/editor/mutations";
+import { moveSceneBy, deleteSceneAtIndex, deleteSceneAt, appendBeatToScene, moveBeatBy } from "@/lib/editor/mutations";
+import { flattenBeats } from "@/lib/editor/flatten-beats";
 import type { DeckDoc } from "@/engine/deck-doc";
 
 const base = (): DeckDoc => ({ version: 1, meta: { id: "d", title: "D" }, scenes: [
@@ -48,4 +49,50 @@ test("appendBeatToScene appends a fresh beat, including to an empty scene", () =
 test("appendBeatToScene no-ops out of range, returning the same reference", () => {
   const d = base();
   expect(appendBeatToScene(d, 9)).toBe(d);
+});
+
+test("moveBeatBy down off a scene tail prepends to the next scene, keeping the flat index", () => {
+  const d = moveBeatBy(base(), 1, 1);                 // "b" tail of s1 → head of s2
+  expect(d.scenes[0].beats.map((b) => b.id)).toEqual(["a"]);
+  expect(d.scenes[1].beats.map((b) => b.id)).toEqual(["b", "c"]);
+  expect(flattenBeats(d).map((f) => f.beat.id).indexOf("b")).toBe(1); // unchanged
+});
+
+test("moveBeatBy up off a scene head appends to the previous scene, keeping the flat index", () => {
+  const d = moveBeatBy(base(), 2, -1);                // "c" head of s2 → tail of s1
+  expect(d.scenes[0].beats.map((b) => b.id)).toEqual(["a", "b", "c"]);
+  expect(d.scenes[1].beats).toEqual([]);
+  expect(flattenBeats(d).map((f) => f.beat.id).indexOf("c")).toBe(2); // unchanged
+});
+
+test("moveBeatBy transfers into an empty scene", () => {
+  const d = moveBeatBy(base(), 2, 1);                 // "c" tail of s2 → head of empty s3
+  expect(d.scenes[1].beats).toEqual([]);
+  expect(d.scenes[2].beats.map((b) => b.id)).toEqual(["c"]);
+});
+
+test("moveBeatBy may leave the source scene empty", () => {
+  const d = moveBeatBy(base(), 2, -1);                // "c" was s2's only beat
+  expect(d.scenes.map((s) => s.id)).toEqual(["s1", "s2", "s3"]); // scene NOT pruned
+  expect(d.scenes[1].beats).toEqual([]);
+});
+
+test("moveBeatBy no-ops only when there is no adjacent scene", () => {
+  const d = base();
+  expect(moveBeatBy(d, 0, -1)).toBe(d);               // first beat of the first scene
+  expect(moveBeatBy(d, 99, 1)).toBe(d);               // no such beat
+  const tail: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [
+    { id: "s1", beats: [{ id: "a", timeline: [] }] },
+  ] };
+  expect(moveBeatBy(tail, 0, 1)).toBe(tail);          // only beat of the only scene
+});
+
+test("moveBeatBy CAN move the flat-0 beat up when a leading empty scene exists", () => {
+  const doc: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [
+    { id: "empty", beats: [] },
+    { id: "s", beats: [{ id: "a", timeline: [] }] },
+  ] };
+  const d = moveBeatBy(doc, 0, -1);
+  expect(d.scenes[0].beats.map((b) => b.id)).toEqual(["a"]);
+  expect(d.scenes[1].beats).toEqual([]);
 });
