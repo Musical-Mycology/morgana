@@ -132,3 +132,36 @@ test("duplicate_action_at, move_action_by, and delete_action_at mutate and persi
   expect(afterDelete.scenes[0].beats[0].timeline.length).toBe(2);
   expect((await loadDeck("demo")).scenes[0].beats[0].timeline.length).toBe(2);
 });
+
+test("move_scene_by reorders scenes", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await callTool("append_scene", { deck_id: "demo" });
+  await callTool("append_scene", { deck_id: "demo" });
+  const before = (await loadDeck("demo")).scenes.map((s) => s.id);
+  const after = await callTool("move_scene_by", { deck_id: "demo", scene_index: 0, dir: 1 }) as DeckDoc;
+  expect(after.scenes.map((s) => s.id)).toEqual([before[1], before[0]]);
+});
+
+test("append_beat_to_scene fills a scene emptied by delete_beat_at", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await callTool("append_scene", { deck_id: "demo" });
+  await callTool("delete_beat_at", { deck_id: "demo", beat_index: 0 });
+  expect((await loadDeck("demo")).scenes[0].beats).toEqual([]);
+  const filled = await callTool("append_beat_to_scene", { deck_id: "demo", scene_index: 0 }) as DeckDoc;
+  expect(filled.scenes[0].beats).toHaveLength(1);
+});
+
+test("delete_scene_at addresses an empty scene by scene_index", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await callTool("append_scene", { deck_id: "demo" });
+  await callTool("delete_beat_at", { deck_id: "demo", beat_index: 0 });
+  const after = await callTool("delete_scene_at", { deck_id: "demo", scene_index: 0 }) as DeckDoc;
+  expect(after.scenes).toEqual([]);
+});
+
+test("delete_scene_at rejects both or neither index", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await callTool("append_scene", { deck_id: "demo" });
+  await expect(callTool("delete_scene_at", { deck_id: "demo" })).rejects.toThrow(ToolCallError);
+  await expect(callTool("delete_scene_at", { deck_id: "demo", beat_index: 0, scene_index: 0 })).rejects.toThrow(ToolCallError);
+});

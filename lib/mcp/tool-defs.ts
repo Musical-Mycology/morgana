@@ -11,6 +11,7 @@ const ACTION_KINDS = Object.keys(REGISTRY);
 
 const DECK_ID = { deck_id: { type: "string", description: "Deck id, as returned by list_decks." } };
 const BEAT_INDEX = { beat_index: { type: "number", description: "Flat (filmstrip-order) beat index, 0-based." } };
+const SCENE_INDEX = { scene_index: { type: "number", description: "Scene index in document order, 0-based." } };
 const ACTION_INDEX = { action_index: { type: "number", description: "Index of the action within the beat's timeline, 0-based." } };
 const DIR = { dir: { type: "number", enum: [-1, 1], description: "-1 to move earlier/left, 1 to move later/right." } };
 
@@ -47,7 +48,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "move_beat_by",
-    description: "Swap the given beat with its neighbor within the same scene (dir -1 = earlier, 1 = later). No-op at a scene boundary.",
+    description: "Move a beat one position in filmstrip order (dir -1 = earlier, 1 = later). Within a scene this swaps with the neighbouring beat; at a scene edge it moves the beat into the adjacent scene. Only a no-op when there is no adjacent scene in that direction.",
     inputSchema: schema({ ...DECK_ID, ...BEAT_INDEX, ...DIR }, ["deck_id", "beat_index", "dir"]),
   },
   {
@@ -56,9 +57,19 @@ export const TOOL_DEFS: ToolDef[] = [
     inputSchema: schema({ ...DECK_ID }, ["deck_id"]),
   },
   {
+    name: "move_scene_by",
+    description: "Swap a scene with its neighbour (dir -1 = earlier, 1 = later). No-op at either end of the deck.",
+    inputSchema: schema({ ...DECK_ID, ...SCENE_INDEX, ...DIR }, ["deck_id", "scene_index", "dir"]),
+  },
+  {
+    name: "append_beat_to_scene",
+    description: "Append a new beat to the end of a scene, addressed by scene index. Use this to fill a scene that has no beats, which no flat beat index can address.",
+    inputSchema: schema({ ...DECK_ID, ...SCENE_INDEX }, ["deck_id", "scene_index"]),
+  },
+  {
     name: "delete_scene_at",
-    description: "Delete the scene containing the given beat, including all of its beats.",
-    inputSchema: schema({ ...DECK_ID, ...BEAT_INDEX }, ["deck_id", "beat_index"]),
+    description: "Delete a whole scene and all of its beats. Give exactly one of beat_index (deletes the scene containing that beat) or scene_index (deletes that scene directly, including one with no beats).",
+    inputSchema: schema({ ...DECK_ID, ...BEAT_INDEX, ...SCENE_INDEX }, ["deck_id"]),
     annotations: { destructiveHint: true },
   },
   {
