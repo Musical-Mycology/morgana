@@ -58,16 +58,15 @@ export default function Editor() {
     setSaveError(s === "error" ? (error ?? "unknown error") : null);
     if (s === "saved") externalChange.resync();
   }, [externalChange]);
-  useAutosave(doc, revision, onStatus);
+  const { markSaved } = useAutosave(doc, revision, onStatus);
 
   const retrySave = useCallback(() => {
     if (!doc) return;
-    setStatus("saving");
-    setSaveError(null);
+    onStatus("saving");
     saveDeck(doc)
-      .then(() => { setStatus("saved"); externalChange.resync(); })
-      .catch((e) => { setStatus("error"); setSaveError(e instanceof Error ? e.message : String(e)); });
-  }, [doc, externalChange]);
+      .then(() => { markSaved(revision); onStatus("saved"); })
+      .catch((e) => onStatus("error", e instanceof Error ? e.message : String(e)));
+  }, [doc, revision, onStatus, markSaved]);
 
   const selectedFlat = beats[selected] ?? null;
   const sceneId = selectedFlat?.sceneId ?? null;
