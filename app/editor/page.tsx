@@ -12,6 +12,9 @@ import { Inspector } from "@/components/editor/Inspector";
 import { DeckSettings } from "@/components/editor/DeckSettings";
 import { ExportPanel } from "@/components/editor/ExportPanel";
 import { McpPanel } from "@/components/editor/McpPanel";
+import { LintPanel } from "@/components/editor/LintPanel";
+import { useLint } from "@/lib/editor/use-lint";
+import { lintCounts } from "@/lib/editor/lint";
 import { primaryPath } from "@/lib/editor/selection";
 import { useExternalChangePoll } from "@/lib/editor/use-external-change-poll";
 
@@ -33,11 +36,13 @@ export default function Editor() {
   const selectedObjectPath = primaryPath(selectedObjectPaths);
   const canvasRef = useRef<CanvasHandle>(null);
   const [time, setTime] = useState({ t: 0, duration: 0 });
-  type Panel = "inspector" | "settings" | "export" | "mcp";
+  type Panel = "inspector" | "settings" | "export" | "mcp" | "lint";
   const [panel, setPanel] = useState<Panel>("inspector");
   const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? "inspector" : p));
   const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<SaveStatus>("idle");
+  const issues = useLint();
+  const counts = lintCounts(issues);
 
   const [deckId, setDeckId] = useState<string | null>(null);
   useEffect(() => {
@@ -98,6 +103,14 @@ export default function Editor() {
         <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => togglePanel("settings")}>Deck settings</button>
         <button className="ed__pill ed__pill--ghost" data-testid="export-toggle" onClick={() => togglePanel("export")}>Export</button>
         <button className="ed__pill ed__pill--ghost" data-testid="mcp-toggle" onClick={() => togglePanel("mcp")}>Connect Claude</button>
+        <button className="ed__pill ed__pill--ghost" data-testid="lint-toggle" onClick={() => togglePanel("lint")}>
+          Issues
+          {counts.errors + counts.warnings > 0 && (
+            <span className="ed__lint-badge" data-testid="lint-count" data-errors={counts.errors}>
+              {counts.errors > 0 ? `${counts.errors}!` : counts.warnings}
+            </span>
+          )}
+        </button>
         <span data-testid="save-status" style={{ marginLeft: "auto", color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
       </div>
       <div className="ed__leftdock">
@@ -106,7 +119,7 @@ export default function Editor() {
       </div>
       <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} /></div>
       <Timeline canvasRef={canvasRef} time={time} />
-      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : <Inspector />}
+      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <Inspector />}
     </div>
   );
 }

@@ -50,3 +50,11 @@
 
 .ed__scene-row { display: flex; align-items: center; gap: 2px; padding: 9px 8px 4px 12px; }
 .ed__scene-empty { font-size: 11px; color: var(--ed-fg-muted); font-style: italic; padding: 4px 12px 8px; }
+.ed__lint-clean { color: var(--ed-fg-muted); font-size: 12px; padding: 4px 12px; }
+.ed__lint-row { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; font-size: 12px; padding: 6px 12px; background: transparent; border: 0; border-top: 1px solid var(--ed-line); color: var(--ed-fg); font-family: var(--ed-body); }
+button.ed__lint-row { cursor: pointer; }
+button.ed__lint-row:hover { background: rgba(253,243,228,0.06); }
+.ed__lint-chip { font-family: var(--ed-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; flex: none; }
+.ed__lint-chip--error { color: var(--ed-accent-2); }
+.ed__lint-chip--warning { color: var(--ed-fg-muted); }
+.ed__lint-badge { font-family: var(--ed-mono); font-size: 10px; margin-left: 4px; }
