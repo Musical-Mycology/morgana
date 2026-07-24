@@ -58,3 +58,6 @@ button.ed__lint-row:hover { background: rgba(253,243,228,0.06); }
 .ed__lint-chip--error { color: var(--ed-accent-2); }
 .ed__lint-chip--warning { color: var(--ed-fg-muted); }
 .ed__lint-badge { font-family: var(--ed-mono); font-size: 10px; margin-left: 4px; }
+
+.ed__empty-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; color: var(--ed-fg-muted); font-size: 13px; text-align: center; }
+.ed__empty-hint { position: absolute; inset: auto 0 12px; text-align: center; color: var(--ed-fg-muted); font-size: 12px; pointer-events: none; }
