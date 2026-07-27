@@ -605,7 +605,7 @@ test("sprite keys are unique across simultaneously live sources", () => {
 });
 
 test("the total cap drops whole trailing sources", () => {
-  const fat: Action = { ...(emitter as never), freq: 1000, decay: 10000 } as Action;
+  const fat: Action = { ...emitter, freq: 1000, decay: 10000 } as Action;
   const s = scene([[fat, fat, fat, { kind: "wait", ms: 5000 }]]);
   const out = noteFieldStateAt(s, 0, 4);
   expect(out.length).toBeLessThanOrEqual(MAX_SPRITES_TOTAL);
