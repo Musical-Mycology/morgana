@@ -181,13 +181,11 @@ Run:
 npm test
 ```
 
-Expected: PASS, no failures. Then run:
+Expected: PASS, no failures.
 
-```bash
-npm run lint
-```
-
-Expected: no errors.
+Do **not** try to run `npm run lint`: this repo has no committed ESLint config, so
+`next lint` stalls on an interactive setup prompt. That is pre-existing on `main`
+and CI has no lint step either. `npm test` is the gate for this task.
 
 - [ ] **Step 7: Commit**
 

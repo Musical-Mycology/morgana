@@ -130,7 +130,7 @@ root-level group plus loose siblings, `[grp(a, b), c, d]`:
    `selectedObjectPaths` untouched;
 5. a two-path selection collapses to just the moved object.
 
-Verification: `npm test` (full unit suite) and `npm run lint`.
+Verification: `npm test` (full unit suite). `npm run lint` is unavailable in this repo — no committed ESLint config, and CI has no lint step.
 
 ## Out of scope
 
