@@ -132,3 +132,62 @@ test("emitter clamps to MAX_SPRITES_PER_SOURCE, keeping the newest notes", () =>
   // keys are unique among live sprites (pool slots do not collide)
   expect(new Set(out.map((s) => s.key)).size).toBe(out.length);
 });
+
+import { circleSpritesAt } from "@/engine/components/effects/note-state";
+
+const RING = (over: Partial<Extract<Action, { kind: "note_circle" }>> = {}) =>
+  ({ kind: "note_circle", pos: { x: 0.5, y: 0.5 }, width: 0.4, height: 0.2,
+     hex: ["#111111", "#222222"], bounce: 0, notes: 4, speed: 4000, ...over }) as
+    Extract<Action, { kind: "note_circle" }>;
+
+test("ring emits `notes` sprites, evenly phased, cycling the palette", () => {
+  const out = circleSpritesAt(RING(), 0, 0);
+  expect(out.length).toBe(4);
+  expect(out.map((s) => s.hex)).toEqual(["#111111", "#222222", "#111111", "#222222"]);
+  expect(new Set(out.map((s) => s.key)).size).toBe(4);
+  for (const s of out) { expect(s.opacity).toBe(1); expect(s.scale).toBe(1); }
+});
+
+test("ring with bounce=0 traces an exact ellipse", () => {
+  const a = RING({ notes: 1, bounce: 0, speed: 4000 });   // rx = 0.2, ry = 0.1, 4s per orbit
+  // phase 0 at t=0 → angle 0 → (cx + rx, cy)
+  const t0 = circleSpritesAt(a, 0, 0)[0];
+  expect(t0.x).toBeCloseTo(0.7, 10);
+  expect(t0.y).toBeCloseTo(0.5, 10);
+  // quarter orbit → angle π/2 → (cx, cy + ry)
+  const t1 = circleSpritesAt(a, 0, 1)[0];
+  expect(t1.x).toBeCloseTo(0.5, 10);
+  expect(t1.y).toBeCloseTo(0.6, 10);
+  // half orbit → angle π → (cx − rx, cy)
+  const t2 = circleSpritesAt(a, 0, 2)[0];
+  expect(t2.x).toBeCloseTo(0.3, 10);
+  expect(t2.y).toBeCloseTo(0.5, 10);
+  // full orbit returns to start
+  const t4 = circleSpritesAt(a, 0, 4)[0];
+  expect(t4.x).toBeCloseTo(t0.x, 10);
+  expect(t4.y).toBeCloseTo(t0.y, 10);
+});
+
+test("bounce superimposes an always-upward hop of bounce·ry·0.5·|sin(3a)|", () => {
+  const a = RING({ notes: 1, bounce: 1, speed: 4000 });   // ry = 0.1
+  // at t=1 the angle is π/2; |sin(3·π/2)| = 1 → hop = 1·0.1·0.5·1 = 0.05, subtracted from y
+  const s = circleSpritesAt(a, 0, 1)[0];
+  expect(s.y).toBeCloseTo(0.6 - 0.05, 10);
+});
+
+test("ring falls back to white when the palette is empty", () => {
+  expect(circleSpritesAt(RING({ hex: [], notes: 1 }), 0, 0)[0].hex).toBe("#FFFFFF");
+});
+
+test("ring applies its defaults and guards", () => {
+  const noOpts = { kind: "note_circle", pos: { x: 0.5, y: 0.5 }, width: 0.2, height: 0.2, hex: ["#fff"] } as
+    Extract<Action, { kind: "note_circle" }>;
+  expect(circleSpritesAt(noOpts, 0, 0).length).toBe(8);       // notes defaults to 8
+  expect(circleSpritesAt(RING(), 0, -1)).toEqual([]);         // before the source starts
+  expect(circleSpritesAt(RING({ notes: 0 }), 0, 0).length).toBe(1);   // clamped to at least 1
+  expect(circleSpritesAt(RING({ notes: 5000 }), 0, 0).length).toBe(MAX_SPRITES_PER_SOURCE);
+});
+
+test("ring is deterministic", () => {
+  expect(circleSpritesAt(RING(), 0, 1.7)).toEqual(circleSpritesAt(RING(), 0, 1.7));
+});

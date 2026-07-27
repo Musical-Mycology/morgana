@@ -114,3 +114,37 @@ export function emitterSpritesAt(
   }
   return out;
 }
+
+/** Live sprites of one note_circle, `elapsed` seconds after the source started.
+ *  Already closed-form in the engine — this is the same ellipse math with the GSAP
+ *  angle tween replaced by `2π·elapsed/dur`, in normalized stage space. */
+export function circleSpritesAt(
+  a: Extract<Action, { kind: "note_circle" }>,
+  srcIdx: number,
+  elapsed: number,
+): NoteSpriteState[] {
+  if (elapsed < 0) return [];
+  const N = Math.max(1, Math.round(a.notes ?? 8));
+  const count = Math.min(N, MAX_SPRITES_PER_SOURCE);
+  const dur = Math.max(0.1, (a.speed ?? 6000) / 1000);   // speed is ms per orbit
+  const colors = a.hex.length ? a.hex : ["#FFFFFF"];
+  const rx = a.width / 2;
+  const ry = a.height / 2;
+  const bounce = a.bounce ?? 0;
+
+  const out: NoteSpriteState[] = [];
+  for (let k = 0; k < count; k++) {
+    const ang = (k / N) * Math.PI * 2 + (elapsed / dur) * Math.PI * 2;
+    const hop = bounce * ry * 0.5 * Math.abs(Math.sin(ang * 3));   // |sin| → always upward
+    out.push({
+      key: `${srcIdx}:${k}`,
+      x: a.pos.x + Math.cos(ang) * rx,
+      y: a.pos.y + Math.sin(ang) * ry - hop,
+      scale: 1,
+      opacity: 1,
+      hex: colors[k % colors.length],
+      glyph: randomGlyph(k),
+    });
+  }
+  return out;
+}
