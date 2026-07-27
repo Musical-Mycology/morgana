@@ -7,7 +7,7 @@ import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene
 import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTransform as mUpdateObjectTransform, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject, translateObjectBy as mTranslateObjectBy } from "./object-mutations";
 import { uniqueObjectId, findObjectPath, getObjectAt, type ObjectPath } from "./object-tree";
 import { descriptorForObject } from "./object-registry";
-import { togglePath, sameParentSiblings } from "./selection";
+import { togglePath, sameParentSiblings, swapSelectionSlots } from "./selection";
 import { buildObjectAnimation, insertActionAt, type ObjectVerbKind } from "./object-actions";
 
 const HISTORY_CAP = 50;
@@ -205,7 +205,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!part.doc) return {};
     return { ...part, selectedObjectPaths: [], enteredGroupPath: null };
   }),
-  reorderObject: (sceneId, path, dir) => set((s) => commit(s, (doc) => mReorderObject(doc, sceneId, path, dir))),
+  reorderObject: (sceneId, path, dir) => set((s) => {
+    const part = commit(s, (doc) => mReorderObject(doc, sceneId, path, dir));
+    if (!part.doc) return {};                      // boundary/unknown-scene no-op: selection must not move either
+    const parent = path.slice(0, -1);
+    const idx = path[path.length - 1];
+    return { ...part, selectedObjectPaths: swapSelectionSlots(s.selectedObjectPaths, parent, idx, idx + dir) };
+  }),
   groupObjects: (sceneId, paths) => set((s) => {
     if (!s.doc || !sameParentSiblings(paths)) return {};
     const groupId = uniqueObjectId(s.doc, sceneId);
