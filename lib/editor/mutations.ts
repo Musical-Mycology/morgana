@@ -69,26 +69,73 @@ export function deleteBeatAt(doc: DeckDoc, flatIdx: number): DeckDoc {
   return mapScene(doc, loc.sceneIdx, (s) => ({ ...s, beats: s.beats.filter((_, bi) => bi !== loc.beatIdx) }));
 }
 
-/** Swap a beat with its neighbour WITHIN its scene. Cross-scene moves are out of scope (v1). */
+/** Move a beat one position in flat (filmstrip) order. Within a scene this swaps with the
+ *  neighbouring beat. At a scene boundary it TRANSFERS the beat into the adjacent scene —
+ *  which may be empty, and which may leave the source scene empty (both are legal). No-op
+ *  only when there is no adjacent scene in that direction.
+ *
+ *  NOTE: a transfer leaves the beat's FLAT index unchanged (it is removed from one scene's
+ *  edge and re-inserted at the adjacent scene's facing edge). Callers must resolve the new
+ *  selection by beat id, not by `flatIdx + dir`. */
 export function moveBeatBy(doc: DeckDoc, flatIdx: number, dir: -1 | 1): DeckDoc {
   const loc = beatLocation(doc, flatIdx);
   if (!loc) return doc;
   const beats = doc.scenes[loc.sceneIdx].beats;
   const target = loc.beatIdx + dir;
-  if (target < 0 || target >= beats.length) return doc; // scene boundary → no-op
-  const next = beats.slice();
-  [next[loc.beatIdx], next[target]] = [next[target], next[loc.beatIdx]];
-  return mapScene(doc, loc.sceneIdx, (s) => ({ ...s, beats: next }));
+
+  if (target >= 0 && target < beats.length) {         // within-scene swap
+    const next = beats.slice();
+    [next[loc.beatIdx], next[target]] = [next[target], next[loc.beatIdx]];
+    return mapScene(doc, loc.sceneIdx, (s) => ({ ...s, beats: next }));
+  }
+
+  const destIdx = loc.sceneIdx + dir;                  // scene boundary → transfer
+  if (destIdx < 0 || destIdx >= doc.scenes.length) return doc;
+  const beat = beats[loc.beatIdx];
+  return {
+    ...doc,
+    scenes: doc.scenes.map((s, si) => {
+      if (si === loc.sceneIdx) return { ...s, beats: s.beats.filter((_, bi) => bi !== loc.beatIdx) };
+      if (si === destIdx) return { ...s, beats: dir === -1 ? [...s.beats, beat] : [beat, ...s.beats] };
+      return s;
+    }),
+  };
 }
 
 export function appendScene(doc: DeckDoc): DeckDoc {
   return { ...doc, scenes: [...doc.scenes, { id: uniqueSceneId(doc), beats: [newBeat(uniqueBeatId(doc))] }] };
 }
 
+/** Swap a scene with its neighbour. Out of range or at either end → no-op (same reference). */
+export function moveSceneBy(doc: DeckDoc, sceneIdx: number, dir: -1 | 1): DeckDoc {
+  const target = sceneIdx + dir;
+  if (sceneIdx < 0 || sceneIdx >= doc.scenes.length) return doc;
+  if (target < 0 || target >= doc.scenes.length) return doc;
+  const scenes = doc.scenes.slice();
+  [scenes[sceneIdx], scenes[target]] = [scenes[target], scenes[sceneIdx]];
+  return { ...doc, scenes };
+}
+
+/** Delete a scene by its own index. Addresses empty scenes, which have no flat beat index. */
+export function deleteSceneAtIndex(doc: DeckDoc, sceneIdx: number): DeckDoc {
+  if (sceneIdx < 0 || sceneIdx >= doc.scenes.length) return doc;
+  return { ...doc, scenes: doc.scenes.filter((_, si) => si !== sceneIdx) };
+}
+
+/** Delete the scene CONTAINING the given flat beat index. Retained unchanged for the
+ *  published `delete_scene_at` MCP tool. */
 export function deleteSceneAt(doc: DeckDoc, flatIdx: number): DeckDoc {
   const loc = beatLocation(doc, flatIdx);
   if (!loc) return doc;
-  return { ...doc, scenes: doc.scenes.filter((_, si) => si !== loc.sceneIdx) };
+  return deleteSceneAtIndex(doc, loc.sceneIdx);
+}
+
+/** Append a fresh beat to a scene. Unlike insertBeatAfter (flat-index keyed) this can
+ *  target an empty scene, which has no flat index to insert after. */
+export function appendBeatToScene(doc: DeckDoc, sceneIdx: number): DeckDoc {
+  if (sceneIdx < 0 || sceneIdx >= doc.scenes.length) return doc;
+  const beat = newBeat(uniqueBeatId(doc));
+  return mapScene(doc, sceneIdx, (s) => ({ ...s, beats: [...s.beats, beat] }));
 }
 
 /** Insert a new action of `kind` after `actionIdx` (append to the end when `null`). */

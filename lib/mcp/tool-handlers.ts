@@ -2,7 +2,7 @@ import { loadDeck, saveDeck, listDecks } from "@/lib/store/deck-store";
 import { validateDeckDoc, type DeckDoc } from "@/engine/deck-doc";
 import {
   insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy,
-  appendScene, deleteSceneAt,
+  appendScene, deleteSceneAt, deleteSceneAtIndex, moveSceneBy, appendBeatToScene,
   insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind,
 } from "@/lib/editor/mutations";
 import { beatLocation } from "@/lib/editor/flatten-beats";
@@ -79,8 +79,19 @@ export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc 
       return mutate(deckId, (doc) => moveBeatBy(doc, requireNumber(a, "beat_index"), requireDir(a, "dir")));
     case "append_scene":
       return mutate(deckId, (doc) => appendScene(doc));
-    case "delete_scene_at":
-      return mutate(deckId, (doc) => deleteSceneAt(doc, requireNumber(a, "beat_index")));
+    case "delete_scene_at": {
+      const beatIndex = optionalNumber(a, "beat_index");
+      const sceneIndex = optionalNumber(a, "scene_index");
+      if ((beatIndex == null) === (sceneIndex == null)) {
+        throw new ToolCallError('give exactly one of "beat_index" or "scene_index"');
+      }
+      return mutate(deckId, (doc) =>
+        sceneIndex == null ? deleteSceneAt(doc, beatIndex!) : deleteSceneAtIndex(doc, sceneIndex));
+    }
+    case "move_scene_by":
+      return mutate(deckId, (doc) => moveSceneBy(doc, requireNumber(a, "scene_index"), requireDir(a, "dir")));
+    case "append_beat_to_scene":
+      return mutate(deckId, (doc) => appendBeatToScene(doc, requireNumber(a, "scene_index")));
     case "insert_action_after":
       return mutate(deckId, (doc) =>
         insertActionAfter(doc, requireNumber(a, "beat_index"), optionalNumber(a, "action_index"), requireString(a, "kind")));

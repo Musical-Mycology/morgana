@@ -194,10 +194,19 @@ decide who's allowed to hit `/api/mcp`.
    and offers a "reload" prompt rather than overwriting either side silently.
 
 Tool surface: `list_decks`, `read_deck`, beat operations (`insert_beat_after`, `duplicate_beat_at`,
-`delete_beat_at`, `move_beat_by`), scene operations (`append_scene`, `delete_scene_at`), and action
-operations (`insert_action_after`, `duplicate_action_at`, `delete_action_at`, `move_action_by`,
-`convert_action_kind`, `update_action`, `update_meta`) — see [`lib/mcp/tool-defs.ts`](lib/mcp/tool-defs.ts)
-for the exact schemas.
+`delete_beat_at`, `move_beat_by`), scene operations (`append_scene`, `delete_scene_at`,
+`move_scene_by`, `append_beat_to_scene`), and action operations (`insert_action_after`,
+`duplicate_action_at`, `delete_action_at`, `move_action_by`, `convert_action_kind`, `update_action`,
+`update_meta`) — see [`lib/mcp/tool-defs.ts`](lib/mcp/tool-defs.ts) for the exact schemas.
+
+`move_beat_by` moves a beat one position in filmstrip order. Within a scene it swaps with
+the neighbouring beat; at a scene edge it moves the beat into the adjacent scene. It is only
+a no-op when there is no adjacent scene in that direction. (Before 2026-07-24 it no-opped at
+every scene boundary.)
+
+A scene may legitimately have no beats. Use `append_beat_to_scene` to fill one and
+`delete_scene_at` with `scene_index` to remove one — a flat `beat_index` cannot address a
+scene that contains no beats.
 
 ---
 

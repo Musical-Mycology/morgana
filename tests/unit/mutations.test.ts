@@ -32,10 +32,14 @@ test("deleteBeatAt removes the targeted beat", () => {
   expect(flattenBeats(d).map((e) => e.beat.id)).toEqual(["a", "c"]);
 });
 
-test("moveBeatBy swaps within a scene; no-ops at the scene boundary", () => {
+test("moveBeatBy swaps within a scene", () => {
   expect(moveBeatBy(base(), 0, 1).scenes[0].beats.map((b) => b.id)).toEqual(["b", "a"]);
-  const d = base();
-  expect(moveBeatBy(d, 1, 1)).toBe(d);                // "b" is last in s1 → boundary no-op (same ref)
+});
+
+test("moveBeatBy transfers across a scene boundary instead of no-opping", () => {
+  const d = moveBeatBy(base(), 1, 1);                 // "b" is last in s1 → prepend to s2
+  expect(d.scenes[0].beats.map((b) => b.id)).toEqual(["a"]);
+  expect(d.scenes[1].beats.map((b) => b.id)).toEqual(["b", "c"]);
 });
 
 test("appendScene / deleteSceneAt add and remove whole scenes", () => {

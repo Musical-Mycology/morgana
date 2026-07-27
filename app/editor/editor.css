@@ -47,3 +47,6 @@
 }
 .ed__handle--rotate { border-radius: 50%; transform: translate(-50%, calc(-50% - 16px)); }
 .ed__obj-ph { display: grid; place-items: center; width: 100%; height: 100%; font-size: 11px; color: var(--ed-fg-muted); border: 1px dashed var(--ed-line); }
+
+.ed__scene-row { display: flex; align-items: center; gap: 2px; padding: 9px 8px 4px 12px; }
+.ed__scene-empty { font-size: 11px; color: var(--ed-fg-muted); font-style: italic; padding: 4px 12px 8px; }

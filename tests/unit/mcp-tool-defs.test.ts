@@ -33,3 +33,22 @@ test("convert_action_kind's new_kind enum matches the effect registry", () => {
   expect(props.new_kind.enum).toContain("text");
   expect(props.new_kind.enum).toContain("obj_reveal");
 });
+
+test("includes the scene-structural tools", () => {
+  const names = TOOL_DEFS.map((t) => t.name);
+  expect(names).toEqual(expect.arrayContaining(["move_scene_by", "append_beat_to_scene"]));
+});
+
+test("delete_scene_at accepts either a beat index or a scene index, requiring neither outright", () => {
+  const tool = TOOL_DEFS.find((t) => t.name === "delete_scene_at")!;
+  const props = tool.inputSchema.properties as Record<string, unknown>;
+  expect(props.beat_index).toBeDefined();
+  expect(props.scene_index).toBeDefined();
+  expect(tool.inputSchema.required).toEqual(["deck_id"]);
+});
+
+test("move_beat_by's description reflects that it now crosses scene boundaries", () => {
+  const tool = TOOL_DEFS.find((t) => t.name === "move_beat_by")!;
+  expect(tool.description.toLowerCase()).toContain("scene");
+  expect(tool.description.toLowerCase()).not.toContain("no-op at a scene boundary");
+});
