@@ -49,6 +49,10 @@ Notable in-repo docs:
   the effect-descriptor registry, the scrub compromise).
 - `docs/2026-06-29-morgana-end-state-design.md` — the end-state ("north star")
   design; the tier roadmap (1.5 Hardening / 2 Depth / 3 Platform) lives here.
+  **Tier 1.5 (Hardening) is complete as of 2026-07-27** — scene structural
+  editing (reorder/delete/cross-scene beat move), the lint/Issues panel, and
+  empty/error states (see `docs/superpowers/plans/2026-07-24-tier-1-5-hardening-sweep.md`).
+  Tier 2 (Depth) is next.
 - `docs/superpowers/specs/` + `docs/superpowers/plans/` — per-feature design
   specs and implementation plans.
 
@@ -76,8 +80,9 @@ mm-jenkins CI, an MM auth requirement to run) is out of scope by construction.
 - **Export round-trip.** `deckDocToModule` (`lib/bridge/export-ts.ts`) emits a
   deck's scenes as a TS module the site can import; the round-trip closes when
   mm-website's hand-authored `investor-hub/lib/deck/` modules are authored in
-  Morgana instead. In-app export UI and import are roadmap (tracked in the
-  Morgana repo's issues/docs).
+  Morgana instead. **In-app export shipped** (the Export panel, `export-toggle`
+  → `components/editor/ExportPanel.tsx`); **import is still roadmap**, so the
+  round-trip is currently one-way.
 
 ## AI integration (MCP server)
 
@@ -93,7 +98,19 @@ unchanged if it's never connected to. Design:
 `docs/superpowers/specs/2026-07-23-morgana-mcp-server-design.md` (in-repo,
 supersedes the end-state design's earlier §12 "in-app AI assistant" sketch,
 which had assumed a third-party "Sign in with Claude" OAuth product that
-doesn't exist).
+doesn't exist). As of the Tier 1.5 hardening sweep, the tool surface also
+includes scene-structural tools with `scene_index` addressing:
+`move_scene_by`, `append_beat_to_scene`, and `delete_scene_at` (which also
+accepts `scene_index` directly, in addition to `beat_index`).
+
+**Contract change to an already-published tool (2026-07-27):** `move_beat_by`
+used to no-op at a scene boundary; it now *transfers* the beat into the
+adjacent scene, and is a no-op only when no adjacent scene exists in that
+direction. Connected Claude clients see the changed behavior immediately —
+there is no version negotiation on the tool surface — so the tool's own
+`description` and the README were updated in the same change. Treat any future
+change to a shipped tool's semantics the same way: the description is the only
+contract a remote model reads.
 
 ## CI / ops
 
@@ -101,6 +118,19 @@ CI runs in **GitHub Actions** (unit + e2e), keeping the repo free of MM infra
 coupling — mm-jenkins is intentionally *not* used here. No Kuma monitor and no
 hosting target yet (`ci_pipeline: none`, `expected_kuma_monitor: none` in
 `mm-meta.yml`) until a deployment is chosen.
+
+**Gotcha — a scene with no beats is legal, and must stay reachable.** The
+filmstrip originally derived its scene groups from the *flat beat list*, so a
+scene whose last beat was deleted became invisible: unselectable, unfillable,
+undeletable, and still present in the saved JSON. Since the Tier 1.5 sweep the
+filmstrip iterates `doc.scenes` (`sceneGroups` in `lib/editor/flatten-beats.ts`)
+and renders an empty scene with its header plus an empty-state row, and a
+`scene-empty` lint warning surfaces it. Cross-scene beat move can legitimately
+empty a scene, so this is a normal authoring state, not a defect. Do **not**
+"tidy" it by auto-pruning empty scenes — that silently restores the orphan bug
+and removes the only way to refill a scene. Any new code that maps scene→beat
+indices must tolerate a zero-beat scene (`flatIndexOf` returns `-1` for one,
+which is why lint rows located only to a scene are deliberately not jumpable).
 
 **Gotcha — the e2e build step must not move into a Playwright `globalSetup`.**
 The suite needs one `next build` up front (three `webServer` entries share it:

@@ -17,6 +17,8 @@ import { useLint } from "@/lib/editor/use-lint";
 import { lintCounts } from "@/lib/editor/lint";
 import { primaryPath } from "@/lib/editor/selection";
 import { useExternalChangePoll } from "@/lib/editor/use-external-change-poll";
+import { CanvasPlaceholderCard, EmptyBeatHint } from "@/components/editor/EmptyStates";
+import { canvasPlaceholder, isBeatEmpty } from "@/lib/editor/empty-state";
 
 const STATUS_LABEL: Record<SaveStatus, string> = { idle: "", saving: "Saving…", saved: "Saved", error: "Save failed" };
 
@@ -46,11 +48,16 @@ export default function Editor() {
   const counts = lintCounts(issues);
 
   const [deckId, setDeckId] = useState<string | null>(null);
+  const loadDeckById = useCallback((id: string) => {
+    setLoadError(false);
+    loadDeck(id).then(load).catch((e) => { console.error("failed to load deck", e); setLoadError(true); });
+  }, [load]);
+
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("deck") ?? "demo";
     setDeckId(id);
-    loadDeck(id).then(load).catch((e) => { console.error("failed to load deck", e); setLoadError(true); });
-  }, [load]);
+    loadDeckById(id);
+  }, [loadDeckById]);
 
   const externalChange = useExternalChangePoll(deckId);
   const onStatus = useCallback((s: SaveStatus, error?: string) => {
@@ -62,14 +69,29 @@ export default function Editor() {
 
   const retrySave = useCallback(() => {
     if (!doc) return;
+    // Capture the revision this retry is for at click time. A newer autosave (or another
+    // retry) can be in flight by the time this one settles, and it can resolve after that
+    // newer attempt — checking the store's *current* revision against the one captured here
+    // stops a stale response from calling onStatus("saved") over a genuinely-still-failing
+    // (or still-in-progress) latest edit.
+    const rev = revision;
     onStatus("saving");
     saveDeck(doc)
-      .then(() => { markSaved(revision); onStatus("saved"); })
-      .catch((e) => onStatus("error", e instanceof Error ? e.message : String(e)));
+      .then(() => {
+        if (useEditor.getState().revision !== rev) return;
+        markSaved(rev);
+        onStatus("saved");
+      })
+      .catch((e) => {
+        if (useEditor.getState().revision !== rev) return;
+        onStatus("error", e instanceof Error ? e.message : String(e));
+      });
   }, [doc, revision, onStatus, markSaved]);
 
   const selectedFlat = beats[selected] ?? null;
   const sceneId = selectedFlat?.sceneId ?? null;
+  const placeholder = canvasPlaceholder({ loadError, doc, selectedFlat });
+  const beatEmpty = doc && selectedFlat ? isBeatEmpty(doc, selectedFlat) : false;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -107,7 +129,7 @@ export default function Editor() {
       )}
       <div className="ed__bar">
         <span className="ed__brand">Morgana</span>
-        <span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? (loadError ? "couldn't load deck" : "no deck")}</span>
+        <span style={{ color: "var(--ed-fg-muted)" }}>{doc?.meta.title ?? "no deck"}</span>
         <button className="ed__pill ed__pill--ghost" data-testid="undo" disabled={!canUndo} onClick={() => undo()}>↶ Undo</button>
         <button className="ed__pill ed__pill--ghost" data-testid="redo" disabled={!canRedo} onClick={() => redo()}>↷ Redo</button>
         <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => togglePanel("settings")}>Deck settings</button>
@@ -137,7 +159,11 @@ export default function Editor() {
         <div className="ed__leftdock-film"><Filmstrip /></div>
         <div className="ed__leftdock-layers"><LayersPanel /></div>
       </div>
-      <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} /></div>
+      <div className="ed__canvas" style={{ position: "relative" }}>
+        {placeholder
+          ? <CanvasPlaceholderCard kind={placeholder} deckId={deckId} onRetry={() => deckId && loadDeckById(deckId)} />
+          : <><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} />{beatEmpty && <EmptyBeatHint />}</>}
+      </div>
       <Timeline canvasRef={canvasRef} time={time} />
       {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <Inspector />}
     </div>

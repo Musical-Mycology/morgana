@@ -74,3 +74,25 @@ test("a beat moves across a scene boundary, empties its scene, and can refill it
 
   await request.delete(`/api/decks/${id}`);
 });
+
+test("an empty deck offers to add the first scene", async ({ page, request }) => {
+  const id = "e2e-empty-deck";
+  await request.delete(`/api/decks/${id}`).catch(() => {});
+  await request.post("/api/decks", { data: { id, title: "Empty" } });
+  await request.put(`/api/decks/${id}`, { data: { version: 1, meta: { id, title: "Empty" }, scenes: [] } });
+
+  await page.goto(`/editor?deck=${id}`);
+  await expect(page.getByTestId("empty-deck")).toBeVisible();
+  await page.getByTestId("empty-deck").getByRole("button").click();
+  await expect(page.getByTestId("empty-deck")).toHaveCount(0);
+  await expect(page.getByTestId("filmstrip").locator(".ed__beat")).toHaveCount(1);
+
+  await request.delete(`/api/decks/${id}`);
+});
+
+test("a missing deck offers Retry and a way back to the library", async ({ page }) => {
+  await page.goto("/editor?deck=does-not-exist");
+  await expect(page.getByTestId("couldnt-load-deck")).toBeVisible();
+  await expect(page.getByTestId("load-retry")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Back to library" })).toBeVisible();
+});
