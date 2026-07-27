@@ -3,9 +3,10 @@
  *  the same time always paints the same frame. See docs/superpowers/specs/
  *  2026-07-27-time-pure-particles-7a-design.md §3. */
 
-import type { Action } from "@/engine/deck/types";
+import type { Action, Scene } from "@/engine/deck/types";
 import type { NoteGlyph } from "@/engine/deck/story-assets";
 import { randomGlyph } from "./notes";
+import { beatTimeline, beatDuration } from "@/engine/authoring/seek";
 
 /** Reference stage width the engine's px constants were authored against. */
 export const REF_W = 1920;
@@ -145,6 +146,70 @@ export function circleSpritesAt(
       hex: colors[k % colors.length],
       glyph: randomGlyph(k),
     });
+  }
+  return out;
+}
+
+type NoteSource =
+  | { kind: "emitter"; action: Extract<Action, { kind: "note_emitter" }>; srcIdx: number; startBeat: number; windowStart: number }
+  | { kind: "ring"; action: Extract<Action, { kind: "note_circle" }>; srcIdx: number; startBeat: number; windowStart: number };
+
+/** Walk one beat's timeline up to `limit` seconds, mutating the live source list.
+ *  `limit = Infinity` replays the whole beat (used when folding prior beats). */
+function foldBeat(
+  sources: NoteSource[], timeline: Action[], beatIdx: number, limit: number, nextIdx: () => number,
+): NoteSource[] {
+  let live = sources;
+  for (const { action, start } of beatTimeline(timeline)) {
+    if (start > limit) break;
+    if (action.kind === "note_emitter") {
+      live.push({ kind: "emitter", action, srcIdx: nextIdx(), startBeat: beatIdx, windowStart: start });
+    } else if (action.kind === "note_circle") {
+      live.push({ kind: "ring", action, srcIdx: nextIdx(), startBeat: beatIdx, windowStart: start });
+    } else if (action.kind === "stop_notes") {
+      live.length = 0;
+    } else if (action.kind === "stop_circle") {
+      live = live.filter((s) => s.kind !== "ring");
+    }
+  }
+  return live;
+}
+
+/** Every live note sprite at (beatIndex, tLocal seconds into that beat).
+ *
+ *  Prior beats are folded to their settled state to derive which sources survive
+ *  (stop_notes / stop_circle remove them), then each carried source's phase is
+ *  continued across the intervening beat durations. Mirrors objectStateAt's fold,
+ *  so there is one cross-beat model in the codebase. */
+export function noteFieldStateAt(scene: Scene, beatIndex: number, tLocal: number): NoteSpriteState[] {
+  const beats = scene?.beats;
+  if (!beats?.length) return [];                                   // zero-beat scenes are legal
+  if (beatIndex < 0 || beatIndex >= beats.length) return [];
+
+  let counter = 0;
+  const nextIdx = () => counter++;
+  let sources: NoteSource[] = [];
+  for (let bi = 0; bi < beatIndex; bi++) {
+    sources = foldBeat(sources, beats[bi].timeline, bi, Infinity, nextIdx);
+  }
+  sources = foldBeat(sources, beats[beatIndex].timeline, beatIndex, tLocal, nextIdx);
+
+  const elapsedOf = (s: NoteSource): number => {
+    if (s.startBeat === beatIndex) return tLocal - s.windowStart;
+    let e = beatDuration(beats[s.startBeat].timeline) - s.windowStart;
+    for (let j = s.startBeat + 1; j < beatIndex; j++) e += beatDuration(beats[j].timeline);
+    return e + tLocal;
+  };
+
+  const out: NoteSpriteState[] = [];
+  for (const s of sources) {
+    const sprites = s.kind === "emitter"
+      ? emitterSpritesAt(s.action, s.srcIdx, elapsedOf(s))
+      : circleSpritesAt(s.action, s.srcIdx, elapsedOf(s));
+    // Total cap drops whole trailing sources, so one runaway emitter cannot blank a
+    // scene's rings mid-source.
+    if (out.length + sprites.length > MAX_SPRITES_TOTAL) break;
+    out.push(...sprites);
   }
   return out;
 }

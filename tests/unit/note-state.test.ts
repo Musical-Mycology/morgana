@@ -191,3 +191,73 @@ test("ring applies its defaults and guards", () => {
 test("ring is deterministic", () => {
   expect(circleSpritesAt(RING(), 0, 1.7)).toEqual(circleSpritesAt(RING(), 0, 1.7));
 });
+
+import { noteFieldStateAt, MAX_SPRITES_TOTAL } from "@/engine/components/effects/note-state";
+import type { Scene } from "@/engine/deck/types";
+
+const emitter: Action = { kind: "note_emitter", color: "#abcdef", pos: { x: 0.5, y: 0.5 }, dir: 0, decay: 1000, freq: 2 };
+const ring: Action = { kind: "note_circle", pos: { x: 0.5, y: 0.5 }, width: 0.2, height: 0.2, hex: ["#fff"], notes: 3, speed: 4000 };
+
+const scene = (beats: Action[][]): Scene =>
+  ({ id: "s", beats: beats.map((timeline, i) => ({ id: `b${i}`, timeline })) });
+
+test("a source started in the current beat is live only after its window opens", () => {
+  const s = scene([[{ kind: "wait", ms: 1000 }, emitter]]);   // emitter starts at t=1
+  expect(noteFieldStateAt(s, 0, 0.5)).toEqual([]);
+  expect(noteFieldStateAt(s, 0, 1.0).length).toBeGreaterThan(0);
+});
+
+test("a source started in a prior beat is still live, phase-continued", () => {
+  const s = scene([[emitter, { kind: "wait", ms: 1000 }], [{ kind: "wait", ms: 1000 }], [{ kind: "wait", ms: 1000 }]]);
+  // beat 0 contributes 1s after the emitter starts; beat 1 contributes 1s; then tLocal.
+  const atBeat2 = noteFieldStateAt(s, 2, 0.5);
+  expect(atBeat2.length).toBeGreaterThan(0);
+  // elapsed = 1 + 1 + 0.5 = 2.5 → identical to sampling the same emitter directly
+  expect(atBeat2).toEqual(emitterSpritesAt(emitter as never, 0, 2.5));
+});
+
+test("stop_notes in a prior beat removes every carried source", () => {
+  const s = scene([[emitter, ring, { kind: "wait", ms: 1000 }], [{ kind: "stop_notes" }], [{ kind: "wait", ms: 500 }]]);
+  expect(noteFieldStateAt(s, 2, 0.2)).toEqual([]);
+});
+
+test("stop_circle removes rings only and leaves emitters running", () => {
+  const s = scene([[emitter, ring, { kind: "wait", ms: 1000 }], [{ kind: "stop_circle" }, { kind: "wait", ms: 500 }]]);
+  const out = noteFieldStateAt(s, 1, 0.4);
+  expect(out.length).toBeGreaterThan(0);
+  expect(out.every((sp) => sp.hex === "#abcdef")).toBe(true);   // emitter colour only, no ring
+});
+
+test("a stop within the current beat only takes effect once its window is reached", () => {
+  const s = scene([[emitter, { kind: "wait", ms: 1000 }, { kind: "stop_notes" }, { kind: "wait", ms: 1000 }]]);
+  expect(noteFieldStateAt(s, 0, 0.5).length).toBeGreaterThan(0);   // before the stop
+  expect(noteFieldStateAt(s, 0, 1.5)).toEqual([]);                 // after the stop
+});
+
+test("the reducer is pure — two identical calls deep-equal", () => {
+  const s = scene([[emitter, ring, { kind: "wait", ms: 2000 }]]);
+  expect(noteFieldStateAt(s, 0, 1.3)).toEqual(noteFieldStateAt(s, 0, 1.3));
+});
+
+test("sprite keys are unique across simultaneously live sources", () => {
+  const s = scene([[emitter, ring, { kind: "wait", ms: 2000 }]]);
+  const out = noteFieldStateAt(s, 0, 1.3);
+  expect(new Set(out.map((sp) => sp.key)).size).toBe(out.length);
+});
+
+test("the total cap drops whole trailing sources", () => {
+  const fat: Action = { ...emitter, freq: 1000, decay: 10000 } as Action;
+  const s = scene([[fat, fat, fat, { kind: "wait", ms: 5000 }]]);
+  const out = noteFieldStateAt(s, 0, 4);
+  expect(out.length).toBeLessThanOrEqual(MAX_SPRITES_TOTAL);
+  expect(out.length).toBeGreaterThan(0);
+});
+
+test("degenerate inputs return [] and never throw", () => {
+  const s = scene([[emitter, { kind: "wait", ms: 1000 }]]);
+  expect(noteFieldStateAt(s, -1, 0.5)).toEqual([]);
+  expect(noteFieldStateAt(s, 9, 0.5)).toEqual([]);
+  expect(noteFieldStateAt(scene([]), 0, 0.5)).toEqual([]);              // zero-beat scene (legal!)
+  expect(noteFieldStateAt(scene([[]]), 0, 0.5)).toEqual([]);            // empty timeline
+  expect(noteFieldStateAt({ id: "s" } as Scene, 0, 0.5)).toEqual([]);   // missing beats
+});
