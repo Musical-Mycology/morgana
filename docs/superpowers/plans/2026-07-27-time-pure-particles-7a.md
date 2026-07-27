@@ -29,7 +29,7 @@
 | `engine/components/NoteField.tsx` | **Rewrite** | Pooled DOM renderer. `renderAt(scene, beatIndex, t)` + `applyNoteState`. 16:9 sprite host. |
 | `engine/components/effects/notes.ts` | **Modify** | Keep `makeNoteHex` + `randomGlyph`; delete `makeNote`, `emitNote`, `launchNote`. |
 | `components/editor/DeckCanvas.tsx` | **Modify** | Mount `NoteField`; sample it from the existing `draw()`. |
-| `engine/authoring/BeatStage.tsx` | **Modify** | Drive `NoteField` from the existing proxy tween. |
+| `engine/authoring/BeatStage.tsx` | **Modify** | Drop `notes` from the runtime call (Task 5); drive `NoteField` from the existing proxy tween (Task 8). |
 | `engine/components/layouts/CinematicSlide.tsx` | **Modify** | Delete 5 `CinematicRuntime` members + 5 `scheduleAction` cases. |
 | `engine/authoring/runtime.ts` | **Modify** | Delete the matching hooks/members. |
 | `engine/authoring/seek.ts` | **Modify** | `isSeekable` → `a.kind !== "cue"`. |
@@ -38,7 +38,9 @@
 | `app/dev/notefield/page.tsx` | **Create** | Dev route for the BeatStage e2e. |
 | `tests/unit/note-state.test.ts` | **Create** | Reducer unit suite (the determinism gate). |
 | `tests/unit/note-field.test.tsx` | **Create** | Component tests for the DOM writer + pooling. |
+| `tests/unit/authoring-runtime.test.ts` | **Create** | The runtime no longer carries note-source hooks. |
 | `tests/unit/note-parity.test.tsx` | **Create** | Both entry points agree at sampled times. |
+| `tests/unit/deck-canvas-notes.test.tsx` | **Create** | Canvas paints notes; scrub is deterministic. |
 | `e2e/notes.spec.ts` | **Create** | Editor scrub determinism + dev-route paint. |
 
 ---
@@ -716,12 +718,178 @@ git commit -m "feat(notes): noteFieldStateAt reducer with cross-beat fold"
 
 ---
 
-## Task 5: Rewrite `NoteField` as a pooled renderer
+## Task 5: Strip the dead note runtime plumbing
+
+**Files:**
+- Modify: `engine/components/layouts/CinematicSlide.tsx` (the `CinematicRuntime` interface ~lines 61-89, and `scheduleAction` ~lines 500-509)
+- Modify: `engine/authoring/runtime.ts`
+- Modify: `engine/authoring/BeatStage.tsx` (the `makeAuthoringRuntime` call only)
+- Test: `tests/unit/authoring-runtime.test.ts` (create)
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: `CinematicRuntime` **without** `cue`, `emitter`, `noteCircle`, `stopNotes`, `stopCircles`; `AuthoringHooks` **without** `notes`.
+
+**Why this comes before the `NoteField` rewrite:** the reducer built in Tasks 1-4 owns note sources now, so the runtime hooks that used to *start* them have no purpose — the same split 3b made for objects ("renders via a parallel stage, not by teaching the runtime a new case"). Removing the **callers** first means Task 6 can then delete `NoteField`'s methods with zero dangling references, so every commit on this branch typechecks.
+
+`makeAuthoringRuntime` is the only implementation of `CinematicRuntime` in the repo — `Slide.tsx` merely passes one through as an optional prop — so this is a closed change.
+
+The **`cue` action kind stays in `engine/deck/types.ts`** for deck-format compatibility. It simply becomes inert. Do not touch `types.ts` in this task.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/unit/authoring-runtime.test.ts`:
+
+```ts
+import { expect, test } from "vitest";
+import { createRef } from "react";
+import { makeAuthoringRuntime } from "@/engine/authoring/runtime";
+import type { ArtStageHandle } from "@/engine/components/ArtStage";
+
+const runtime = () => makeAuthoringRuntime({
+  art: createRef<ArtStageHandle>(),
+  setNight: () => {},
+  resolveEntry: () => [],
+  resolveEnd: () => [],
+  onGate: () => {},
+  onWaiting: () => {},
+});
+
+test("the authoring runtime carries no note-source hooks", () => {
+  const rt = runtime() as unknown as Record<string, unknown>;
+  for (const k of ["cue", "emitter", "noteCircle", "stopNotes", "stopCircles"]) {
+    expect(k in rt).toBe(false);
+  }
+});
+
+test("the authoring runtime still carries the art / gate / nav surface", () => {
+  const rt = runtime() as unknown as Record<string, unknown>;
+  for (const k of ["art", "applyArt", "setNightlight", "onGate", "revealArrows", "pulseArrow", "onWaiting", "resolveEntry", "resolveEnd", "jumpTo"]) {
+    expect(typeof rt[k]).toBe("function");
+  }
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run tests/unit/authoring-runtime.test.ts`
+Expected: FAIL — the first test fails with `expected true to be false` (the hooks are still present). It may also fail to compile the `makeAuthoringRuntime({...})` literal, because `AuthoringHooks` still requires a `notes` field — either failure is the correct red.
+
+- [ ] **Step 3a: Strip `CinematicSlide.tsx`**
+
+Delete these five members, with their doc comments, from the `CinematicRuntime` interface:
+
+```ts
+  cue(c: EffectCue): void;
+  emitter(opts: { color: string; x: number; y: number; dir: number; spread: number; decayMs: number; freq: number }): void;
+  noteCircle(opts: { x: number; y: number; width: number; height: number; hex: string[]; bounce: number; notes: number; speed: number }): void;
+  stopNotes(): void;
+  stopCircles(): void;
+```
+
+Delete these five cases from `scheduleAction`:
+
+```ts
+      case "cue": master.add(() => runtime.cue(a.cue)); break;
+      case "note_emitter": master.add(() => runtime.emitter({ /* … */ })); break;
+      case "note_circle": master.add(() => runtime.noteCircle({ /* … */ })); break;
+      case "stop_circle": master.add(() => runtime.stopCircles()); break;
+      case "stop_notes": master.add(() => runtime.stopNotes()); break;
+```
+
+Replace the deleted cases with one comment, so the omission reads as intentional:
+
+```ts
+      // cue / note_emitter / note_circle / stop_circle / stop_notes are NOT scheduled here.
+      // Note sources render from the pure noteFieldStateAt reducer via NoteField (see
+      // engine/components/effects/note-state.ts), driven by whatever clock the host supplies —
+      // the same split objects use. `cue` is inert; the kind survives in types.ts for
+      // deck-format compatibility only.
+```
+
+`EffectCue` is now very likely an unused import — if `npx tsc --noEmit` or the linter flags it, remove it from the import list at the top of the file. Leave every other case untouched.
+
+- [ ] **Step 3b: Rewrite `engine/authoring/runtime.ts`**
+
+Replace the whole file with:
+
+```ts
+import type { RefObject } from "react";
+import type { CinematicRuntime } from "@/engine/components/layouts/CinematicSlide";
+import type { ArtStageHandle } from "@/engine/components/ArtStage";
+import type { StoryAsset } from "@/engine/deck/story-assets";
+
+export interface AuthoringHooks {
+  art: RefObject<ArtStageHandle | null>;
+  setNight: (n: number) => void;
+  resolveEntry: () => StoryAsset[];
+  resolveEnd: () => StoryAsset[];
+  onGate: (resume: () => void) => void;
+  onWaiting: (waiting: boolean) => void;
+}
+
+/** A CinematicRuntime with NO global input capture / fullscreen — for the editor.
+ *  Note sources are deliberately NOT plumbed through here: they render from the pure
+ *  noteFieldStateAt reducer via NoteField, driven by whatever clock the host supplies. */
+export function makeAuthoringRuntime(h: AuthoringHooks): CinematicRuntime {
+  return {
+    art: (layers, mode, ms) => h.art.current?.show(layers, mode, ms),
+    applyArt: (t, ms) => h.art.current?.apply(t, ms),
+    setNightlight: (to) => h.setNight(to),
+    onGate: (resume) => h.onGate(resume),
+    revealArrows: () => {},
+    pulseArrow: () => {},
+    onWaiting: (w) => h.onWaiting(w),
+    resolveEntry: () => h.resolveEntry(),
+    resolveEnd: () => h.resolveEnd(),
+    jumpTo: () => {},
+  };
+}
+```
+
+- [ ] **Step 3c: Update the `makeAuthoringRuntime` call in `BeatStage.tsx`**
+
+Drop the `notes` property from the object literal — `AuthoringHooks` no longer declares it, so leaving it in is a TypeScript excess-property error:
+
+```tsx
+  const runtime = useMemo(
+    () => makeAuthoringRuntime({
+      art, setNight,
+      resolveEntry: () => entryLayers,
+      resolveEnd: () => endLayers,
+      onGate: () => {}, onWaiting: () => {},
+    }),
+    [entryLayers, endLayers],
+  );
+```
+
+**Keep** the `const notes = useRef<NoteFieldHandle>(null);` declaration and the `<NoteField ref={notes} reduced={false} />` element exactly as they are — Task 8 wires `notes` to the new imperative handle. Do not remove either.
+
+- [ ] **Step 4: Run the full gate**
+
+Run: `npx vitest run && npx tsc --noEmit`
+Expected: PASS — the whole unit suite (including `beatstage-objects.test.tsx`, which renders `BeatStage`), and tsc clean. Note sources now render nowhere, which is the same as before this branch started; no test asserted otherwise.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add engine/components/layouts/CinematicSlide.tsx engine/authoring/runtime.ts engine/authoring/BeatStage.tsx tests/unit/authoring-runtime.test.ts
+git commit -m "refactor(notes): drop note-source hooks from the cinematic runtime
+
+The noteFieldStateAt reducer owns note sources now, so CinematicRuntime's
+cue/emitter/noteCircle/stopNotes/stopCircles hooks and their
+scheduleAction cases have no purpose. The \`cue\` action kind stays in
+types.ts for deck-format compatibility and is now inert."
+```
+
+---
+
+## Task 6: Rewrite `NoteField` as a pooled renderer
 
 **Files:**
 - Rewrite: `engine/components/NoteField.tsx`
 - Modify: `engine/components/effects/notes.ts`
-- Test: `tests/unit/note-field.test.tsx`
+- Test: `tests/unit/note-field.test.tsx` (create)
 
 **Interfaces:**
 - Consumes: Task 4's `noteFieldStateAt`, Task 2's `NoteSpriteState`, `NOTE_SIZE_N` from Task 1; `makeNoteHex` and `randomGlyph` from `./effects/notes`.
@@ -730,7 +898,7 @@ git commit -m "feat(notes): noteFieldStateAt reducer with cross-beat fold"
   - `applyNoteState(node: HTMLElement, s: NoteSpriteState, resolveStory: (k: StoryAsset) => string): void`
   - `NoteField` — a `forwardRef<NoteFieldHandle, { reduced?: boolean }>` component rendering `data-testid="notefield"`.
 
-**Why the deletions:** `emit`, `stopEmit`, and `swirl` have **no callers anywhere in the repo** — they are vendored leftovers that drove mm-website's story-panel effects, reachable only via `runtime.cue`, which is a no-op in the only runtime here. Keeping them would leave a component that is half closed-form reducer and half orphaned GSAP. `engine/` is vendored **from** mm-website, not to it, so nothing downstream breaks.
+**Why the deletions:** `emit`, `stopEmit`, and `swirl` have **no callers anywhere in the repo** — they are vendored leftovers that drove mm-website's story-panel effects, reachable only via `runtime.cue`, which Task 5 has now removed. `startEmitter`/`startCircle`/`stopNotes`/`stopCircles` likewise lost their last caller in Task 5. Keeping any of them would leave a component that is half closed-form reducer and half orphaned GSAP — the drift liability this whole sub-project exists to remove. `engine/` is vendored **from** mm-website, not to it, so nothing downstream breaks.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -940,12 +1108,10 @@ export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({
 });
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Run the full gate**
 
-Run: `npx vitest run tests/unit/note-field.test.tsx tests/unit/note-state.test.ts`
-Expected: PASS — 6 component tests + 29 reducer tests.
-
-`npx tsc --noEmit` will still FAIL here with errors in `runtime.ts`, `BeatStage.tsx`, and `CinematicSlide.tsx` referencing the deleted `emit`/`swirl`/`startEmitter`/`startCircle`/`stopNotes`/`stopCircles`. That is expected — Task 7 removes those call sites. Do not patch them here.
+Run: `npx vitest run && npx tsc --noEmit`
+Expected: PASS — the whole unit suite and tsc clean. Task 5 already removed every caller of the deleted methods, so nothing should dangle. If tsc reports an unresolved reference to `startEmitter`, `startCircle`, `stopNotes`, `stopCircles`, `emit`, `stopEmit`, or `swirl`, Task 5 missed a call site — report it rather than re-adding the method.
 
 - [ ] **Step 5: Commit**
 
@@ -954,19 +1120,19 @@ git add engine/components/NoteField.tsx engine/components/effects/notes.ts tests
 git commit -m "feat(notes): reducer-driven NoteField with pooled sprites
 
 Drops per-sprite GSAP, anchors sprites to the 16:9 stage rather than the
-host, and deletes the unreachable emit/stopEmit/swirl legacy API."
+host, and deletes the now-unreachable emit/stopEmit/swirl legacy API."
 ```
 
 ---
 
-## Task 6: Mount `NoteField` in the editor canvas
+## Task 7: Mount `NoteField` in the editor canvas
 
 **Files:**
 - Modify: `components/editor/DeckCanvas.tsx`
 - Test: `tests/unit/deck-canvas-notes.test.tsx` (create)
 
 **Interfaces:**
-- Consumes: Task 5's `NoteField`, `NoteFieldHandle`.
+- Consumes: Task 6's `NoteField`, `NoteFieldHandle`.
 - Produces: no new exports. `DeckCanvas` renders a `data-testid="notefield"` node and samples it from `draw()`.
 
 **Note:** unlike objects there is **no mode-swap** — notes have no authoring overlay to swap against, so they render at every `t` including `0`, which is what playback does.
@@ -1060,10 +1226,10 @@ Mount the component between `<ArtStage>` and the `.cin` div so DOM order matches
 <div className="cin"><div className="cin__stage">{/* …unchanged… */}</div></div>
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 
-Run: `npx vitest run tests/unit/deck-canvas-notes.test.tsx`
-Expected: PASS — 2 tests.
+Run: `npx vitest run && npx tsc --noEmit`
+Expected: PASS — the whole unit suite and tsc clean.
 
 - [ ] **Step 5: Commit**
 
@@ -1074,19 +1240,15 @@ git commit -m "feat(notes): render notes in the editor canvas"
 
 ---
 
-## Task 7: Drive notes from `BeatStage` and strip the dead runtime plumbing
+## Task 8: Drive notes from `BeatStage`
 
 **Files:**
-- Modify: `engine/authoring/BeatStage.tsx`
-- Modify: `engine/authoring/runtime.ts`
-- Modify: `engine/components/layouts/CinematicSlide.tsx`
+- Modify: `engine/authoring/BeatStage.tsx` (the proxy-tween `useEffect` only)
 - Test: `tests/unit/note-parity.test.tsx` (create)
 
 **Interfaces:**
-- Consumes: Task 5's `NoteFieldHandle`, Task 4's `noteFieldStateAt`.
-- Produces: `CinematicRuntime` **without** `cue`, `emitter`, `noteCircle`, `stopNotes`, `stopCircles`; `AuthoringHooks` **without** `notes`.
-
-**Why:** the reducer now owns note sources, so the runtime hooks that used to *start* them have no purpose — the same move 3b made for objects ("renders via a parallel stage, not by teaching the runtime a new case"). The `cue` **action kind stays in `types.ts`** for deck-format compatibility; it simply becomes inert.
+- Consumes: Task 6's `NoteFieldHandle` (the `notes` ref is already declared and already passed to `<NoteField>` — Task 5 left both in place), Task 4's `noteFieldStateAt`.
+- Produces: no new exports.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1094,7 +1256,7 @@ Create `tests/unit/note-parity.test.tsx`:
 
 ```tsx
 import { describe, it, expect } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { createRef } from "react";
 import { BeatStage } from "@/engine/authoring/BeatStage";
 import { NoteField, type NoteFieldHandle } from "@/engine/components/NoteField";
@@ -1133,74 +1295,11 @@ describe("note rendering parity across entry points", () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/unit/note-parity.test.tsx`
-Expected: FAIL — a TypeScript/runtime error from `runtime.ts` calling the deleted `startEmitter`, or `0 to be greater than 0` for the BeatStage case.
+Expected: the first test PASSES (Task 6 already delivered `NoteField`); the second FAILS with `expected 0 to be greater than 0`, because `BeatStage` never calls `renderAt`.
 
-- [ ] **Step 3a: Strip `CinematicSlide.tsx`**
+- [ ] **Step 3: Wire the proxy tween**
 
-Delete these five members from the `CinematicRuntime` interface (lines ~66–75 and ~80): `cue`, `emitter`, `noteCircle`, `stopNotes`, `stopCircles` — along with their doc comments.
-
-Delete these five cases from `scheduleAction`:
-
-```ts
-      case "cue": master.add(() => runtime.cue(a.cue)); break;
-      case "note_emitter": master.add(() => runtime.emitter({ /* … */ })); break;
-      case "note_circle": master.add(() => runtime.noteCircle({ /* … */ })); break;
-      case "stop_circle": master.add(() => runtime.stopCircles()); break;
-      case "stop_notes": master.add(() => runtime.stopNotes()); break;
-```
-
-Replace them with a single comment so the omission is intentional and readable:
-
-```ts
-      // cue / note_emitter / note_circle / stop_circle / stop_notes render from the pure
-      // noteFieldStateAt reducer via NoteField (see effects/note-state.ts), not from the
-      // runtime — same split objects use. `cue` is inert; the kind survives for deck-format
-      // compatibility only.
-```
-
-`EffectCue` remains imported only if still referenced; if TypeScript reports it unused, drop it from the import list.
-
-- [ ] **Step 3b: Strip `runtime.ts`**
-
-Rewrite `engine/authoring/runtime.ts` as:
-
-```ts
-import type { RefObject } from "react";
-import type { CinematicRuntime } from "@/engine/components/layouts/CinematicSlide";
-import type { ArtStageHandle } from "@/engine/components/ArtStage";
-import type { StoryAsset } from "@/engine/deck/story-assets";
-
-export interface AuthoringHooks {
-  art: RefObject<ArtStageHandle | null>;
-  setNight: (n: number) => void;
-  resolveEntry: () => StoryAsset[];
-  resolveEnd: () => StoryAsset[];
-  onGate: (resume: () => void) => void;
-  onWaiting: (waiting: boolean) => void;
-}
-
-/** A CinematicRuntime with NO global input capture / fullscreen — for the editor.
- *  Note sources are NOT plumbed through here: they render from the pure
- *  noteFieldStateAt reducer via NoteField, driven by whatever clock the host supplies. */
-export function makeAuthoringRuntime(h: AuthoringHooks): CinematicRuntime {
-  return {
-    art: (layers, mode, ms) => h.art.current?.show(layers, mode, ms),
-    applyArt: (t, ms) => h.art.current?.apply(t, ms),
-    setNightlight: (to) => h.setNight(to),
-    onGate: (resume) => h.onGate(resume),
-    revealArrows: () => {},
-    pulseArrow: () => {},
-    onWaiting: (w) => h.onWaiting(w),
-    resolveEntry: () => h.resolveEntry(),
-    resolveEnd: () => h.resolveEnd(),
-    jumpTo: () => {},
-  };
-}
-```
-
-- [ ] **Step 3c: Wire `BeatStage.tsx`**
-
-In `engine/authoring/BeatStage.tsx`, drop `notes` from the `makeAuthoringRuntime` call (it no longer takes it) but keep the `notes` ref for the imperative handle. Then extend the existing proxy-tween effect so the *same* clock drives both stages:
+In `engine/authoring/BeatStage.tsx`, extend the existing proxy-tween `useEffect` so the *same* clock drives both stages:
 
 ```tsx
   useEffect(() => {
@@ -1223,33 +1322,28 @@ In `engine/authoring/BeatStage.tsx`, drop `notes` from the `makeAuthoringRuntime
   }, [scene, beat, beatIndex, animate]);
 ```
 
-Extend the existing `KNOWN LIMITATION` comment block above this effect with one sentence:
+Append one sentence to the existing `KNOWN LIMITATION` comment block directly above this effect:
 
 ```
 //   NoteField now rides this same proxy, so it inherits the identical desync. §7b's
 //   transport work should re-point BOTH stages at CinematicSlide's real segment timelines.
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Run the full gate**
 
 Run: `npx vitest run && npx tsc --noEmit`
-Expected: PASS — the full unit suite (including `beatstage-objects.test.tsx`), and tsc clean. If tsc still flags an unused `EffectCue`/`NoteColor` import, delete that import.
+Expected: PASS — the whole unit suite and tsc clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add engine/authoring/BeatStage.tsx engine/authoring/runtime.ts engine/components/layouts/CinematicSlide.tsx tests/unit/note-parity.test.tsx
-git commit -m "feat(notes): drive NoteField from BeatStage; strip dead note runtime
-
-The reducer owns note sources, so CinematicRuntime's cue/emitter/
-noteCircle/stopNotes/stopCircles hooks and their scheduleAction cases
-have no purpose. The `cue` action kind stays in types.ts for deck-format
-compatibility and is now inert."
+git add engine/authoring/BeatStage.tsx tests/unit/note-parity.test.tsx
+git commit -m "feat(notes): drive NoteField from BeatStage's proxy clock"
 ```
 
 ---
 
-## Task 8: Complete the note descriptors and correct the `seekable` contract
+## Task 9: Complete the note descriptors and correct the `seekable` contract
 
 **Files:**
 - Modify: `lib/editor/registry.ts:39-44` (the `note_emitter` entry) and `:101-104` (`GENERIC`)
@@ -1396,7 +1490,7 @@ clamped to the 0.1s floor) becomes 1000."
 
 ---
 
-## Task 9: Fixture deck, dev route, e2e, and docs
+## Task 10: Fixture deck, dev route, e2e, and docs
 
 **Files:**
 - Create: `samples/notes.deck.json`
@@ -1418,6 +1512,22 @@ Create `e2e/notes.spec.ts`:
 ```ts
 import { expect, test } from "@playwright/test";
 
+/** Set a range input to `value` and fire the React onChange. The NATIVE value setter is
+ *  required — React tracks controlled-input values on the element, so a plain
+ *  `el.value = x` is invisible to it and onChange never fires. Copied from the working
+ *  helper in e2e/objects-playback.spec.ts:5. */
+async function setRange(page: import("@playwright/test").Page, testId: string, value: number) {
+  await page.getByTestId(testId).evaluate(
+    (el: HTMLInputElement, v: number) => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      nativeSetter?.call(el, String(v));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    },
+    value,
+  );
+}
+
 const sprites = '[data-testid="notefield"] span';
 const frame = (page: import("@playwright/test").Page) =>
   page.$$eval(sprites, (nodes) =>
@@ -1426,52 +1536,46 @@ const frame = (page: import("@playwright/test").Page) =>
       .map((n) => { const e = n as HTMLElement; return `${e.style.left}|${e.style.top}|${e.style.opacity}`; })
       .sort());
 
+/** Editor specs in this suite have a pre-existing hydration race — the shell HTML can paint
+ *  before the client bundle is live. A brief settle measurably reduces (does not eliminate)
+ *  it; see the same wait in e2e/objects-playback.spec.ts:36 and e2e/objects.spec.ts. */
+const openDeck = async (page: import("@playwright/test").Page) => {
+  await page.goto("/editor?deck=notes");
+  await expect(page.getByTestId("scrub")).toBeVisible();
+  await page.waitForTimeout(300);
+};
+
 test("editor canvas paints notes under scrub, deterministically", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto("/editor?deck=notes");
+  await openDeck(page);
 
-  const scrub = page.getByTestId("scrub");
-  await expect(scrub).toBeVisible();
-
-  const seek = async (t: number) => scrub.evaluate((el, v) => {
-    const input = el as HTMLInputElement;
-    input.value = String(v);
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }, t);
-
-  await seek(1.5);
+  await setRange(page, "scrub", 1.5);
   await expect.poll(async () => (await frame(page)).length).toBeGreaterThan(0);
   const at15 = await frame(page);
 
-  await seek(3.0);
+  await setRange(page, "scrub", 3.0);
   const at30 = await frame(page);
   expect(at30).not.toEqual(at15);          // time actually advances the sprites
 
-  await seek(1.5);
+  await setRange(page, "scrub", 1.5);
   expect(await frame(page)).toEqual(at15); // …and returning to t repaints the same frame
 
   expect(errors).toEqual([]);
 });
 
 test("notes survive into a later beat and stop when told to", async ({ page }) => {
-  await page.goto("/editor?deck=notes");
+  await openDeck(page);
   const film = page.getByTestId("filmstrip");
-  const scrub = page.getByTestId("scrub");
-  const seek = async (t: number) => scrub.evaluate((el, v) => {
-    const input = el as HTMLInputElement;
-    input.value = String(v);
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }, t);
 
   // beat 1 starts no sources of its own — anything painted is carried from beat 0
   await film.locator(".ed__beat").nth(1).click();
-  await seek(0.5);
+  await setRange(page, "scrub", 0.5);
   await expect.poll(async () => (await frame(page)).length).toBeGreaterThan(0);
 
   // beat 2 stops the rings, then everything
   await film.locator(".ed__beat").nth(2).click();
-  await seek(2.5);
+  await setRange(page, "scrub", 2.5);
   await expect.poll(async () => (await frame(page)).length).toBe(0);
 });
 
@@ -1604,26 +1708,26 @@ recorded as the starting corpus for §7c's parity gate."
 | --- | --- |
 | §3.1 reducer location | 1 |
 | §3.2 types & signature | 2, 4 |
-| §3.3 coordinate model + 16:9 anchoring fix | 1 (constants), 5 (stage box, sprite sizing) |
+| §3.3 coordinate model + 16:9 anchoring fix | 1 (constants), 6 (stage box, sprite sizing) |
 | §3.4 fold + phase continuation | 4 |
 | §3.5 emitter closed form + seeded jitter + ms units | 2 |
 | §3.6 ring transcription | 3 |
-| §3.7 bounds & pooling | 2 (per-source), 3 (ring), 4 (total), 5 (node reuse) |
+| §3.7 bounds & pooling | 2 (per-source), 3 (ring), 4 (total), 6 (node reuse) |
 | §3.8 degenerate inputs | 2, 3, 4 |
-| §4 `NoteField` + `applyNoteState` | 5 |
-| §5.1 DeckCanvas | 6 |
-| §5.2 BeatStage | 7 |
-| §5.3 deletions | 5 (`NoteField`/`notes.ts`), 7 (`CinematicSlide`/`runtime.ts`) |
-| §5.4 `seekable` contract + 2 test updates | 8 |
-| §5.5 descriptors + `hex` gap + `decay` default | 8 |
-| §6 fixture + corpus + deck-count check | 9 |
-| §7 unit / component / parity / e2e | 2–4 / 5 / 7 / 9 |
-| §8 phases | 1–4 = phase 1; 5 = phase 2; 6–7 = phase 3; 8–9 = phase 4 |
+| §4 `NoteField` + `applyNoteState` | 6 |
+| §5.1 DeckCanvas | 7 |
+| §5.2 BeatStage | 8 |
+| §5.3 deletions | 5 (`CinematicSlide`/`runtime.ts`), 6 (`NoteField`/`notes.ts`) |
+| §5.4 `seekable` contract + 2 test updates | 9 |
+| §5.5 descriptors + `hex` gap + `decay` default | 9 |
+| §6 fixture + corpus + deck-count check | 10 |
+| §7 unit / component / parity / e2e | 2–4 / 6 / 8 / 10 |
+| §8 phases | 1–4 = phase 1; 5–6 = phase 2; 7–8 = phase 3; 9–10 = phase 4 |
 
 No gaps.
 
-**Placeholder scan:** every code step carries real code; no "TBD", no "similar to Task N", no "add error handling". The one deliberate conditional is Task 9 Step 3c, which states the exact fix (`/editor?deck=demo`) and the exact file pattern to copy.
+**Placeholder scan:** every code step carries real code; no "TBD", no "similar to Task N", no "add error handling". The one deliberate conditional is Task 10 Step 3c, which states the exact fix (`/editor?deck=demo`) and the exact file pattern to copy.
 
-**Type consistency:** `NoteSpriteState` (Task 2) is used verbatim in Tasks 3, 4, 5. `noteFieldStateAt(scene, beatIndex, tLocal)` (Task 4) is called with that arity in Tasks 5, 6, 7. `NoteFieldHandle.renderAt(scene, beatIndex, t)` (Task 5) matches its call sites in Tasks 6 and 7. `emitterDecaySeconds`, `MAX_SPRITES_PER_SOURCE`, `MAX_SPRITES_TOTAL`, `EMIT_SPEED_N`, `NOTE_SIZE_N`, `STAGE_ASPECT` are defined in Task 1/2 and referenced consistently thereafter. `randomGlyph` survives the Task 5 trim and is imported by `note-state.ts` from Task 2 onward.
+**Type consistency:** `NoteSpriteState` (Task 2) is used verbatim in Tasks 3, 4, 6. `noteFieldStateAt(scene, beatIndex, tLocal)` (Task 4) is called with that arity in Tasks 6, 7, 8. `NoteFieldHandle.renderAt(scene, beatIndex, t)` (Task 6) matches its call sites in Tasks 7 and 8. `emitterDecaySeconds`, `MAX_SPRITES_PER_SOURCE`, `MAX_SPRITES_TOTAL`, `EMIT_SPEED_N`, `NOTE_SIZE_N`, `STAGE_ASPECT` are defined in Tasks 1-2 and referenced consistently thereafter. `randomGlyph` survives the Task 6 trim and is imported by `note-state.ts` from Task 2 onward.
 
-**Known intra-plan breakage (intentional, stated in place):** `npx tsc --noEmit` fails between Tasks 5 and 7 because Task 5 deletes handle methods that Task 7 removes the callers of. Task 5 Step 4 says so explicitly and Task 7 Step 4 re-runs the full gate.
+**Every task is typecheck-green.** An earlier draft had the `NoteField` rewrite delete methods whose callers a later task removed, leaving a commit that failed `npx tsc --noEmit`. The runtime strip (Task 5) now runs *before* the rewrite (Task 6), so callers disappear before the methods do and every commit passes `npx vitest run && npx tsc --noEmit`.
