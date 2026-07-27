@@ -233,5 +233,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     const kids: ObjectPath[] = Array.from({ length: n }, (_, i) => [...parent, slot + i]);
     return { ...part, selectedObjectPaths: kids, enteredGroupPath: null, selectedAction: null };
   }),
-  reparentObject: (sceneId, from, toParent, toIndex) => set((s) => commit(s, (doc) => mReparentObject(doc, sceneId, from, toParent, toIndex))),
+  reparentObject: (sceneId, from, toParent, toIndex) => set((s) => {
+    if (!s.doc) return {};
+    // The id must be read before the commit: afterwards `from` designates a different node.
+    const movedId = getObjectAt(s.doc.scenes.find((sc) => sc.id === sceneId)?.objects ?? [], from)?.id;
+    const part = commit(s, (doc) => mReparentObject(doc, sceneId, from, toParent, toIndex));
+    if (!part.doc) return {};                    // refused/unknown move: the selection must not move either
+    const scene = part.doc.scenes.find((sc) => sc.id === sceneId);
+    const p = movedId && scene ? findObjectPath(scene.objects ?? [], movedId) : null;
+    return { ...part, selectedObjectPaths: p ? [p] : [], enteredGroupPath: null, selectedAction: null };
+  }),
 }));
