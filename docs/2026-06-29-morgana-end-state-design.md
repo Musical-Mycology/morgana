@@ -79,14 +79,14 @@ lands.
 | Area | Capability | Today (this branch) | End-state | Tier |
 | --- | --- | --- | --- | --- |
 | **Filmstrip** | Scene-grouped beats; select | ✅ | ✅ + collapse/zoom, live thumbnails | 1 / 2 |
-| | Beat add/dupe/delete/move | ✅ (move within scene only) | ✅ + cross-scene move, drag-reorder | 1.5 |
+| | Beat add/dupe/delete/move | ✅ incl. cross-scene move (transfers into the adjacent scene at a boundary) | ✅ + drag-reorder | 1.5 |
 | | Scene add | ✅ | ✅ | 1 |
-| | Scene delete / reorder | ⚠️ delete in store, no UI button; no reorder | ✅ buttons + drag | 1.5 |
+| | Scene delete / reorder | ✅ delete + up/down reorder buttons, keyed by scene index; empty scenes stay visible | ✅ buttons + drag | 1.5 |
 | **Canvas** | Render selected beat | ✅ via seek-renderer (text/art/nightlight only) | ✅ via real GSAP runtime (all effects) | 2 |
 | | On-stage placement | ✅ generic `pos` handle | ✅ bespoke per-effect editors (arc, decay, spin, scale, layers) | 2 |
 | | Play / pause / scrub | ✅ (rAF over seek-renderer) | ✅ deterministic scrub of the real engine, incl. particles | 2 |
-| **Timeline** | Per-beat action list | ✅ read-only chips | ✅ editable track | 1.5 |
-| | Add / delete / reorder / dupe action | ❌ | ✅ kind picker + drag | 1.5 |
+| **Timeline** | Per-beat action list | ✅ editable chip track | ✅ editable track | 1.5 |
+| | Add / delete / reorder / dupe action | ✅ kind-picker add, up/down reorder, duplicate, delete — pre-dates this branch's Tier 1.5 work | ✅ kind picker + drag | 1.5 |
 | | Convert action kind | ❌ | ✅ | 2 |
 | | Click-gate viz; resizable waits | ❌ (plain chips) | ✅ gate dividers + drag-resize waits + segment grouping | 2 |
 | | Keyframe / curve editing | ❌ | ✅ (e.g. nightlight curve) | 2 |
@@ -101,15 +101,15 @@ lands.
 | **Fonts** | Per-deck fonts | ❌ (no font system) | ✅ bundled library + upload/registration/subsetting | 2 |
 | **Effects** | Effect framework | ✅ internal registry | ✅ external/declarative third-party descriptors | 2 / 3 |
 | **AI** | In-app assistant | ❌ | ✅ docked Claude assistant (read · safe-edit · lint-fix · generative) over the editing API | 3 |
-| **Validation** | Deck validators | ⚠️ `validateDeckDoc` (structural) + `validateDeck` (slide-level), not surfaced in editor | ✅ live lint panel (dangling counters, missing media, gate-less infinite beats, empty beats) | 1.5 / 2 |
-| **Interop** | Export to TS | ⚠️ `deckDocToModule` lib, no UI | ✅ in-app export + import + round-trip | 1.5 / 2 |
+| **Validation** | Deck validators | ✅ `lintDeck` composes `validateDeckDoc` (errors) + `validateDeck∘flattenStory` (warnings) + a new `scene-empty` rule, surfaced as an Issues panel (count badge + jump-to-fix) | ✅ + dangling counters, missing media, gate-less infinite beats | 1.5 / 2 |
+| **Interop** | Export to TS | ✅ `deckDocToModule` + an in-app Export panel (copy / download `.ts`) — pre-dates this branch's Tier 1.5 work | ✅ in-app export + import + round-trip | 1.5 / 2 |
 | | Portable format / package | ⚠️ vendored engine | ✅ documented format + `@musical-mycology/morgana` engine package | 3 |
-| **QoL** | Onboarding / empty states | ⚠️ minimal | ✅ first-run, empty-state guidance | 1.5 |
+| **QoL** | Onboarding / empty states | ✅ cards for empty deck, empty scene, empty-beat hint, and load failure (Retry + Back to library) | ✅ first-run, empty-state guidance | 1.5 |
 | | Accessibility | ⚠️ partial | ✅ focus order, ARIA, keyboard operability | 2 |
-| | Error handling | ✅ load-fail surfaced; save status | ✅ comprehensive, recoverable | 1.5 |
+| | Error handling | ✅ load-fail surfaced (Retry + Back to library); a rejected save shows the server's actual reason with a working Retry, and no longer auto-retries forever | ✅ comprehensive, recoverable | 1.5 |
 | **Theming** | Token / chrome injection | ✅ (engine tokens + `meta.chrome`) | ✅ in-app theme editor + brand presets | 2 |
 | **Platform** | Deck CRUD + autosave | ✅ | ✅ | 1 |
-| | Deck switcher / New / Delete UI | ❌ (API exists; `?deck=` only) | ✅ | 1.5 |
+| | Deck switcher / New / Delete UI | ✅ deck library page (`/`) — grid + thumbnails, new-deck form, delete-with-confirm, open into the editor — pre-dates this branch's Tier 1.5 work | ✅ | 1.5 |
 | | Share / present mode | ❌ | ✅ read-only links + present mode | 3 |
 | | Multi-user / realtime collab | ❌ | ❌ **explicit non-goal** (§17) | — |
 | **Infra** | Unit + e2e + Docker smoke | ✅ | ✅ + e2e determinism + CI | 1.5 / 2 |
@@ -564,7 +564,7 @@ ahead*.
 
 | Tier | Theme | Work items |
 | --- | --- | --- |
-| **1.5 — Hardening** *(near-term; finish the v1 surface)* | Complete what Plan-3c started | Timeline **action CRUD** (add/delete/reorder/dupe); **deck switcher / New / Delete** UI; **delete-scene** button + **scene reorder**; **cross-scene** beat move; **in-app TS export**; **surface the existing validators**; onboarding/empty-states + error handling; **e2e determinism + CI**. |
+| **1.5 — Hardening** *(complete, 2026-07-27)* | Complete what Plan-3c started | **Done.** This branch's own contribution (`docs/superpowers/plans/2026-07-24-tier-1-5-hardening-sweep.md`): **delete-scene** button + **scene reorder** + **cross-scene** beat move, filmstrip UI and MCP parity (`move_scene_by`, `append_beat_to_scene`, `delete_scene_at` by `scene_index`), empty scenes now visible in the filmstrip; **surface the existing validators** as a live Issues (lint) panel (`lintDeck`, plus a new `scene-empty` rule) with jump-to-fix; onboarding/empty-states (empty deck/scene/beat, load-failure Retry) + a rejected-save error surfaced with Retry; an autosave bugfix (a failed save no longer retries forever). The remaining items in this tier's original scope — timeline **action CRUD** (add/delete/reorder/dupe), the **deck switcher / New / Delete** UI, and **in-app TS export** — turn out to already exist in the codebase from earlier, pre-Tier-1.5 work (§3) that this design doc had never been updated to reflect; **e2e determinism + CI** likewise predates this sweep (GitHub Actions, `.github/workflows/ci.yml`). With this sweep's additions, every item originally scoped to Tier 1.5 is now delivered. |
 | **2 — Depth** *(the core of the north star)* | Make every effect first-class and the canvas truthful | **Real-engine canvas + deterministic particle scrubbing** (§7, the keystone); **bespoke on-stage effect editors** (§4); **rich timeline** — gate viz, segment grouping, drag-resize waits, convert-kind, keyframe/curve (§5); **editing power** — copy/paste, multi-select, keyboard surface, templates (§6); **assets** panel + upload + picker (§9); **fonts** library + upload/subset (§10); **action-level validators** (§8); **plugin framework** first cut (§11); **theme editor** (§14b); **a11y** (§13); **import + round-trip** (§14a). |
 | **3 — Platform** *(long-horizon; deliberately lean)* | Share, assist, extract | **In-app AI assistant** (§12, incl. generative; needs Tier-1.5 action CRUD); **share links + present mode** (§17); **package extraction** `@musical-mycology/morgana` (§14a); **CDN/hosted asset management** (§9); **sandboxed third-party plugin runtime** (§11); **named version history** (§13); optional **lightweight hosting**. |
 | **— Non-goals** | Out of the north star | **Multi-user / realtime collaboration / CRDT**; **in-app accounts/auth as a requirement to run**; any infrastructure-specific coupling (§17). |

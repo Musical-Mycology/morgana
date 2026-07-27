@@ -49,6 +49,10 @@ Notable in-repo docs:
   the effect-descriptor registry, the scrub compromise).
 - `docs/2026-06-29-morgana-end-state-design.md` — the end-state ("north star")
   design; the tier roadmap (1.5 Hardening / 2 Depth / 3 Platform) lives here.
+  **Tier 1.5 (Hardening) is complete as of 2026-07-27** — scene structural
+  editing (reorder/delete/cross-scene beat move), the lint/Issues panel, and
+  empty/error states (see `docs/superpowers/plans/2026-07-24-tier-1-5-hardening-sweep.md`).
+  Tier 2 (Depth) is next.
 - `docs/superpowers/specs/` + `docs/superpowers/plans/` — per-feature design
   specs and implementation plans.
 
@@ -93,7 +97,10 @@ unchanged if it's never connected to. Design:
 `docs/superpowers/specs/2026-07-23-morgana-mcp-server-design.md` (in-repo,
 supersedes the end-state design's earlier §12 "in-app AI assistant" sketch,
 which had assumed a third-party "Sign in with Claude" OAuth product that
-doesn't exist).
+doesn't exist). As of the Tier 1.5 hardening sweep, the tool surface also
+includes scene-structural tools with `scene_index` addressing:
+`move_scene_by`, `append_beat_to_scene`, and `delete_scene_at` (which also
+accepts `scene_index` directly, in addition to `beat_index`).
 
 ## CI / ops
 
