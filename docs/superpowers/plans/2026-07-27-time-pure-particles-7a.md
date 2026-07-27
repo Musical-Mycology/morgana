@@ -931,13 +931,19 @@ describe("NoteField", () => {
     expect(parseFloat(first.style.opacity)).toBeGreaterThan(0);
   });
 
-  it("reuses pooled nodes — node count is stable across a t sweep", () => {
+  it("reuses pooled nodes — the pool is bounded and stable once warm", () => {
     const ref = createRef<NoteFieldHandle>();
     const { container } = render(<NoteField ref={ref} />);
-    ref.current!.renderAt(scene, 0, 2.0);
-    const after1 = sprites(container).length;
-    for (const t of [2.1, 2.5, 3.0, 3.5]) ref.current!.renderAt(scene, 0, t);
-    expect(sprites(container).length).toBe(after1);
+    // Warm the pool FIRST. The pool bound P = ceil(D·freq)+1 is one wider than the maximum
+    // number of simultaneously-live sprites (the live window is a half-open interval of
+    // length D·freq, so it holds at most ceil(D·freq) integers), which means no single
+    // renderAt can populate every slot. Asserting stability from the first call would fail
+    // against a CORRECT implementation.
+    const sweep = [2.0, 2.1, 2.5, 3.0, 3.5];
+    for (const t of sweep) ref.current!.renderAt(scene, 0, t);
+    const warm = sprites(container).length;
+    for (const t of sweep) ref.current!.renderAt(scene, 0, t);
+    expect(sprites(container).length).toBe(warm);  // no growth once warm → nodes are reused
   });
 
   it("is deterministic — the same t repaints the same DOM", () => {
