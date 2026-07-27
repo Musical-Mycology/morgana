@@ -85,9 +85,11 @@ test surface than the one-node action justifies while it still has no caller.
 two-line remap and a demonstrated multi-select case (shift-selecting both swap
 partners); neither holds here.
 
-Note this deliberately does **not** depend on `swapSelectionSlots`, which lives
-on the unmerged `claude/strange-dirac-b40df6`. This change is off `main` and the
-two branches merge in either order.
+Note this deliberately does **not** depend on `swapSelectionSlots`. When this
+design was written that helper was still unmerged (`claude/strange-dirac-b40df6`),
+so independence kept the two branches mergeable in either order; the reorder work
+has since landed on `main` as #24, and this change was merged up onto it without
+touching either action's logic.
 
 ### `enteredGroupPath` and `selectedAction`
 

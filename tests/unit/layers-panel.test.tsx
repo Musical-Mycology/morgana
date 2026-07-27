@@ -132,3 +132,15 @@ test("the add control appends a new object", () => {
   fireEvent.change(screen.getByTestId("layer-object-add"), { target: { value: "text" } });
   expect(useEditor.getState().doc!.scenes[0].objects!.some((o) => o.kind === "text" && o.id !== "c0")).toBe(true);
 });
+
+test("raising twice walks the same object to the top, and the toolbar follows it", () => {
+  render(<LayersPanel />);
+  fireEvent.click(rowFor("a"));                        // path [0], backmost
+  fireEvent.click(screen.getByTestId("layer-raise"));
+  fireEvent.click(screen.getByTestId("layer-raise"));
+  // 'a' is raised both times — not the object swapped down by the first click
+  expect(useEditor.getState().doc!.scenes[0].objects!.map((o) => o.id)).toEqual(["g", "b", "a"]);
+  // the toolbar now describes 'a' at the top of the list, not whatever sits in its old slot
+  expect((screen.getByTestId("layer-raise") as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByTestId("layer-lower") as HTMLButtonElement).disabled).toBe(false);
+});

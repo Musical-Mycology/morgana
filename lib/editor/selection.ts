@@ -31,6 +31,21 @@ export function sameParentSiblings(paths: ObjectPath[]): boolean {
   );
 }
 
+/** Remap selection paths across a sibling swap of slots `a` and `b` under `parent`.
+ *  Only the element at depth `parent.length` is rewritten, so a descendant of a swapped
+ *  slot rides along with its ancestor. Paths outside `parent`, and paths that stop at or
+ *  above the swap depth, are returned unchanged. */
+export function swapSelectionSlots(paths: ObjectPath[], parent: ObjectPath, a: number, b: number): ObjectPath[] {
+  return paths.map((p) => {
+    if (p.length <= parent.length || !isPrefix(parent, p)) return p;
+    const slot = p[parent.length];
+    if (slot !== a && slot !== b) return p;
+    const next = p.slice();
+    next[parent.length] = slot === a ? b : a;
+    return next;
+  });
+}
+
 /** Group-as-unit hit resolution. Given the leaf `hitPath` under the cursor and the
  *  currently-entered group (null = root context), return the path to actually select:
  *  the direct child of the entered context that contains the hit. When the hit is not

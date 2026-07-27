@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { pathsEqual, pathInList, primaryPath, togglePath, sameParentSiblings } from "@/lib/editor/selection";
+import { pathsEqual, pathInList, primaryPath, togglePath, sameParentSiblings, swapSelectionSlots } from "@/lib/editor/selection";
 import { resolveCanvasSelection } from "@/lib/editor/selection";
 import { flattenForPanel } from "@/lib/editor/selection";
 import type { SceneObject } from "@/engine/deck/types";
@@ -78,4 +78,26 @@ test("flattenForPanel is front-of-z first with the group header above its childr
 test("flattenForPanel skips a collapsed group's children", () => {
   const rows = flattenForPanel(tree(), new Set(["G"]));
   expect(rows.map((r) => r.obj.id)).toEqual(["B", "G", "A"]);
+});
+
+test("swapSelectionSlots moves a selected path across the swapped slots", () => {
+  expect(swapSelectionSlots([[0]], [], 0, 1)).toEqual([[1]]);
+  expect(swapSelectionSlots([[1]], [], 0, 1)).toEqual([[0]]);
+});
+
+test("swapSelectionSlots carries descendants along with the moved slot", () => {
+  expect(swapSelectionSlots([[1, 0], [2, 3, 4]], [], 1, 2)).toEqual([[2, 0], [1, 3, 4]]);
+});
+
+test("swapSelectionSlots leaves untouched slots and other parents alone", () => {
+  expect(swapSelectionSlots([[3], [0, 1]], [], 1, 2)).toEqual([[3], [0, 1]]);
+  expect(swapSelectionSlots([[5, 1]], [0], 1, 2)).toEqual([[5, 1]]);   // swap inside group [0], path under group [5]
+});
+
+test("swapSelectionSlots remaps within a nested parent", () => {
+  expect(swapSelectionSlots([[0, 1], [0, 2]], [0], 1, 2)).toEqual([[0, 2], [0, 1]]);
+});
+
+test("swapSelectionSlots ignores a path that stops above the swap depth", () => {
+  expect(swapSelectionSlots([[0]], [0], 0, 1)).toEqual([[0]]);
 });
