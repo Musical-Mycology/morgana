@@ -251,6 +251,29 @@ only if a measured need appears — not by default.
 surface and time-pure particles are prerequisites for the on-stage editors (§4, handles overlay the
 true render) and keyframe/curve editing (§5).
 
+**Implementation note (2026-07-27 — §7a landed).** This section's two-piece plan is now tracked as
+three sub-efforts: **§7a** (time-pure note particles — spec
+`docs/superpowers/specs/2026-07-27-time-pure-particles-7a-design.md`) is done — `note_emitter` and
+`note_circle` are closed-form functions of time (`engine/components/effects/note-state.ts`), rendered
+by a stateless `NoteField` that both `DeckCanvas` and `BeatStage` drive from their own clock; **§7b**
+is the transport surface (`seek`/`pause`/`play`/`duration` over the GSAP master) — still open; **§7c**
+is the canvas swap, the parity gate, and `seek.ts`'s deletion — still open. Two things learned building
+§7a, worth keeping in mind for §7b/§7c:
+
+1. **`CinematicSlide`'s GSAP master is a callback scheduler with time spacers, not a seekable
+   representation.** Effects are scheduled via `master.add(fn)` (a `delayedCall`), so the timelines
+   the effect builders return are orphaned and actually run on wall-clock; durations are re-declared
+   as `master.to({}, {duration})` spacers purely to reserve time on the master, which is also why
+   `seek.ts` carries its own second copy of `introDuration`. `master.seek(t)` does **not** work
+   today — §7b is a restructure of this scheduling, not a thin control surface bolted on top.
+2. **The corpus question (§18 residual, "which decks and times") is partially closed:**
+   `samples/notes.deck.json` (added in the §7a fixture task) is a single-note-action deck seeded into
+   every e2e data dir, and is the first entry in what should become §7c's parity corpus. It is not
+   sufficient on its own — **the in-repo cross-path parity test that exists today compares sprite
+   *styles* only and does not cover stacking/layering divergence, so §7c's parity gate must assert
+   layering (DOM order / z-index) too, not just per-sprite position/opacity/color, or a real
+   regression there would pass unnoticed.**
+
 ## 8. Validation & linting
 
 **Vision.** A live **lint panel** surfaces deck problems as you author, each with a jump-to-fix:

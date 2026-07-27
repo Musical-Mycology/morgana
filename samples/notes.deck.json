@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "meta": { "id": "notes", "title": "Note Particles" },
+  "scenes": [
+    { "id": "notes", "beats": [
+      { "id": "b0", "timeline": [
+        { "kind": "text", "value": "Sources start here", "in": "fade" },
+        { "kind": "note_emitter", "color": "#f0c9a0", "pos": { "x": 0.3, "y": 0.7 }, "dir": 0, "var": 30, "decay": 1500, "freq": 3 },
+        { "kind": "note_circle", "pos": { "x": 0.7, "y": 0.4 }, "width": 0.24, "height": 0.24, "hex": ["#d4a843", "#f0c9a0"], "bounce": 0.3, "notes": 6, "speed": 4000 },
+        { "kind": "wait", "ms": 4000 }
+      ] },
+      { "id": "b1", "timeline": [
+        { "kind": "text", "value": "…and carry into this beat", "in": "fade" },
+        { "kind": "wait", "ms": 3000 }
+      ] },
+      { "id": "b2", "timeline": [
+        { "kind": "text", "value": "Rings stop, then everything", "in": "fade" },
+        { "kind": "wait", "ms": 400 },
+        { "kind": "stop_circle" },
+        { "kind": "wait", "ms": 400 },
+        { "kind": "stop_notes" },
+        { "kind": "wait", "ms": 1500 }
+      ] }
+    ] }
+  ]
+}

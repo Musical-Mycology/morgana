@@ -55,6 +55,21 @@ Notable in-repo docs:
   Tier 2 (Depth) is next.
 - `docs/superpowers/specs/` + `docs/superpowers/plans/` — per-feature design
   specs and implementation plans.
+- **Tier 2 §7 is decomposed** into §7a (time-pure note particles — spec
+  `docs/superpowers/specs/2026-07-27-time-pure-particles-7a-design.md`), §7b (the seekable
+  transport surface) and §7c (canvas swap + parity gate + `seek.ts` deletion). §7a is the
+  first landed. **Gotcha — `CinematicSlide`'s GSAP master is a callback scheduler with time
+  spacers, not a seekable representation**: effects are scheduled via `master.add(fn)` (a
+  `delayedCall`), so the timelines the effect builders return are orphaned and run on
+  wall-clock, which is why durations are re-declared as `master.to({}, {duration})` spacers
+  and why `seek.ts` carries a second copy of `introDuration`. `master.seek(t)` therefore
+  does *not* work today — §7b is a restructure, not a control surface.
+- **Note particles are pure functions of time** (`engine/components/effects/note-state.ts`).
+  `NoteField` holds no time state: both `DeckCanvas` and `BeatStage` mount it and supply a
+  clock. `CinematicRuntime` no longer carries `cue`/`emitter`/`noteCircle`/`stopNotes`/
+  `stopCircles` — the `cue` *action kind* survives in `types.ts` for deck-format
+  compatibility but is inert. Do not re-add per-sprite GSAP tweens: a second note animation
+  implementation is exactly the drift liability §7 exists to remove.
 
 When syncing this deep-dive after a Morgana change, remember the split:
 architecture/role/contract facts belong **here**; feature design detail belongs
