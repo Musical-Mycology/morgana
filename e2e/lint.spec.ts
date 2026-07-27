@@ -60,3 +60,40 @@ test("deleting a scene's last beat raises a warning that clears when refilled", 
 
   await request.delete(`/api/decks/${id}`);
 });
+
+test("a rejected save shows the server's reason and Retry succeeds", async ({ page, request }) => {
+  const id = "e2e-lint-save-retry";
+  await request.delete(`/api/decks/${id}`).catch(() => {});
+  const doc = { version: 1, meta: { id, title: "Retry" }, scenes: [
+    { id: "one", beats: [{ id: "a", timeline: [{ kind: "text", value: "A", in: "fade" }] }] },
+  ] };
+  await request.post("/api/decks", { data: { id, title: "Retry" } });
+  await request.put(`/api/decks/${id}`, { data: doc });
+
+  await page.goto(`/editor?deck=${id}`);
+
+  await page.route(`**/api/decks/${id}`, async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "scenes[0].id required" }),
+    });
+  });
+
+  await page.getByTestId("filmstrip").locator(".ed__beat").first().click();
+  await page.getByTestId("beat-add").click();               // edits the doc; autosave (700ms debounce) fires the mocked PUT
+
+  await expect(page.getByTestId("save-status")).toHaveText("Save failed");
+  await expect(page.getByTestId("save-error")).toBeVisible();
+  await expect(page.getByTestId("save-error")).toContainText("scenes[0].id required");
+  await expect(page.getByTestId("save-retry")).toBeVisible();
+
+  await page.unroute(`**/api/decks/${id}`);
+  await page.getByTestId("save-retry").click();
+
+  await expect(page.getByTestId("save-status")).toHaveText("Saved");
+  await expect(page.getByTestId("save-error")).toHaveCount(0);
+
+  await request.delete(`/api/decks/${id}`);
+});

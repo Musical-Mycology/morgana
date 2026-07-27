@@ -20,11 +20,19 @@ export function useAutosave(
   delay = 700,
 ): AutosaveHandle {
   const lastSaved = useRef(0);
+  // Tracks the revision a save was *attempted* for (success or failure), independent of
+  // `lastSaved`. Without this, a failed save leaves `lastSaved` stale forever, and since this
+  // effect's dependencies (notably `onStatus`) can change identity on every render regardless
+  // of `revision`, the effect would otherwise re-run and reschedule the same failed save
+  // indefinitely. A failed revision is attempted once; the user's Retry button is the recovery
+  // path, not an automatic retry storm.
+  const lastAttempted = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!doc || revision === 0 || revision === lastSaved.current) return;
+    if (!doc || revision === 0 || revision === lastSaved.current || revision === lastAttempted.current) return;
     onStatus("saving");
     const rev = revision;
+    lastAttempted.current = rev;
     timer.current = setTimeout(() => {
       saveDeck(doc)
         .then(() => { lastSaved.current = rev; onStatus("saved"); })

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export interface ExternalChangeState {
   changed: boolean;
@@ -54,5 +54,7 @@ export function useExternalChangePoll(deckId: string | null, intervalMs = 4000):
     return () => { cancelled = true; clearInterval(id); };
   }, [deckId, intervalMs, fetchMtime]);
 
-  return { changed, dismiss: () => setChanged(false), resync };
+  const dismiss = useCallback(() => setChanged(false), []);
+
+  return useMemo(() => ({ changed, dismiss, resync }), [changed, dismiss, resync]);
 }

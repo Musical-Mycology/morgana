@@ -58,3 +58,45 @@ test("a revision change still schedules a save", async () => {
   expect(saveDeck).toHaveBeenCalledTimes(1);
   expect(saveDeck).toHaveBeenCalledWith(doc);
 });
+
+test("after a failed save, the same revision is not retried", async () => {
+  saveDeck.mockRejectedValueOnce(new Error("boom"));
+  const { rerender } = renderHook(
+    ({ revision, onStatus }: { revision: number; onStatus: (s: string, e?: string) => void }) =>
+      useAutosave(doc, revision, onStatus),
+    { initialProps: { revision: 1, onStatus: vi.fn() } },
+  );
+
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(saveDeck).toHaveBeenCalledTimes(1);
+
+  // Re-render several times with the SAME revision but a fresh `onStatus` identity each
+  // time — mirroring app/editor/page.tsx, where onStatus is rebuilt every render. Before the
+  // `lastAttempted` guard, each of these re-runs the debounce effect and, because the failed
+  // save never updated `lastSaved`, blindly reschedules another save.
+  rerender({ revision: 1, onStatus: vi.fn() });
+  rerender({ revision: 1, onStatus: vi.fn() });
+  rerender({ revision: 1, onStatus: vi.fn() });
+
+  await vi.advanceTimersByTimeAsync(1000);
+
+  expect(saveDeck).toHaveBeenCalledTimes(1);
+});
+
+test("a new revision after a failure does save", async () => {
+  saveDeck.mockRejectedValueOnce(new Error("boom"));
+  const { rerender } = renderHook(
+    ({ revision, onStatus }: { revision: number; onStatus: (s: string, e?: string) => void }) =>
+      useAutosave(doc, revision, onStatus),
+    { initialProps: { revision: 1, onStatus: vi.fn() } },
+  );
+
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(saveDeck).toHaveBeenCalledTimes(1);
+
+  rerender({ revision: 2, onStatus: vi.fn() });
+
+  await vi.advanceTimersByTimeAsync(1000);
+
+  expect(saveDeck).toHaveBeenCalledTimes(2);
+});
