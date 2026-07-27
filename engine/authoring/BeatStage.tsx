@@ -27,7 +27,7 @@ export function BeatStage({
 
   const runtime = useMemo(
     () => makeAuthoringRuntime({
-      art, notes, setNight,
+      art, setNight,
       resolveEntry: () => entryLayers,
       resolveEnd: () => endLayers,
       onGate: () => {}, onWaiting: () => {},
