@@ -2,12 +2,31 @@ import { expect, test, beforeEach } from "vitest";
 import { useEditor } from "@/lib/editor/store";
 import { primaryPath } from "@/lib/editor/selection";
 import type { DeckDoc } from "@/engine/deck-doc";
+import type { SceneObject } from "@/engine/deck/types";
 
 const base = (): DeckDoc => ({ version: 1, meta: { id: "d", title: "D" }, scenes: [
   { id: "s1", beats: [{ id: "b1", timeline: [{ kind: "text", value: "x", in: "fade" }] }, { id: "b2", timeline: [] }] },
 ] });
 
 const primary = () => primaryPath(useEditor.getState().selectedObjectPaths);
+
+const shape = (id: string, x: number): SceneObject =>
+  ({ id, kind: "shape", shape: "rect", transform: { x, y: 0, w: 0.1, h: 0.1 } });
+
+/** Root list [grp(a, b), c, d] — paths: grp [0], a [0,0], b [0,1], c [1], d [2]. */
+const withGroup = (): DeckDoc => ({ version: 1, meta: { id: "d", title: "D" }, scenes: [
+  { id: "s1", objects: [
+    { id: "grp", kind: "group", transform: { x: 0, y: 0, w: 0.3, h: 0.1 }, children: [shape("a", 0), shape("b", 0.1)] },
+    shape("c", 0.5),
+    shape("d", 0.7),
+  ], beats: [{ id: "b1", timeline: [] }] },
+] });
+
+const rootIds = () => useEditor.getState().doc!.scenes[0].objects!.map((o) => o.id);
+const kidIds = () => {
+  const grp = useEditor.getState().doc!.scenes[0].objects!.find((o) => o.id === "grp");
+  return grp && grp.kind === "group" ? grp.children.map((o) => o.id) : [];
+};
 
 beforeEach(() => { useEditor.getState().load(base()); });
 
@@ -80,4 +99,51 @@ test("load, addAction, deleteBeat, deleteScene each clear the object selection",
   expect(clearAnd(() => useEditor.getState().addAction(0, null, "text"))).toEqual([]);
   expect(clearAnd(() => useEditor.getState().deleteBeat(0))).toEqual([]);
   expect(clearAnd(() => useEditor.getState().deleteScene(0))).toEqual([]);
+});
+
+test("reparentObject into a group selects the moved object and clears the group/action context", () => {
+  useEditor.getState().load(withGroup());
+  useEditor.getState().selectAction(0);          // must come first: selectAction clears enteredGroupPath
+  useEditor.getState().enterGroup([0]);
+  useEditor.getState().reparentObject("s1", [1], [0], 0);   // 'c' into grp at index 0
+  expect(kidIds()).toEqual(["c", "a", "b"]);
+  expect(rootIds()).toEqual(["grp", "d"]);
+  expect(useEditor.getState().selectedObjectPaths).toEqual([[0, 0]]);
+  expect(useEditor.getState().enteredGroupPath).toBeNull();
+  expect(useEditor.getState().selectedAction).toBeNull();
+});
+
+test("reparentObject out of a group selects the moved object at its new root path", () => {
+  useEditor.getState().load(withGroup());
+  useEditor.getState().reparentObject("s1", [0, 0], [], 2);  // 'a' out of grp, to root index 2
+  expect(rootIds()).toEqual(["grp", "c", "a", "d"]);
+  expect(kidIds()).toEqual(["b"]);
+  expect(useEditor.getState().selectedObjectPaths).toEqual([[2]]);
+});
+
+test("a forward move within one list selects the adjusted index, not the requested one", () => {
+  useEditor.getState().load(withGroup());
+  useEditor.getState().reparentObject("s1", [1], [], 3);     // 'c' to the end of the root list
+  expect(rootIds()).toEqual(["grp", "d", "c"]);
+  // The removal of 'c' shifted the target, so the mutation inserted at 2, not 3.
+  expect(useEditor.getState().selectedObjectPaths).toEqual([[2]]);
+});
+
+test("a refused reparent changes nothing, including the selection", () => {
+  useEditor.getState().load(withGroup());
+  useEditor.getState().selectObject([2]);
+  const doc = useEditor.getState().doc;
+  const rev = useEditor.getState().revision;
+  useEditor.getState().reparentObject("s1", [0], [0, 0], 0); // grp into its own subtree
+  expect(useEditor.getState().doc).toBe(doc);
+  expect(useEditor.getState().revision).toBe(rev);
+  expect(useEditor.getState().selectedObjectPaths).toEqual([[2]]);
+});
+
+test("reparentObject collapses a multi-selection to the moved object", () => {
+  useEditor.getState().load(withGroup());
+  useEditor.getState().selectObject([1]);
+  useEditor.getState().toggleObjectSelection([2]);           // selection [[1],[2]]
+  useEditor.getState().reparentObject("s1", [1], [0], 0);    // move 'c' into grp
+  expect(useEditor.getState().selectedObjectPaths).toEqual([[0, 0]]);
 });
