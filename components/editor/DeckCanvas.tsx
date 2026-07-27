@@ -58,7 +58,11 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
       <div ref={host} className="ed__canvas-host" style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", maxHeight: "100%", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
         <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />
         <NoteField ref={notes} reduced={false} />
-        <div className="cin"><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
+        {/* CinematicSlide's own `.cin` rule (position:relative) + `.cin__stage` (z-index:2) never apply here —
+            CinematicSlide isn't mounted on this route, so this wrapper is otherwise static and paints BELOW
+            NoteField's positioned z-index:2 regardless of DOM order. Pin it explicitly above notes (z-index:2)
+            and below PosHandle (5) / ObjectStage (6), matching BeatStage's effective art -> notes -> text -> objects order. */}
+        <div className="cin" style={{ position: "absolute", inset: 0, zIndex: 3 }}><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
         <ObjectStage ref={objStage} scene={scene ?? { id: "", beats: [] }} active={preview} />
         <PosHandle hostRef={host} redraw={draw} />
         {!preview && <ObjectsLayer hostRef={host} />}
