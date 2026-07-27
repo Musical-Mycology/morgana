@@ -44,9 +44,11 @@ export function actionDuration(a: Action): number {
   }
 }
 
-/** Tween effects can be rendered at arbitrary progress; particle/note sources cannot. */
+/** Every effect can be rendered at arbitrary progress. `cue` is the sole exception: it is
+ *  inert in Morgana (no runtime implements it) and renders nothing. Note sources became
+ *  seekable in §7a via the pure noteFieldStateAt reducer. */
 export function isSeekable(a: Action): boolean {
-  return a.kind !== "note_emitter" && a.kind !== "note_circle" && a.kind !== "cue";
+  return a.kind !== "cue";
 }
 
 export interface Window { action: Action; start: number; end: number; }
