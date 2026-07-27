@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./editor.css";
 import { useEditor } from "@/lib/editor/store";
-import { loadDeck } from "@/lib/api/decks-client";
+import { loadDeck, saveDeck } from "@/lib/api/decks-client";
 import { useAutosave, type SaveStatus } from "@/lib/editor/use-autosave";
 import { DeckCanvas, type CanvasHandle } from "@/components/editor/DeckCanvas";
 import { Filmstrip } from "@/components/editor/Filmstrip";
@@ -12,6 +12,9 @@ import { Inspector } from "@/components/editor/Inspector";
 import { DeckSettings } from "@/components/editor/DeckSettings";
 import { ExportPanel } from "@/components/editor/ExportPanel";
 import { McpPanel } from "@/components/editor/McpPanel";
+import { LintPanel } from "@/components/editor/LintPanel";
+import { useLint } from "@/lib/editor/use-lint";
+import { lintCounts } from "@/lib/editor/lint";
 import { primaryPath } from "@/lib/editor/selection";
 import { useExternalChangePoll } from "@/lib/editor/use-external-change-poll";
 
@@ -33,11 +36,14 @@ export default function Editor() {
   const selectedObjectPath = primaryPath(selectedObjectPaths);
   const canvasRef = useRef<CanvasHandle>(null);
   const [time, setTime] = useState({ t: 0, duration: 0 });
-  type Panel = "inspector" | "settings" | "export" | "mcp";
+  type Panel = "inspector" | "settings" | "export" | "mcp" | "lint";
   const [panel, setPanel] = useState<Panel>("inspector");
   const togglePanel = (p: Panel) => setPanel((cur) => (cur === p ? "inspector" : p));
   const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<SaveStatus>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const issues = useLint();
+  const counts = lintCounts(issues);
 
   const [deckId, setDeckId] = useState<string | null>(null);
   useEffect(() => {
@@ -47,11 +53,20 @@ export default function Editor() {
   }, [load]);
 
   const externalChange = useExternalChangePoll(deckId);
-  const onStatus = useCallback((s: SaveStatus) => {
+  const onStatus = useCallback((s: SaveStatus, error?: string) => {
     setStatus(s);
+    setSaveError(s === "error" ? (error ?? "unknown error") : null);
     if (s === "saved") externalChange.resync();
   }, [externalChange]);
-  useAutosave(doc, revision, onStatus);
+  const { markSaved } = useAutosave(doc, revision, onStatus);
+
+  const retrySave = useCallback(() => {
+    if (!doc) return;
+    onStatus("saving");
+    saveDeck(doc)
+      .then(() => { markSaved(revision); onStatus("saved"); })
+      .catch((e) => onStatus("error", e instanceof Error ? e.message : String(e)));
+  }, [doc, revision, onStatus, markSaved]);
 
   const selectedFlat = beats[selected] ?? null;
   const sceneId = selectedFlat?.sceneId ?? null;
@@ -98,7 +113,25 @@ export default function Editor() {
         <button className="ed__pill ed__pill--ghost" data-testid="deck-settings-toggle" onClick={() => togglePanel("settings")}>Deck settings</button>
         <button className="ed__pill ed__pill--ghost" data-testid="export-toggle" onClick={() => togglePanel("export")}>Export</button>
         <button className="ed__pill ed__pill--ghost" data-testid="mcp-toggle" onClick={() => togglePanel("mcp")}>Connect Claude</button>
-        <span data-testid="save-status" style={{ marginLeft: "auto", color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
+        <button className="ed__pill ed__pill--ghost" data-testid="lint-toggle" onClick={() => togglePanel("lint")}>
+          Issues
+          {counts.errors + counts.warnings > 0 && (
+            <span className="ed__lint-badge" data-testid="lint-count" data-errors={counts.errors}>
+              {counts.errors > 0 ? `${counts.errors}!` : counts.warnings}
+            </span>
+          )}
+        </button>
+        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          {saveError && (
+            <span data-testid="save-error" title={saveError} style={{ color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {saveError}
+            </span>
+          )}
+          {saveError && (
+            <button className="ed__pill ed__pill--ghost" data-testid="save-retry" onClick={retrySave}>Retry</button>
+          )}
+          <span data-testid="save-status" style={{ color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12 }}>{STATUS_LABEL[status]}</span>
+        </span>
       </div>
       <div className="ed__leftdock">
         <div className="ed__leftdock-film"><Filmstrip /></div>
@@ -106,7 +139,7 @@ export default function Editor() {
       </div>
       <div className="ed__canvas"><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} /></div>
       <Timeline canvasRef={canvasRef} time={time} />
-      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : <Inspector />}
+      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <Inspector />}
     </div>
   );
 }
