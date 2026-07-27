@@ -27,21 +27,30 @@ export function parseDocPath(message: string): LintLocation | undefined {
   return at;
 }
 
-const SLIDE_ID_RE = /^slide "([^"]+)":/;
+// Matches both message shapes validateDeck emits for a slide id: the common `slide "<id>": …`
+// prefix, and the differently-worded `duplicate slide id "<id>"` (no colon, no leading
+// "slide" token before "id"). Anchored at the start so it doesn't match unrelated messages
+// that merely contain a quoted string elsewhere.
+const SLIDE_ID_RE = /^(?:slide "([^"]+)":|duplicate slide id "([^"]+)")/;
 
 /** flattenStory builds slide ids as `${scene.id}.${beat.id}`, so a validateDeck message
  *  resolves back to a beat by scanning for that pair. */
 function locateSlide(doc: DeckDoc, message: string): LintLocation | undefined {
   const m = SLIDE_ID_RE.exec(message);
   if (!m) return undefined;
+  const id = m[1] ?? m[2];
   for (let sceneIdx = 0; sceneIdx < doc.scenes.length; sceneIdx++) {
     const scene = doc.scenes[sceneIdx];
     for (let beatIdx = 0; beatIdx < scene.beats.length; beatIdx++) {
-      if (`${scene.id}.${scene.beats[beatIdx].id}` === m[1]) return { sceneIdx, beatIdx };
+      if (`${scene.id}.${scene.beats[beatIdx].id}` === id) return { sceneIdx, beatIdx };
     }
   }
   return undefined;
 }
+
+// validateDeck's exact wording for a cinematic beat with no art and no timeline. Matched
+// precisely so this suppression can't accidentally swallow some other message.
+const NO_ART_NO_TIMELINE_RE = /^slide "[^"]+": cinematic beat has no art and no timeline$/;
 
 const LAST = Number.MAX_SAFE_INTEGER;
 
@@ -77,7 +86,20 @@ export function lintDeck(doc: DeckDoc): LintIssue[] {
   if (errors.length === 0) {
     try {
       for (const message of validateDeck(flattenStory(doc.scenes))) {
-        warnings.push({ rule: "slide", severity: "warning", message, at: locateSlide(doc, message) });
+        const at = locateSlide(doc, message);
+        // engine/deck/validate.ts flags a cinematic beat with no art and no timeline, but it
+        // knows nothing about scene-level objects — this branch's own isBeatEmpty (in
+        // empty-state.ts) treats such a beat as non-empty once its scene has objects, because
+        // the object layer genuinely renders them. Without this suppression, any beat that
+        // relies on scene objects for its visual content gets a permanent, unresolvable
+        // warning here. The engine is read-only for this branch (validateDeck is shared code
+        // with its own consumers), so the fix lives in the editor's lint layer instead: the
+        // deeper fix — teaching validateDeck about scene objects — is a deliberate follow-up,
+        // not an oversight.
+        if (NO_ART_NO_TIMELINE_RE.test(message) && at !== undefined && (doc.scenes[at.sceneIdx].objects?.length ?? 0) > 0) {
+          continue;
+        }
+        warnings.push({ rule: "slide", severity: "warning", message, at });
       }
     } catch { /* ignore — an unlintable deck is still an editable deck */ }
   }

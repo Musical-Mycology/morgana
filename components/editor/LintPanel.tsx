@@ -16,12 +16,19 @@ export function LintPanel({ issues }: { issues: LintIssue[] }) {
     if (at.actionIdx !== undefined) selectAction(at.actionIdx);
   };
 
+  // "Located" means the jump will actually land somewhere. A scene-only location (no
+  // beatIdx — e.g. scene-empty, or an object-tree structural error) has no beat to select,
+  // so `flatIndexOf` would always return -1 for it; rendering those as buttons makes every
+  // click a silent no-op. Require a beatIdx that resolves to a real flat index.
+  const isLocated = (at: LintIssue["at"]): boolean =>
+    doc !== null && at !== undefined && at.beatIdx !== undefined && flatIndexOf(doc, at.sceneIdx, at.beatIdx) >= 0;
+
   return (
     <div className="ed__inspector" data-testid="lint-panel">
       <div className="ed__lbl">Issues</div>
       {issues.length === 0 && <p className="ed__lint-clean">No issues.</p>}
       {issues.map((issue, i) => {
-        const located = issue.at !== undefined && doc !== null;
+        const located = isLocated(issue.at);
         const props = {
           key: i,
           className: "ed__lint-row",

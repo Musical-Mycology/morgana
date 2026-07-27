@@ -48,3 +48,28 @@ test("a deck-level row is not interactive", () => {
   expect(row.tagName).not.toBe("BUTTON");
   expect(row.getAttribute("data-located")).toBe("false");
 });
+
+test("a scene-empty row (scene-only location, no beatIdx) is not interactive", () => {
+  const issues: LintIssue[] = [
+    { rule: "scene-empty", severity: "warning", message: 'scene "s2" has no beats', at: { sceneIdx: 1 } },
+  ];
+  render(<LintPanel issues={issues} />);
+  const row = screen.getByTestId("lint-issue");
+  expect(row.tagName).not.toBe("BUTTON");
+  expect(row.getAttribute("data-located")).toBe("false");
+  fireEvent.click(row);
+  // clicking a non-interactive row must not change selection
+  expect(useEditor.getState().selected).toBe(0);
+});
+
+test("a beat-located issue still renders as a button and still jumps", () => {
+  const issues: LintIssue[] = [
+    { rule: "slide", severity: "warning", message: "hollow", at: { sceneIdx: 1, beatIdx: 0 } },
+  ];
+  render(<LintPanel issues={issues} />);
+  const row = screen.getByTestId("lint-issue");
+  expect(row.tagName).toBe("BUTTON");
+  expect(row.getAttribute("data-located")).toBe("true");
+  fireEvent.click(row);
+  expect(useEditor.getState().selected).toBe(1); // flat index of s2's only beat
+});

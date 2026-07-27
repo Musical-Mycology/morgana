@@ -74,6 +74,35 @@ test("errors come first; warnings are sorted into document order", () => {
   expect(issues.map((i) => i.at!.sceneIdx)).toEqual([0, 1]);
 });
 
+test("the no-art/no-timeline slide warning is suppressed for a beat whose scene has objects", () => {
+  const doc = clean();
+  doc.scenes[0].objects = [
+    { id: "o1", kind: "shape", shape: "rect", transform: { x: 0, y: 0, w: 1, h: 1 } },
+  ];
+  doc.scenes[0].beats.push({ id: "hollow", timeline: [] }); // no art, no timeline
+  const issues = lintDeck(doc);
+  expect(issues.some((i) => i.rule === "slide")).toBe(false);
+});
+
+test("the no-art/no-timeline slide warning still fires when the scene has no objects", () => {
+  const doc = clean();
+  doc.scenes[0].beats.push({ id: "hollow", timeline: [] }); // no art, no timeline, no objects
+  const issues = lintDeck(doc);
+  expect(issues.some((i) => i.rule === "slide")).toBe(true);
+});
+
+test("a duplicate slide id warning resolves to a real beat location", () => {
+  const doc: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [
+    { id: "dup", beats: [{ id: "x", timeline: [{ kind: "text", value: "A", in: "fade" }] }] },
+    { id: "dup", beats: [{ id: "x", timeline: [{ kind: "text", value: "B", in: "fade" }] }] },
+  ] };
+  const issues = lintDeck(doc);
+  const w = issues.find((i) => i.message.startsWith("duplicate slide id"));
+  expect(w).toBeDefined();
+  expect(w!.at).toBeDefined();
+  expect(w!.at).toEqual({ sceneIdx: 0, beatIdx: 0 });
+});
+
 test("lintCounts tallies by severity", () => {
   const doc = clean();
   doc.scenes.push({ id: "gap", beats: [] });
