@@ -1285,7 +1285,11 @@ describe("note rendering parity across entry points", () => {
     const { container } = render(<NoteField ref={ref} />);
     for (const t of [0, 0.4, 1.1, 2.7, 3.9]) {
       ref.current!.renderAt(scene, 0, t);
-      expect(painted(container).length).toBe(noteFieldStateAt(scene, 0, t).filter((s) => s.opacity > 0).length);
+      // Compare like with like: `painted` counts nodes NOT display:none, and applyNoteState
+      // shows a node for EVERY sprite the reducer returns — including a just-born sprite whose
+      // eased opacity is exactly 0 at t=0. Filtering the reducer side by `opacity > 0` would
+      // drop that sprite and under-count against the DOM.
+      expect(painted(container).length).toBe(noteFieldStateAt(scene, 0, t).length);
     }
   });
 
