@@ -69,10 +69,23 @@ export default function Editor() {
 
   const retrySave = useCallback(() => {
     if (!doc) return;
+    // Capture the revision this retry is for at click time. A newer autosave (or another
+    // retry) can be in flight by the time this one settles, and it can resolve after that
+    // newer attempt — checking the store's *current* revision against the one captured here
+    // stops a stale response from calling onStatus("saved") over a genuinely-still-failing
+    // (or still-in-progress) latest edit.
+    const rev = revision;
     onStatus("saving");
     saveDeck(doc)
-      .then(() => { markSaved(revision); onStatus("saved"); })
-      .catch((e) => onStatus("error", e instanceof Error ? e.message : String(e)));
+      .then(() => {
+        if (useEditor.getState().revision !== rev) return;
+        markSaved(rev);
+        onStatus("saved");
+      })
+      .catch((e) => {
+        if (useEditor.getState().revision !== rev) return;
+        onStatus("error", e instanceof Error ? e.message : String(e));
+      });
   }, [doc, revision, onStatus, markSaved]);
 
   const selectedFlat = beats[selected] ?? null;

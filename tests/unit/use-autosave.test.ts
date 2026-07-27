@@ -100,3 +100,48 @@ test("a new revision after a failure does save", async () => {
 
   expect(saveDeck).toHaveBeenCalledTimes(2);
 });
+
+// Flush the microtask queue without relying on fake timers (the pending saves below are
+// resolved directly, not via setTimeout).
+const flushMicrotasks = async () => {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+};
+
+test("a stale response for an older revision does not report 'saved' after a newer save has started", async () => {
+  const onStatus = vi.fn();
+  let resolveOld!: () => void;
+  let resolveNew!: () => void;
+  const oldSave = new Promise<{ ok: true }>((res) => { resolveOld = () => res({ ok: true }); });
+  const newSave = new Promise<{ ok: true }>((res) => { resolveNew = () => res({ ok: true }); });
+  saveDeck.mockImplementationOnce(() => oldSave);
+  saveDeck.mockImplementationOnce(() => newSave);
+
+  const { rerender } = renderHook(
+    ({ revision }: { revision: number }) => useAutosave(doc, revision, onStatus),
+    { initialProps: { revision: 1 } },
+  );
+
+  // Revision 1's save fires and is left in flight (slow request).
+  await vi.advanceTimersByTimeAsync(700);
+  expect(saveDeck).toHaveBeenCalledTimes(1);
+
+  // The user edits again 700ms later: revision 2's save fires while revision 1's is still
+  // outstanding — two saves now in flight at once.
+  rerender({ revision: 2 });
+  await vi.advanceTimersByTimeAsync(700);
+  expect(saveDeck).toHaveBeenCalledTimes(2);
+
+  // The NEWER save resolves first.
+  resolveNew();
+  await flushMicrotasks();
+  expect(onStatus).toHaveBeenCalledWith("saved");
+  const savedCallsAfterNew = onStatus.mock.calls.filter((c) => c[0] === "saved").length;
+  expect(savedCallsAfterNew).toBe(1);
+
+  // The OLDER (stale) save resolves after — it must not re-report "saved" and hide the
+  // fact that the latest revision's own save already settled.
+  resolveOld();
+  await flushMicrotasks();
+  const savedCallsAfterOld = onStatus.mock.calls.filter((c) => c[0] === "saved").length;
+  expect(savedCallsAfterOld).toBe(1);
+});
