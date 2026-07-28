@@ -102,3 +102,40 @@ test("SEEK SYMMETRY across a clear: seeking back re-shows the cleared line", () 
   renderAt(0.4);                       // BACK past the clear — must rebuild
   expect(lineTextAt(host)).toEqual(["before"]);
 });
+
+// A `pos`-bearing text action gets its OWN wrapper box (via makeLineBox), separate from the
+// <p> that buildText's `el` points at. resetFrom must tear down that box too, or every
+// backward seek past a boundary strands an empty positioned box in `.cin__stage` — and leaves
+// a detached node in lineBoxes.current besides. A scrub bar drags backward constantly, so this
+// is the common path, not an edge case.
+//
+// This must seek back to a t that lands INSIDE an in-flight fade_out (not yet settled): the
+// settled fade_out/clear branches call clearLineBoxes() themselves, which would incidentally
+// wipe any leaked box and mask the bug. The in-flight branch only sets opacity — it never
+// calls clearLineBoxes() — so it is the one path where resetFrom's own box teardown is load-
+// bearing, not merely redundant with an unconditional wipe elsewhere.
+const posFading: Action[] = [
+  { kind: "text", value: "before", in: "fade", pos: { x: 0.1, y: 0.1 } }, // [0, 0.8)
+  { kind: "fade_out" },                                                   // [0.8, 1.3)
+  { kind: "text", value: "after", in: "fade", pos: { x: 0.1, y: 0.1 } },  // [1.3, 2.1)
+];
+
+test("backward seek into an in-flight fade_out does not leak positioned line boxes", () => {
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "pf", timeline: posFading } }} animate runtime={noopRuntime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  const renderAt = (t: number) => host.__renderAt!(t);
+  const stage = container.querySelector<HTMLElement>(".cin__stage")!;
+  // Every `.cin__text` box directly under the stage: the one persistent shared box (always
+  // present) plus one per still-live `pos`-bearing line box. Should never grow across seeks.
+  const boxCount = () => stage.querySelectorAll(".cin__text").length;
+
+  renderAt(2.5);                // forward, past the fade_out, settled into "after"'s window
+  expect(boxCount()).toBe(2);   // shared box + "after"'s own box
+
+  renderAt(1.0);                // BACK, landing INSIDE the fade_out's own [0.8, 1.3) window —
+                                 // rebuildBoundary finds the fade_out itself (not -1), and the
+                                 // fold replays it as in-flight, which never calls clearLineBoxes.
+  expect(boxCount()).toBe(2);   // shared box + rebuilt "before" box — no leaked "after" box
+});

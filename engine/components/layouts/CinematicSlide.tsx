@@ -76,7 +76,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   const mediaTiles = useRef<Map<string, HTMLElement>>(new Map());
   // Built, PAUSED effect timelines keyed by action index. Nothing here ever runs on
   // wall-clock — renderAt is the only thing that advances them (design spec §7b §4.2).
-  const built = useRef<Map<number, { el: HTMLElement; tl: gsap.core.Timeline | null }>>(new Map());
+  // `box` is set only for a `pos`-bearing text action: the separate wrapper div makeLineBox()
+  // creates (distinct from `el`, the <p> inside it). resetFrom must tear both down, or a
+  // backward seek strands an empty positioned box in the stage (and a detached node in
+  // lineBoxes.current) every time it lands inside an in-flight fade_out.
+  const built = useRef<Map<number, { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement }>>(new Map());
   const lastT = useRef(0);
   const [againRevealed, setAgainRevealed] = useState(false);
 
@@ -430,20 +434,23 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
 
   /** Build one text action's element + its real reveal timeline, paused at 0. Reuses the same
    *  el-creation + effect-selection logic as scheduleAction's `text` case (design spec §7b §4.2). */
-  function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): { el: HTMLElement; tl: gsap.core.Timeline | null } {
+  function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement } {
     const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive"];
     const effIn: TextIn = hasInlineMarkup(a.value) && perPiece.includes(a.in) ? "fade" : a.in;
     // instantText / no-reveal lines have no entrance: they render at rest, and (matching
     // scheduleAction's equivalent branch) their dots render already-faded-in via `instant`.
     const instant = !!(instantText && !a.reveal);
+    // `box` is only created (and only tracked) for a non-append, `pos`-bearing line — capture
+    // it so resetFrom can tear it down alongside `el` (see the `built` ref's comment).
+    let box: HTMLElement | undefined;
     const el = a.append
       ? appendFragment(a.value)
-      : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, instant, a.tone);
+      : appendText(a.pos ? (box = makeLineBox(a.pos, a.align)) : host, a.value, a.size, a.align, a.dots, instant, a.tone);
     if (a.in === "cursive") el.classList.add("cin__line--cursive");
-    if (instant) return { el, tl: null };
+    if (instant) return { el, tl: null, box };
     const tl = buildTextEffect(el, effIn, a);
     tl.pause(0);
-    return { el, tl };
+    return { el, tl, box };
   }
 
   /** Drop every cached entry from `index` onward, killing its (paused) tween and removing
@@ -455,6 +462,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       if (i < index) continue;
       entry.tl?.kill();
       entry.el.remove();
+      // A `pos`-bearing text action's wrapper box is a separate node from `el` (see buildText)
+      // — remove it too, and splice it out of lineBoxes.current, or it strands an empty box in
+      // the stage and a detached node in that array (design spec §7b §4.3).
+      if (entry.box) {
+        entry.box.remove();
+        const bi = lineBoxes.current.indexOf(entry.box);
+        if (bi !== -1) lineBoxes.current.splice(bi, 1);
+      }
       built.current.delete(i);
     }
   }
