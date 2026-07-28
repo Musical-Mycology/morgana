@@ -1,9 +1,14 @@
-import { expect, test } from "vitest";
-import { render } from "@testing-library/react";
-import { createElement } from "react";
+import { afterEach, expect, test } from "vitest";
+import { render, cleanup } from "@testing-library/react";
+import { createElement, createRef } from "react";
 import { counterValueAt, formatCounterValue } from "@/engine/deck/counter";
-import { CinematicSlide } from "@/engine/components/layouts/CinematicSlide";
+import { CinematicSlide, type SlideTransport } from "@/engine/components/layouts/CinematicSlide";
 import type { Action, Beat } from "@/engine/deck/types";
+
+// CinematicSlide autoplays via a real gsap.ticker as soon as it mounts (Task 9) — unmount
+// between tests so each mount's ticker gets paused (via the effect's cleanup) rather than
+// leaking into later tests.
+afterEach(cleanup);
 
 test("counterValueAt eases from `from` to `to` across local progress", () => {
   expect(counterValueAt(0, 100, 0)).toBeCloseTo(0);
@@ -27,15 +32,17 @@ const noopRuntime = {
   resolveEntry: () => [], resolveEnd: () => [], jumpTo: () => {},
 };
 
-/** Mount and return a handle that exposes renderAt via the test-only `__renderAt` escape
- *  hatch on the DOM node (same pattern as tests/unit/slide-render-at.test.tsx). */
+/** Mount and return a handle that exposes renderAt via the real SlideTransport ref (Task 9
+ *  replaced the test-only `__renderAt` escape hatch with this — same pattern as
+ *  tests/unit/slide-render-at.test.tsx). */
 function mountCounterSlide(timeline: Action[]) {
   const beat: Beat = { id: "counter-beat", timeline };
+  const transport = createRef<SlideTransport>();
   const { container } = render(
-    createElement(CinematicSlide, { slots: { sceneId: "s", beat }, animate: true, runtime: noopRuntime }),
+    createElement(CinematicSlide, { slots: { sceneId: "s", beat }, animate: true, runtime: noopRuntime, transport }),
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  return { host, renderAt: (t: number) => host.__renderAt!(t) };
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  return { host, transport, renderAt: (t: number) => transport.current!.seek(t) };
 }
 
 const counterValueText = (host: HTMLElement) =>
@@ -136,4 +143,39 @@ test("counter_add composes across two consecutive adds: show(0) -> add(+50) -> a
 
   renderAt(2.0); // settled after both adds
   expect(counterValueText(host)).toBe(formatCounterValue(80));
+});
+
+// --- PLAYBACK: counters must actually animate under play(), not snap instantly ------------
+//
+// Tasks 5/6 deleted the wall-clock gsap.from/gsap.to tweens the OLD scheduleAction path used to
+// animate counters/media — accepted as a temporary regression on the explicit condition that
+// task 9 restores it, because the ticker now drives renderAt continuously (task 9 brief,
+// required check 1). This test drives the REAL ticker (no manual seek) and samples mid-flight
+// via a real wall-clock wait, so it would fail if playback still snapped straight to the
+// settled value instead of easing through it.
+test("PLAYBACK: a counter_to actually animates under play(), not a snap (required check 1)", async () => {
+  // counter_show is a fixed 0.4s window; counter_to runs a full 1s on top of that. Rather than
+  // sampling at one fixed real-time instant (flaky under a loaded test run, where scheduling
+  // jitter can push a single sample past settlement), poll repeatedly through the whole window
+  // and assert SOME sample landed strictly between the start and end values — robust to timing
+  // jitter as long as the poll interval is well under the animation's own duration.
+  const playTimeline: Action[] = [
+    { kind: "counter_show", pos: { x: 0.5, y: 0.5 }, value: 0 },
+    { kind: "counter_to", value: 100, durationMs: 1000 },
+  ];
+  const beat: Beat = { id: "counter-play", timeline: playTimeline };
+  const { container } = render(
+    createElement(CinematicSlide, { slots: { sceneId: "s", beat }, animate: true, runtime: noopRuntime }),
+  );
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  const valueText = () => host.querySelector(".cin__counter-value")?.textContent ?? null;
+
+  let sawIntermediate = false;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const v = valueText();
+    if (v != null && v !== formatCounterValue(0) && v !== formatCounterValue(100)) { sawIntermediate = true; break; }
+    await new Promise<void>((resolve) => setTimeout(resolve, 15));
+  }
+  expect(sawIntermediate).toBe(true); // caught it mid-ease — never just start or end
 });

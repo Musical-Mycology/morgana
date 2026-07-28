@@ -1,9 +1,14 @@
-import { expect, test } from "vitest";
-import { render } from "@testing-library/react";
-import { createElement } from "react";
+import { afterEach, expect, test } from "vitest";
+import { render, cleanup } from "@testing-library/react";
+import { createElement, createRef } from "react";
 import { mediaStateAt } from "@/engine/deck/media-state";
-import { CinematicSlide } from "@/engine/components/layouts/CinematicSlide";
+import { CinematicSlide, type SlideTransport } from "@/engine/components/layouts/CinematicSlide";
 import type { Action, Beat } from "@/engine/deck/types";
+
+// CinematicSlide autoplays via a real gsap.ticker as soon as it mounts (Task 9) — unmount
+// between tests so each mount's ticker gets paused (via the effect's cleanup) rather than
+// leaking into later tests.
+afterEach(cleanup);
 
 const show: Extract<Action, { kind: "media" }> = { kind: "media", id: "m", pos: { x: 0.2, y: 0.3 } };
 const move: Extract<Action, { kind: "media_move" }> = { kind: "media_move", id: "m", to: { x: 0.8, y: 0.3 }, durationMs: 1000 };
@@ -81,11 +86,12 @@ const noopRuntime = {
 
 function mountMediaSlide(timeline: Action[]) {
   const beat: Beat = { id: "media-beat", timeline };
+  const transport = createRef<SlideTransport>();
   const { container } = render(
-    createElement(CinematicSlide, { slots: { sceneId: "s", beat }, animate: true, runtime: noopRuntime }),
+    createElement(CinematicSlide, { slots: { sceneId: "s", beat }, animate: true, runtime: noopRuntime, transport }),
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  return { host, renderAt: (t: number) => host.__renderAt!(t) };
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  return { host, transport, renderAt: (t: number) => transport.current!.seek(t) };
 }
 
 // media(600ms default) [0, 0.6) -> media_move(1000ms) [0.6, 1.6)
@@ -120,4 +126,40 @@ test("BACKWARD SEEK: scrubbing back before a tile's `media` action tears it down
 
   renderAt(0.2); // BACK before media's own start (0.5): not yet reached
   expect(host.querySelector(".cin__media")).toBeNull();
+});
+
+// --- PLAYBACK: media tiles must actually animate under play(), not snap instantly ---------
+//
+// Tasks 5/6 deleted the wall-clock gsap.to tweens the OLD scheduleAction path used to animate
+// media moves — accepted as a temporary regression on the explicit condition that task 9
+// restores it, because the ticker now drives renderAt continuously (task 9 brief, required
+// check 1). This test drives the REAL ticker (no manual seek) and samples mid-flight via a
+// real wall-clock wait, so it would fail if playback still snapped straight to the target
+// position instead of easing through it.
+test("PLAYBACK: a media_move actually animates under play(), not a snap (required check 1)", async () => {
+  // `media`'s show window is shortened to 0.2s; media_move runs a full 1s on top of that.
+  // Rather than sampling at one fixed real-time instant (flaky under a loaded test run, where
+  // scheduling jitter can push a single sample past settlement), poll repeatedly through the
+  // whole window and assert SOME sample landed strictly between the start and end positions —
+  // robust to timing jitter as long as the poll interval is well under the animation's own
+  // duration.
+  const playTimeline: Action[] = [
+    { kind: "media", id: "m", pos: { x: 0.2, y: 0.3 }, durationMs: 200 },
+    { kind: "media_move", id: "m", to: { x: 0.8, y: 0.3 }, durationMs: 1000 },
+  ];
+  const beat: Beat = { id: "media-play", timeline: playTimeline };
+  const { container } = render(
+    createElement(CinematicSlide, { slots: { sceneId: "s", beat }, animate: true, runtime: noopRuntime }),
+  );
+  const tile = () => container.querySelector<HTMLElement>(".cin__media");
+
+  let sawIntermediate = false;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const el = tile();
+    const left = el ? parseFloat(el.style.left) : NaN;
+    if (!Number.isNaN(left) && left > 20 && left < 80) { sawIntermediate = true; break; }
+    await new Promise<void>((resolve) => setTimeout(resolve, 15));
+  }
+  expect(sawIntermediate).toBe(true); // caught it mid-ease — never just start or end
 });

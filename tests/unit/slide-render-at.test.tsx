@@ -1,6 +1,8 @@
-import { expect, test } from "vitest";
-import { render } from "@testing-library/react";
-import { CinematicSlide } from "@/engine/components/layouts/CinematicSlide";
+import { afterEach, expect, test } from "vitest";
+import { createRef } from "react";
+import { render, cleanup } from "@testing-library/react";
+import { CinematicSlide, type SlideTransport } from "@/engine/components/layouts/CinematicSlide";
+import { ROTATE_STEP, rotateItemAt } from "@/engine/components/effects/cinematic-anim";
 import type { Action, Beat } from "@/engine/deck/types";
 
 const noopRuntime = {
@@ -9,20 +11,29 @@ const noopRuntime = {
   resolveEntry: () => [], resolveEnd: () => [], jumpTo: () => {},
 };
 
+// CinematicSlide now autoplays (via SlideTransport.play()) as soon as it mounts, driven by a
+// REAL gsap.ticker listener — unlike the old escape hatch, that ticker is genuinely live and
+// keeps calling renderAt on wall-clock time until paused. Every mounted instance must be
+// unmounted between tests (which runs the effect's cleanup → pause()) or its ticker leaks into
+// later tests (ambiguity res. #1) — see the mutation check in the task report for proof this
+// actually matters.
+afterEach(cleanup);
+
 const timeline: Action[] = [
   { kind: "text", value: "first", in: "fade" },
   { kind: "text", value: "second", in: "fade" },
 ];
 const beat: Beat = { id: "b", timeline };
 
-/** Mount and return a handle that exposes renderAt via the transport ref (Task 9)
- *  — until then, via the test-only `__renderAt` escape hatch on the DOM node. */
+/** Mount and return a handle that exposes renderAt via the real SlideTransport ref (Task 9
+ *  replaced the test-only `__renderAt` escape hatch with this). */
 function mountSlide() {
+  const transport = createRef<SlideTransport>();
   const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat }} animate runtime={noopRuntime} />,
+    <CinematicSlide slots={{ sceneId: "s", beat }} animate runtime={noopRuntime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  return { host, renderAt: (t: number) => host.__renderAt!(t) };
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  return { host, transport, renderAt: (t: number) => transport.current!.seek(t) };
 }
 
 // Compares text content AND the inline style GSAP writes as it seeks (opacity, transform,
@@ -71,6 +82,32 @@ test("renderAt actually advances the paused timeline (not a no-op)", () => {
   expect(late).not.toEqual(early);
 });
 
+// --- SlideTransport surface (Task 9) -----------------------------------------------------
+
+test("duration() is the canonical beatDuration, not a GSAP reading", () => {
+  const ref = createRef<SlideTransport>();
+  render(<CinematicSlide slots={{ sceneId: "s", beat }} animate runtime={noopRuntime} transport={ref} />);
+  expect(ref.current!.duration()).toBeCloseTo(1.6, 1);   // two fade lines at 0.8
+});
+
+test("seek clamps to [0, duration]", () => {
+  const ref = createRef<SlideTransport>();
+  render(<CinematicSlide slots={{ sceneId: "s", beat }} animate runtime={noopRuntime} transport={ref} />);
+  ref.current!.seek(-5);
+  ref.current!.seek(999);              // must not throw
+  expect(lineTextAt(document.querySelector(".cin")!)).toEqual(["first", "second"]);
+});
+
+test("seek does not throw on a zero-duration/empty beat", () => {
+  const ref = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "empty", timeline: [] } }} animate runtime={noopRuntime} transport={ref} />,
+  );
+  expect(ref.current!.duration()).toBe(0);
+  expect(() => ref.current!.seek(5)).not.toThrow();
+  expect(() => ref.current!.seek(-5)).not.toThrow();
+});
+
 const clearing: Action[] = [
   { kind: "text", value: "before", in: "fade" },   // [0, 0.8)
   { kind: "clear" },                                // at 0.8
@@ -87,11 +124,12 @@ const lineTextAt = (host: HTMLElement) =>
   [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
 
 test("SEEK SYMMETRY across a clear: seeking back re-shows the cleared line", () => {
+  const transport = createRef<SlideTransport>();
   const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "c", timeline: clearing } }} animate runtime={noopRuntime} />,
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "c", timeline: clearing } }} animate runtime={noopRuntime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  const renderAt = (t: number) => host.__renderAt!(t);
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  const renderAt = (t: number) => transport.current!.seek(t);
 
   renderAt(0.4);
   expect(lineTextAt(host)).toEqual(["before"]);
@@ -121,11 +159,11 @@ const posFading: Action[] = [
 ];
 
 test("backward seek into an in-flight fade_out does not leak positioned line boxes", () => {
+  const transport = createRef<SlideTransport>();
   const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "pf", timeline: posFading } }} animate runtime={noopRuntime} />,
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "pf", timeline: posFading } }} animate runtime={noopRuntime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  const renderAt = (t: number) => host.__renderAt!(t);
+  const renderAt = (t: number) => transport.current!.seek(t);
   const stage = container.querySelector<HTMLElement>(".cin__stage")!;
   // Every `.cin__text` box directly under the stage: the one persistent shared box (always
   // present) plus one per still-live `pos`-bearing line box. Should never grow across seeks.
@@ -163,11 +201,11 @@ test("scrubbing within one art window issues no repeated runtime calls", () => {
     { kind: "nightlight", to: 0.4 },
     { kind: "wait", ms: 2000 },
   ];
-  const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a", timeline: tl } }} animate runtime={runtime} />,
+  const transport = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a", timeline: tl } }} animate runtime={runtime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  for (const t of [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]) host.__renderAt!(t);
+  for (const t of [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]) transport.current!.seek(t);
   expect(calls).toEqual(["art", "night"]);   // once each, not once per frame
 });
 
@@ -184,14 +222,14 @@ test("backward seek past the reset boundary re-issues art and nightlight", () =>
     { kind: "nightlight", to: 0.4 },
     { kind: "wait", ms: 2000 },
   ];
-  const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a2", timeline: tl } }} animate runtime={runtime} />,
+  const transport = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a2", timeline: tl } }} animate runtime={runtime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  host.__renderAt!(1.0);
+  transport.current!.seek(1.0);
   expect(calls).toEqual(["art", "night"]);
-  host.__renderAt!(0.0); // BACK to before the art/nightlight actions — resetFrom(0) must clear refs
-  host.__renderAt!(1.0); // forward again: must re-issue, not skip on a stale "already applied" ref
+  transport.current!.seek(0.0); // BACK to before the art/nightlight actions — resetFrom(0) must clear refs
+  transport.current!.seek(1.0); // forward again: must re-issue, not skip on a stale "already applied" ref
   expect(calls).toEqual(["art", "night", "art", "night"]);
 });
 
@@ -213,12 +251,12 @@ test("art/nightlight after a `clear` are issued once, not re-issued on every for
     { kind: "nightlight", to: 0.4 },                              // at 0.8
     { kind: "wait", ms: 2000 },                                   // [0.8, 2.8)
   ];
-  const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a3", timeline: tl } }} animate runtime={runtime} />,
+  const transport = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a3", timeline: tl } }} animate runtime={runtime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
   // Every one of these frames re-folds the `clear` at 0.8 (it is at-or-before every t here).
-  for (const t of [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]) host.__renderAt!(t);
+  for (const t of [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]) transport.current!.seek(t);
   expect(calls).toEqual(["art", "night"]);   // once each, not once per frame past the clear
 });
 
@@ -237,11 +275,12 @@ test("BUILD CACHE: text after a `clear` is built once, not rebuilt on every re-f
     { kind: "clear" },                              // at 0.8
     { kind: "text", value: "after", in: "fade" },  // [0.8, 1.6)
   ];
+  const transport = createRef<SlideTransport>();
   const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "cache1", timeline: tl } }} animate runtime={noopRuntime} />,
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "cache1", timeline: tl } }} animate runtime={noopRuntime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  const renderAt = (t: number) => host.__renderAt!(t);
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  const renderAt = (t: number) => transport.current!.seek(t);
 
   renderAt(1.0);                                   // inside "after"'s in-flight window
   const first = host.querySelector("p.cin__line");
@@ -269,12 +308,12 @@ test("art diffing key is independent of the transition object's own key insertio
     reversedOrder,                   // at 0.5 — value-identical to naturalOrder, different key order
     { kind: "wait", ms: 500 },       // [0.5, 1.0)
   ];
-  const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a4", timeline: tl } }} animate runtime={runtime} />,
+  const transport = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a4", timeline: tl } }} animate runtime={runtime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  host.__renderAt!(0.1);  // reaches naturalOrder
-  host.__renderAt!(0.6);  // reaches reversedOrder — same VALUE as naturalOrder, must be a no-op
+  transport.current!.seek(0.1);  // reaches naturalOrder
+  transport.current!.seek(0.6);  // reaches reversedOrder — same VALUE as naturalOrder, must be a no-op
   expect(calls).toEqual(["art"]); // fired once, not once per differently-key-ordered-but-equal action
 });
 
@@ -293,11 +332,12 @@ const roundTripFade: Action[] = [
 ];
 
 test("ROUND TRIP: backward seek into an in-flight fade_out, then forward past settlement, leaves only the post-fade text", () => {
+  const transport = createRef<SlideTransport>();
   const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "rtf", timeline: roundTripFade } }} animate runtime={noopRuntime} />,
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "rtf", timeline: roundTripFade } }} animate runtime={noopRuntime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  const renderAt = (t: number) => host.__renderAt!(t);
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  const renderAt = (t: number) => transport.current!.seek(t);
   const textAtNow = () => [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
 
   renderAt(2.5);                // forward, past the fade_out, settled into "after"
@@ -321,11 +361,12 @@ const roundTripClear: Action[] = [
 ];
 
 test("ROUND TRIP: backward seek across a `clear`, then forward again, leaves only the post-clear text", () => {
+  const transport = createRef<SlideTransport>();
   const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "rtc", timeline: roundTripClear } }} animate runtime={noopRuntime} />,
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "rtc", timeline: roundTripClear } }} animate runtime={noopRuntime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  const renderAt = (t: number) => host.__renderAt!(t);
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  const renderAt = (t: number) => transport.current!.seek(t);
   const textAtNow = () => [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
 
   renderAt(1.4);                // forward, past the clear, into "after"
@@ -358,11 +399,12 @@ test("FORWARD-ONLY (no backward seek): scrubbing forward across several frames p
     { kind: "clear" },                              // at 0.8
     { kind: "text", value: "after", in: "fade" },  // [0.8, 1.6)
   ];
+  const transport = createRef<SlideTransport>();
   const { container } = render(
-    <CinematicSlide slots={{ sceneId: "s", beat: { id: "fwd-only", timeline: tl } }} animate runtime={noopRuntime} />,
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "fwd-only", timeline: tl } }} animate runtime={noopRuntime} transport={transport} />,
   );
-  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
-  const renderAt = (t: number) => host.__renderAt!(t);
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  const renderAt = (t: number) => transport.current!.seek(t);
   const allTexts = () => [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
 
   // Every one of these is STRICTLY greater than the previous — never a backward seek.
@@ -370,4 +412,126 @@ test("FORWARD-ONLY (no backward seek): scrubbing forward across several frames p
     renderAt(t);
     expect(allTexts()).toEqual(["after"]); // NOT ["after", "before"] — "before" must never reappear
   }
+});
+
+// --- rotateList: phase is relative to its own start, not absolute t (Task 8/9) --------------
+//
+// `actionDuration` returns 0 for `rotateList` — it occupies no time on the axis, so `f.p` is
+// always 1 the instant it's reached. Its visible item must therefore be derived from
+// `t - f.start` (elapsed since ITS OWN start), never from absolute `t` — the design spec (§5)
+// says so explicitly, but until now no COMMITTED test pinned it down: task 8's own coverage of
+// this was an uncommitted mutation check only, because this file was off-limits at the time.
+// It is not off-limits now (task 9 brief, required check 2).
+test("rotateList's visible item is measured from its own start, not from absolute t", () => {
+  const items = ["alpha", "beta", "gamma"];
+  const tl: Action[] = [
+    { kind: "wait", ms: 2000 },      // [0, 2.0) — pushes rotateList's own start well past 0
+    { kind: "rotateList", items },    // at 2.0 (0 duration — occupies no time on the axis)
+    // rotateList contributes 0 duration, so beatDuration (and therefore seek()'s clamp) would
+    // otherwise stop at exactly 2.0 — this trailing wait gives the axis room to seek well past
+    // rotateList's own start without being clamped back onto it.
+    { kind: "wait", ms: 5000 },      // [2.0, 7.0)
+  ];
+  const transport = createRef<SlideTransport>();
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "rot", timeline: tl } }} animate runtime={noopRuntime} transport={transport} />,
+  );
+  const host = container.querySelector<HTMLElement>(".cin")!;
+
+  const elapsedSinceStart = ROTATE_STEP * 1.5;   // -> "beta" (see rotate-list-at.test.ts)
+  const t = 2.0 + elapsedSinceStart;
+  transport.current!.seek(t);
+  const slot = host.querySelector<HTMLElement>(".cin__rotslot")!;
+
+  // Sanity: the two candidate elapsed values must actually diverge in which item they pick,
+  // or this test would pass regardless of which one renderAt actually uses.
+  expect(rotateItemAt(items, t)).not.toBe(rotateItemAt(items, elapsedSinceStart));
+
+  expect(slot.textContent).toBe(rotateItemAt(items, elapsedSinceStart)); // relative — correct
+  expect(slot.textContent).not.toBe(rotateItemAt(items, t));             // NOT absolute t
+});
+
+// --- gate semantics (Task 9, required check 3 + ambiguity res. #2) --------------------------
+//
+// These exercise the REAL ticker (gsap.ticker), not a manual renderAt seek — the whole point is
+// to prove playback actually pauses at a gate and actually resumes via runtime.onGate, exactly
+// as the old per-segment machinery did. That means real wall-clock waits; the timelines below
+// use tiny `wait` durations (tens of ms) so the tests stay fast.
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitUntil(cond: () => boolean, timeoutMs = 2000) {
+  const start = Date.now();
+  while (!cond()) {
+    if (Date.now() - start > timeoutMs) throw new Error("waitUntil: timed out waiting for condition");
+    await sleep(5);
+  }
+}
+
+test("playback pauses at a gate and resumes via the runtime.onGate callback", async () => {
+  let resumeFn: (() => void) | null = null;
+  let gateCalls = 0;
+  let waitingCalls = 0;
+  const runtime = {
+    ...noopRuntime,
+    onGate: (resume: () => void) => { gateCalls++; resumeFn = resume; },
+    // The setup effect also calls onWaiting(false) once at mount (before the gate is ever
+    // reached) — only count the TRUE call that means "reached the end of the axis".
+    onWaiting: (w: boolean) => { if (w) waitingCalls++; },
+  };
+  const tl: Action[] = [
+    { kind: "wait", ms: 20 },   // [0, 0.02)
+    { kind: "click_gate" },      // at 0.02
+    { kind: "wait", ms: 20 },   // [0.02, 0.04)
+  ];
+  render(<CinematicSlide slots={{ sceneId: "s", beat: { id: "g1", timeline: tl } }} animate runtime={runtime} />);
+
+  // Autoplay is running (no manual play() call needed) — wait for it to reach and pause at the gate.
+  await waitUntil(() => gateCalls === 1);
+  expect(waitingCalls).toBe(0); // not yet reached the end
+
+  // Prove it's genuinely PAUSED, not still ticking toward the end — give it more real time.
+  await sleep(60);
+  expect(gateCalls).toBe(1);
+  expect(waitingCalls).toBe(0);
+
+  // Resume via the callback runtime.onGate was handed, exactly as the segment machinery did.
+  resumeFn!();
+  await waitUntil(() => waitingCalls === 1);
+  expect(gateCalls).toBe(1); // never re-triggered
+});
+
+test("seeking to a gate's exact time then calling play() does not immediately re-trigger that gate", async () => {
+  let gateCalls = 0;
+  let waitingCalls = 0;
+  const runtime = {
+    ...noopRuntime,
+    onGate: () => { gateCalls++; },
+    // The setup effect also calls onWaiting(false) once at mount (before the gate is ever
+    // reached) — only count the TRUE call that means "reached the end of the axis".
+    onWaiting: (w: boolean) => { if (w) waitingCalls++; },
+  };
+  const tl: Action[] = [
+    { kind: "wait", ms: 20 },   // [0, 0.02)
+    { kind: "click_gate" },      // at 0.02
+    { kind: "wait", ms: 20 },   // [0.02, 0.04)
+  ];
+  const transport = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "g3", timeline: tl } }} animate runtime={runtime} transport={transport} />,
+  );
+  // Cancel the autoplay ticker before it ticks (no real time has passed yet — this all runs
+  // synchronously right after render()), then simulate "paused exactly on the gate": a seek
+  // straight to the gate's own start, followed by resuming play() from there.
+  transport.current!.pause();
+  transport.current!.seek(0.02);
+  transport.current!.play();
+
+  // If the "next gate" search used lastT.current >= gate.start instead of >, play() would
+  // immediately re-pause on the very gate it just resumed from and deadlock forever — this
+  // waitUntil would time out instead of ever seeing waitingCalls reach 1 (ambiguity res. #2).
+  await waitUntil(() => waitingCalls === 1);
+  expect(gateCalls).toBe(0); // must not pause again on the gate it was already sitting on
 });

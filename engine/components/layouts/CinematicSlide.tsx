@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import type { ArtMode, ArtTransition, CinematicSlideSlots, Action, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
@@ -10,13 +10,13 @@ import { renderPanelHTML } from "@/engine/deck/panel";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
 import { parseInlineLinks, hasInlineMarkup } from "@/engine/deck/inline-links";
-import { formatCounterValue, counterTarget, counterValueAt } from "@/engine/deck/counter";
+import { formatCounterValue, counterValueAt } from "@/engine/deck/counter";
 import { mediaStateAt, type MediaFold, type MediaRenderState } from "@/engine/deck/media-state";
 import {
   flyUp, fadeIn, fadeSide, dotFade, rotateItemAt, lineAndDots,
   letterFly, letterUp, wordUp, blurIn, typewriter,
 } from "../effects/cinematic-anim";
-import { introDuration, foldAt, rebuildBoundary } from "@/engine/authoring/beat-clock";
+import { foldAt, rebuildBoundary, beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
 
 /**
  * Position a text box at `pos` per its align. Right boxes anchor their RIGHT edge (via the
@@ -65,6 +65,17 @@ export interface CinematicRuntime {
   jumpTo(index: number): void;
 }
 
+/** The public seekable transport over a beat's single time axis (design spec §7b §4.1).
+ *  `seek` clamps to `[0, duration()]` and never throws, including on a zero-duration/empty
+ *  beat. `duration()` is always `beatDuration(beat.timeline)` — the pure beat-clock reading,
+ *  never a GSAP timeline's own `.duration()`. */
+export interface SlideTransport {
+  seek(t: number): void;
+  play(): void;
+  pause(): void;
+  duration(): number;
+}
+
 interface Props {
   slots: CinematicSlideSlots;
   animate: boolean;
@@ -76,20 +87,26 @@ interface Props {
   /** Investor deck: render narration text instantly (no per-line entrance animation).
    *  click_gates still step the timeline; only the text-in reveal is suppressed. */
   instantText?: boolean;
+  /** Imperative handle onto this beat's transport — seek/play/pause/duration over the single
+   *  time axis (design spec §7b §4.1). Optional: most callers just let it autoplay. */
+  transport?: Ref<SlideTransport>;
 }
 
-export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText }: Props) {
+export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
-  const masterRef = useRef<gsap.core.Timeline | null>(null);
+  // The single gsap.ticker listener currently driving playback, or null when paused. play()
+  // always pause()s first (so re-play never double-registers), and pause() nulls this after
+  // removing it — ambiguity res. #1: a leaked ticker keeps calling renderAt against a stale
+  // beat after the component moves on, and unlike a leaked tween, nothing else will kill it.
+  const ticker = useRef<((time: number, delta: number) => void) | null>(null);
   const lineBoxes = useRef<HTMLElement[]>([]); // free-positioned per-line text boxes (text action `pos`)
   const currentLine = useRef<HTMLElement | null>(null); // last line, for inline `append` fragments
   const fadeRef = useRef<gsap.core.Tween | null>(null); // active fade_out tween, killed on beat change
   // `a` is the counter_show action that built this box — renderAt compares against it (by
   // reference) to know whether the fold's current counter is the one already on screen, or
-  // whether it needs to rebuild (design spec §7b §5). `value` is bookkeeping for the old
-  // wall-clock scheduleAction path only (counter_add's relative delta); renderAt never reads it.
-  const counterRef = useRef<{ box: HTMLElement; valueEl: HTMLElement; prefix: string; value: number; a: Extract<Action, { kind: "counter_show" }> } | null>(null);
+  // whether it needs to rebuild (design spec §7b §5).
+  const counterRef = useRef<{ box: HTMLElement; valueEl: HTMLElement; prefix: string; a: Extract<Action, { kind: "counter_show" }> } | null>(null);
   const mediaTiles = useRef<Map<string, HTMLElement>>(new Map());
   // Built, PAUSED effect timelines keyed by action index. Nothing here ever runs on
   // wall-clock — renderAt is the only thing that advances them (design spec §7b §4.2).
@@ -128,10 +145,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     const host = scope.current;
     if (!host) return;
     const textHost = host.querySelector<HTMLElement>(".cin__text")!;
-    // useGSAP defers context cleanup to unmount (not dependency change), so kill the
-    // previous beat's master timeline explicitly to avoid zombie timelines playing stale
-    // text/art into the new beat.
-    masterRef.current?.kill();
+    // useGSAP defers context cleanup to unmount (not dependency change), so stop the
+    // previous beat's ticker explicitly to avoid a zombie ticker driving renderAt against
+    // stale refs after the new beat's setup below resets them.
+    pause();
     fadeRef.current?.kill();
     fadeRef.current = null;
     built.current.forEach((entry) => entry.tl?.kill());
@@ -191,39 +208,20 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // it as an absolute cross-fade using the entry op's mode.
     if (slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs);
 
-    // Split the timeline into segments at click_gate boundaries; play one at a time and
-    // wait for the user's forward input between them (robust intra-beat click-stepping —
-    // GSAP addPause can't reliably stop callbacks scheduled at the same tick as the pause).
-    const segments: Action[][] = [[]];
-    for (const a of slots.beat.timeline) {
-      if (a.kind === "click_gate") segments.push([]);
-      else segments[segments.length - 1].push(a);
-    }
-    let segIdx = 0;
-    const playSegment = () => {
-      const seg = gsap.timeline({
-        onComplete: () => {
-          if (segIdx < segments.length - 1) {
-            segIdx++;
-            runtime.onGate(playSegment); // pause here; the user's next forward input resumes
-          } else {
-            runtime.onWaiting(true);
-          }
-        },
-      });
-      masterRef.current = seg;
-      for (const a of segments[segIdx]) scheduleAction(seg, a, textHost);
-      if (!segments[segIdx].length) seg.to({}, { duration: 0.001 }); // empty segment still ticks → onComplete
-    };
-    playSegment();
+    // Autoplay from t=0 — observable behaviour is unchanged from the old per-segment
+    // machinery (design spec §7b §4.4): a ticker now drives the single time axis instead of
+    // N GSAP timelines, pausing at each click_gate and handing `resume` to runtime.onGate,
+    // exactly as the segment machinery did. Most callers (today) never touch `transport` at
+    // all; the ref just gives a scrubber somewhere to grab onto later.
+    play();
 
-    // Test-only handle; Task 9 replaces this with the SlideTransport ref.
-    (host.closest(".cin") as HTMLElement & { __renderAt?: (t: number) => void }).__renderAt = renderAt;
-
-    // master timeline + built effect timelines are created here / in deferred callbacks;
-    // kill them on unmount (deps re-run also kills them at the top of the effect above).
+    // built effect timelines are created here / in deferred callbacks; kill them on unmount
+    // (deps re-run also kills them at the top of the effect above). The ticker itself is
+    // stopped via pause() — critical: gsap.ticker.add has no other owner, so a beat change or
+    // unmount that forgets this leaves a zombie ticker calling renderAt forever (ambiguity
+    // res. #1).
     return () => {
-      masterRef.current?.kill();
+      pause();
       built.current.forEach((entry) => entry.tl?.kill());
       built.current.clear();
       clearLineBoxes();
@@ -323,10 +321,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return scope.current?.querySelector<HTMLElement>(".cin__stage") ?? scope.current;
   }
 
-  /** Build the counter's DOM at rest (opacity 1, no offset) — no entrance animation here.
-   *  Both the old wall-clock scheduleAction path (instant show) and renderAt's paint step
-   *  (which applies the eased entrance itself, driven by fold progress) call this to (re)build
-   *  the box; only renderAt scrubs its opacity/offset afterward (design spec §7b §5). */
+  /** Build the counter's DOM at rest (opacity 1, no offset) — no entrance animation here;
+   *  renderAt's paint step applies the eased entrance itself, driven by fold progress, and
+   *  scrubs opacity/offset afterward (design spec §7b §5). */
   function showCounter(a: Extract<Action, { kind: "counter_show" }>) {
     clearCounter();
     const box = document.createElement("div");
@@ -344,31 +341,16 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     }
     const valueEl = document.createElement("div");
     valueEl.className = "cin__counter-value";
-    const value = a.value ?? 0;
     const prefix = a.prefix ?? "";
-    valueEl.textContent = formatCounterValue(value, prefix);
+    valueEl.textContent = formatCounterValue(a.value ?? 0, prefix);
     box.appendChild(valueEl);
     stageParent()?.appendChild(box);
-    counterRef.current = { box, valueEl, prefix, value, a };
-  }
-
-  /** Old wall-clock scheduleAction path only: an instant snap to the counter's new target via
-   *  the same pure counterValueAt renderAt uses (p=1, i.e. fully settled) — no GSAP tween.
-   *  **Behaviour change**: this path used to animate the digits over `durationMs`; it no longer
-   *  does (design spec §7b §5). renderAt's paintCounter is what makes this scrubbable/eased,
-   *  driven by the fold's own progress — this function has no `p` to animate with. */
-  function tweenCounter(a: { kind: "counter_to"; value: number } | { kind: "counter_add"; delta: number }) {
-    const c = counterRef.current;
-    if (!c) return;
-    const target = counterTarget(c.value, a);
-    c.valueEl.textContent = formatCounterValue(counterValueAt(c.value, target, 1), c.prefix);
-    c.value = target;
+    counterRef.current = { box, valueEl, prefix, a };
   }
 
   /** Fade the counter to opacity `1 - p` — a direct write, not a tween (design spec §7b §5,
-   *  ambiguity res. #3). At `p >= 1` it is fully hidden, so it is torn down. Used both by
-   *  renderAt's paint step (varying `p` per frame) and the old scheduleAction path (a single
-   *  `p = 1` call — an instant hide, replacing what used to fade over `durationMs`). */
+   *  ambiguity res. #3). At `p >= 1` it is fully hidden, so it is torn down. renderAt's paint
+   *  step is the only caller, varying `p` per frame. */
   function hideCounter(p: number) {
     const c = counterRef.current;
     if (!c) return;
@@ -439,42 +421,6 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return el;
   }
 
-  /** Old wall-clock scheduleAction path only: build the tile at rest, no entrance tween.
-   *  **Behaviour change**: this used to gsap.from-tween in over `durationMs`; it no longer
-   *  does (design spec §7b §6, same shape as Task 5's counter conversion). renderAt's
-   *  paintMedia is what makes the entrance scrubbable, driven by the fold's own progress via
-   *  the pure mediaStateAt — this function has no `p` to animate with. */
-  function showMedia(a: Extract<Action, { kind: "media" }>) {
-    mediaTiles.current.get(a.id)?.remove();
-    const el = makeMediaEl(a);
-    stageParent()?.appendChild(el);
-    mediaTiles.current.set(a.id, el);
-  }
-
-  /** Old wall-clock scheduleAction path only: an instant snap to the tile's new position/scale
-   *  — no GSAP tween. **Behaviour change**: this used to gsap.to-tween over `durationMs`; see
-   *  showMedia's note. */
-  function moveMedia(a: Extract<Action, { kind: "media_move" }>) {
-    const el = mediaTiles.current.get(a.id);
-    if (!el) return;
-    el.style.left = `${a.to.x * 100}%`;
-    el.style.top = `${a.to.y * 100}%`;
-    if (a.scale != null) gsap.set(el, { scale: a.scale });
-  }
-
-  /** Old wall-clock scheduleAction path only: an instant removal — no fade tween. **Behaviour
-   *  change**: this used to gsap.to-tween opacity to 0 over `durationMs` before removing; see
-   *  showMedia's note. `a.id` omitted clears every tile (design spec §7b §6, ambiguity res. #3). */
-  function outMedia(a: Extract<Action, { kind: "media_out" }>) {
-    const ids = a.id ? [a.id] : [...mediaTiles.current.keys()];
-    for (const id of ids) {
-      const el = mediaTiles.current.get(id);
-      if (!el) continue;
-      mediaTiles.current.delete(id);
-      el.remove();
-    }
-  }
-
   function clearMedia() {
     mediaTiles.current.forEach((el) => el.remove());
     mediaTiles.current.clear();
@@ -515,8 +461,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   }
 
   /** Shared ease selector: builds the reveal-effect timeline for a text line's (possibly
-   *  downgraded) `in` style. Used by both the scheduled autoplay path (scheduleAction) and
-   *  the paused seekable path (buildText) so the branch mapping lives in exactly one place. */
+   *  downgraded) `in` style. buildText's sole caller. */
   function buildTextEffect(el: HTMLElement, effIn: TextIn, a: Extract<Action, { kind: "text" }>): gsap.core.Timeline {
     const dir = a.align === "right" ? "right" : "left"; // letterFly follows justification
     const tl =
@@ -532,13 +477,13 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return tl;
   }
 
-  /** Build one text action's element + its real reveal timeline, paused at 0. Reuses the same
-   *  el-creation + effect-selection logic as scheduleAction's `text` case (design spec §7b §4.2). */
+  /** Build one text action's element + its real reveal timeline, paused at 0 — the only place
+   *  text elements/timelines are built (design spec §7b §4.2). */
   function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement } {
     const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive"];
     const effIn: TextIn = hasInlineMarkup(a.value) && perPiece.includes(a.in) ? "fade" : a.in;
-    // instantText / no-reveal lines have no entrance: they render at rest, and (matching
-    // scheduleAction's equivalent branch) their dots render already-faded-in via `instant`.
+    // instantText / no-reveal lines have no entrance: they render at rest, and their dots
+    // render already-faded-in via `instant`.
     const instant = !!(instantText && !a.reveal);
     // `box` is only created (and only tracked) for a non-append, `pos`-bearing line — capture
     // it so resetFrom can tear it down alongside `el` (see the `built` ref's comment).
@@ -758,104 +703,64 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     lastT.current = t;
   }
 
-  function scheduleAction(master: gsap.core.Timeline, a: Action, host: HTMLElement) {
-    switch (a.kind) {
-      case "text": {
-        // Investor deck: no text-in transition. Append the line at rest and reserve a tick so the
-        // segment still completes (→ click_gate / onWaiting). click-stepping is unaffected.
-        // A line with `reveal: true` opts back into its `in` animation (falls through below).
-        if (instantText && !a.reveal) {
-          master.add(() => {
-            const el = a.append
-              ? appendFragment(a.value)
-              : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, true, a.tone);
-            if (a.in === "cursive") el.classList.add("cin__line--cursive");
-          });
-          master.to({}, { duration: 0.01 });
-          break;
-        }
-        // Inline links can't survive SplitText (it re-splits the anchor text); fall back to a
-        // line-level fade when a per-piece effect is paired with a linked value. Hoisted out of
-        // the master.add callback so the time-reservation below can size by the effective effect.
-        const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive"];
-        const effIn: TextIn = hasInlineMarkup(a.value) && perPiece.includes(a.in) ? "fade" : a.in;
-        master.add(() => {
-          const el = a.append
-            ? appendFragment(a.value) // inline fragment on the current line
-            : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, false, a.tone);
-          if (a.in === "cursive") el.classList.add("cin__line--cursive"); // script font + larger size
-          return buildTextEffect(el, effIn, a);
-        });
-        // Reserve ≈ this line's intro duration so the master's onComplete (→ onWaiting)
-        // fires after the line settles, not before. Tune pacing/overlap live in Phase 2.
-        master.to({}, { duration: introDuration({ ...a, in: effIn }) });
-        break;
-      }
-      // Old wall-clock scheduleAction path only: an instant snap to the first item, no loop.
-      // **Behaviour change**: this used to spin up an infinite `repeat: -1` GSAP loop cycling
-      // through items on wall-clock time; it no longer does (design spec §7b §5). An infinite
-      // loop can't be seeked as a tween, so renderAt's fold loop derives which item is showing
-      // from elapsed time via rotateItemAt instead — there is no longer a loop anywhere to kill
-      // (ambiguity res. #3), same shape as Task 5/6's counter/media conversion.
-      case "rotateList": {
-        master.add(() => {
-          const slot = document.createElement("span");
-          slot.className = `cin__rotslot cin__line--${a.size ?? "md"}`; // size from cinematic-style (default md)
-          host.appendChild(slot);
-          slot.textContent = rotateItemAt(a.items, 0);
-        });
-        break;
-      }
-      // Clears the text/free-lines only — the intro logo+tagline persist (they leave when
-      // the beat unmounts on advance), so clearing a CTA line doesn't drop the splash.
-      case "clear": master.add(() => { host.innerHTML = ""; clearLineBoxes(); }); break;
-      case "art": master.add(() => runtime.applyArt(a.art, a.art.durationMs)); break;
-      case "nightlight": master.add(() => runtime.setNightlight(a.to, a.durationMs)); break;
-      // cue / note_emitter / note_circle / stop_circle / stop_notes are NOT scheduled here.
-      // Note sources render from the pure noteFieldStateAt reducer via NoteField (see
-      // engine/components/effects/note-state.ts), driven by whatever clock the host supplies —
-      // the same split objects use. `cue` is inert; the kind survives in types.ts for
-      // deck-format compatibility only.
-      // click_gate is a segment boundary handled in useGSAP (timeline segmentation), not here.
-      case "click_gate": break;
-      case "reveal_arrows": master.add(() => runtime.revealArrows()); break;
-      case "reveal_again": master.add(() => setAgainRevealed(true)); break;
-      case "pulse_arrow": master.add(() => runtime.pulseArrow(a.which, a.scale ?? 3)); break;
-      case "fade_out": {
-        const d = (a.durationMs ?? 500) / 1000;
-        // Fade the live text out, then clear it as a SEQUENCED master step (the clear
-        // must run before the master plays the next actions, or a following `text`
-        // append races it). Track the tween so the cleanup can KILL it before restoring
-        // opacity — otherwise the still-live tween renders its final opacity:0 frame
-        // after clearProps and leaves the (persistent, reused) box invisible.
-        master.add(() => {
-          fadeRef.current = gsap.to([host, ...lineBoxes.current], { opacity: 0, duration: d, ease: "power2.inOut" });
-        });
-        master.to({}, { duration: d }); // let the fade play out
-        master.add(() => {
-          fadeRef.current?.kill();
-          fadeRef.current = null;
-          host.innerHTML = "";
-          clearLineBoxes();
-          gsap.set(host, { clearProps: "opacity" }); // restore the box so the next line is visible
-        });
-        break;
-      }
-      case "wait": master.to({}, { duration: a.ms / 1000 }); break;
-      case "counter_show": master.add(() => showCounter(a)); master.to({}, { duration: 0.4 }); break;
-      case "counter_to":
-      case "counter_add": {
-        const ms = a.durationMs ?? 800;
-        master.add(() => tweenCounter(a));
-        master.to({}, { duration: ms / 1000 });
-        break;
-      }
-      case "counter_hide": master.add(() => hideCounter(1)); break;
-      case "media": master.add(() => showMedia(a)); master.to({}, { duration: (a.durationMs ?? 600) / 1000 }); break;
-      case "media_move": master.add(() => moveMedia(a)); master.to({}, { duration: (a.durationMs ?? 800) / 1000 }); break;
-      case "media_out": master.add(() => outMedia(a)); master.to({}, { duration: (a.durationMs ?? 500) / 1000 }); break;
+  // --- SlideTransport: one time axis + gate boundaries, replacing the old per-segment GSAP
+  // timelines (design spec §7b §4.4). Gate boundaries are TIMES on the single axis: playback
+  // pauses at each, the editor scrubs straight through (D1).
+  const gates = beatTimeline(slots.beat.timeline)
+    .filter((w) => w.action.kind === "click_gate")
+    .map((w) => w.start);
+
+  /** === beatDuration(beat.timeline) — the pure beat-clock reading, never a GSAP timeline's
+   *  own .duration() (Global Constraints: no tl.duration() reads). */
+  function duration(): number {
+    return beatDuration(slots.beat.timeline);
+  }
+
+  /** Jump straight to `t`, clamped to [0, duration()] — never throws, including on a
+   *  zero-duration or empty beat (ambiguity res. #3). */
+  function seek(to: number) {
+    renderAt(Math.max(0, Math.min(duration(), to)));
+  }
+
+  /** Stop the ticker driving playback, if any. Idempotent — safe to call when already paused. */
+  function pause() {
+    if (ticker.current) {
+      gsap.ticker.remove(ticker.current);
+      ticker.current = null;
     }
   }
+
+  /** Start (or resume) playback from `lastT.current`. Always pause()s first, so calling play()
+   *  while already playing never double-registers a ticker. The "next gate" is searched with a
+   *  STRICT `>` against lastT.current — not `>=` — so resuming from a position sitting exactly
+   *  on a gate's own start (e.g. play() called as a gate's `resume`, or after seek(gateTime))
+   *  finds the gate AFTER it, not the one it's already sitting on. Using `>=` here would make
+   *  play() immediately re-pause on the same gate it just resumed from, deadlocking forever
+   *  (ambiguity res. #2). */
+  function play() {
+    pause();
+    const nextGate = gates.find((g) => g > lastT.current);
+    const tick = (_time: number, delta: number) => {
+      const t = lastT.current + delta / 1000;
+      if (nextGate != null && t >= nextGate) {
+        renderAt(nextGate);
+        pause();
+        runtime.onGate(play); // paused here; runtime.onGate's resume is this same play()
+        return;
+      }
+      if (t >= duration()) {
+        renderAt(duration());
+        pause();
+        runtime.onWaiting(true);
+        return;
+      }
+      renderAt(t);
+    };
+    ticker.current = tick;
+    gsap.ticker.add(tick);
+  }
+
+  useImperativeHandle(transport, () => ({ seek, play, pause, duration }));
 
   const pos = slots.beat.pos ?? DEFAULT_TEXT_POS;
   // Anchor the shared text box at `pos` per the first NON-free line's justification
