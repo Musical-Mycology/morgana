@@ -30,18 +30,7 @@ export default function Page() {
       <BeatStage sceneId="demo" beat={beat} scene={scene} beatIndex={0} transport={transport} />
       <input
         data-testid="scrub" type="range" min={0} max={5} step={0.1} value={t}
-        onChange={(e) => {
-          const v = Number(e.target.value);
-          setT(v);
-          // pause() before seek(): CinematicSlide autoplays on mount, and seek() alone does not
-          // stop that ticker — its next real-time tick would otherwise immediately overwrite a
-          // manual seek using a gate boundary captured back when play() started (the same
-          // pause-then-seek order the protected test "seeking to a gate's exact time..." in
-          // tests/unit/slide-render-at.test.tsx uses). A scrub control taking manual control of
-          // the clock is exactly the case that should stop autoplay.
-          transport.current?.pause();
-          transport.current?.seek(v);
-        }}
+        onChange={(e) => { const v = Number(e.target.value); setT(v); transport.current?.seek(v); }}
         style={{ position: "fixed", bottom: 12, left: 12, right: 12, zIndex: 10 }}
       />
     </>

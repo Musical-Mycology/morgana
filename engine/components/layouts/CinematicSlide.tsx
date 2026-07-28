@@ -769,8 +769,15 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   }
 
   /** Jump straight to `t`, clamped to [0, duration()] — never throws, including on a
-   *  zero-duration or empty beat (ambiguity res. #3). */
+   *  zero-duration or empty beat (ambiguity res. #3). Always pause()s first (mirroring play(),
+   *  which already unconditionally pauses before it does anything else): a manual seek is the
+   *  caller taking control of the clock, and leaving a live ticker running is a real defect, not
+   *  a caller-side quirk to route around — play()'s tick closure captures `nextGate` once and
+   *  never recomputes it, so a seek across a gate boundary while the ticker is still live gets
+   *  silently undone by the very next real-time frame (Task 10 review). Callers must never need
+   *  to remember to pause() before seek() themselves. */
   function seek(to: number) {
+    pause();
     renderAt(Math.max(0, Math.min(duration(), to)));
   }
 

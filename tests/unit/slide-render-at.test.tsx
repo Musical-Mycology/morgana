@@ -536,6 +536,38 @@ test("seeking to a gate's exact time then calling play() does not immediately re
   expect(gateCalls).toBe(0); // must not pause again on the gate it was already sitting on
 });
 
+// Task 10 review (Important finding): seek() must pause() internally. play()'s tick closure
+// captures `nextGate` once, at play()-time, and never recomputes it — so a bare seek() issued
+// while the autoplay ticker from mount is still live gets silently undone within one real frame
+// if the seek crossed a gate boundary: the ticker's next tick computes
+// `t = lastT.current + delta/1000` against the STALE captured nextGate, sees it's been crossed,
+// and snaps back to `renderAt(nextGate)`. A caller must never have to remember to pause() before
+// seek() themselves (see app/dev/beatstage/page.tsx, which needed exactly that workaround before
+// this fix, and no longer does).
+test("seek() while the autoplay ticker is still live lands and STAYS — not undone by a later tick", async () => {
+  const tl: Action[] = [
+    { kind: "wait", ms: 200 },                     // [0, 0.2)
+    { kind: "click_gate" },                         // @0.2
+    { kind: "wait", ms: 100 },                     // [0.2, 0.3)
+    { kind: "text", value: "after the gate", in: "fade" }, // [0.3, 1.1)
+  ];
+  const transport = createRef<SlideTransport>();
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "g5", timeline: tl } }} animate runtime={noopRuntime} transport={transport} />,
+  );
+  const host = container.querySelector<HTMLElement>(".cin")!;
+
+  // Seek PAST the gate (to where "after the gate" has started) while the ticker from mount's
+  // autoplay is still live — no real time has passed yet, so nothing has ticked or paused.
+  transport.current!.seek(0.5);
+
+  // Give the still-running ticker several real frames' worth of time to (mis)fire and revert
+  // the seek back to the gate at t=0.2, where "after the gate" has not started yet.
+  await sleep(80);
+
+  expect(host.textContent).toContain("after the gate");
+});
+
 // --- one-shot side effects: reveal_arrows / pulse_arrow / reveal_again (review round 1) ----
 //
 // These three were handled by scheduleAction before this task and had NO replacement after it
