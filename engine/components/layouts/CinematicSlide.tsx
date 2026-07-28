@@ -11,6 +11,7 @@ import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
 import { parseInlineLinks, hasInlineMarkup } from "@/engine/deck/inline-links";
 import { formatCounterValue, counterTarget, counterValueAt } from "@/engine/deck/counter";
+import { mediaStateAt, type MediaFold, type MediaRenderState } from "@/engine/deck/media-state";
 import {
   flyUp, fadeIn, fadeSide, dotFade, rotateList, lineAndDots,
   letterFly, letterUp, wordUp, blurIn, typewriter,
@@ -399,45 +400,79 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return el;
   }
 
+  /** Old wall-clock scheduleAction path only: build the tile at rest, no entrance tween.
+   *  **Behaviour change**: this used to gsap.from-tween in over `durationMs`; it no longer
+   *  does (design spec §7b §6, same shape as Task 5's counter conversion). renderAt's
+   *  paintMedia is what makes the entrance scrubbable, driven by the fold's own progress via
+   *  the pure mediaStateAt — this function has no `p` to animate with. */
   function showMedia(a: Extract<Action, { kind: "media" }>) {
     mediaTiles.current.get(a.id)?.remove();
     const el = makeMediaEl(a);
     stageParent()?.appendChild(el);
     mediaTiles.current.set(a.id, el);
-    const dur = (a.durationMs ?? 600) / 1000;
-    const mode = a.in ?? "fade";
-    if (mode === "flyUp") gsap.from(el, { y: 40, opacity: 0, duration: dur, ease: "power3.out" });
-    else if (mode === "pop") gsap.from(el, { scale: 0.8, opacity: 0, duration: dur, ease: "back.out(2)" });
-    else if (mode === "fadeSide") gsap.from(el, { x: 24, opacity: 0, duration: dur, ease: "power2.out" });
-    else gsap.from(el, { opacity: 0, duration: dur, ease: "power2.out" });
   }
 
+  /** Old wall-clock scheduleAction path only: an instant snap to the tile's new position/scale
+   *  — no GSAP tween. **Behaviour change**: this used to gsap.to-tween over `durationMs`; see
+   *  showMedia's note. */
   function moveMedia(a: Extract<Action, { kind: "media_move" }>) {
     const el = mediaTiles.current.get(a.id);
     if (!el) return;
-    gsap.to(el, {
-      left: `${a.to.x * 100}%`,
-      top: `${a.to.y * 100}%`,
-      ...(a.scale != null ? { scale: a.scale } : {}),
-      duration: (a.durationMs ?? 800) / 1000,
-      ease: "power3.inOut",
-    });
+    el.style.left = `${a.to.x * 100}%`;
+    el.style.top = `${a.to.y * 100}%`;
+    if (a.scale != null) gsap.set(el, { scale: a.scale });
   }
 
+  /** Old wall-clock scheduleAction path only: an instant removal — no fade tween. **Behaviour
+   *  change**: this used to gsap.to-tween opacity to 0 over `durationMs` before removing; see
+   *  showMedia's note. `a.id` omitted clears every tile (design spec §7b §6, ambiguity res. #3). */
   function outMedia(a: Extract<Action, { kind: "media_out" }>) {
-    const dur = (a.durationMs ?? 500) / 1000;
     const ids = a.id ? [a.id] : [...mediaTiles.current.keys()];
     for (const id of ids) {
       const el = mediaTiles.current.get(id);
       if (!el) continue;
       mediaTiles.current.delete(id);
-      gsap.to(el, { opacity: 0, duration: dur, onComplete: () => el.remove() });
+      el.remove();
     }
   }
 
   function clearMedia() {
     mediaTiles.current.forEach((el) => el.remove());
     mediaTiles.current.clear();
+  }
+
+  /** Paint every media tile's position/scale/opacity at fold-derived progress — a pure read
+   *  of mediaStateAt, never a GSAP tween (design spec §7b §6). `fold` is this renderAt call's
+   *  full run of reached media actions (in fold order); `state` is mediaStateAt's result keyed
+   *  by tile id. A tile tracked in mediaTiles.current with no entry in `state` predates the
+   *  current `media` action's reach (a backward seek past it) and is torn down; an id in
+   *  `state` with no DOM tile yet is built via makeMediaEl from its `media` show action, found
+   *  by scanning `fold`. Because this is recomputed from scratch on every call (not carried as
+   *  tween state), backward seek falls out for free. */
+  function paintMedia(fold: MediaFold[], state: Map<string, MediaRenderState>) {
+    for (const [id, el] of mediaTiles.current) {
+      if (!state.has(id)) { el.remove(); mediaTiles.current.delete(id); }
+    }
+    if (!state.size) return;
+    let showActions: Map<string, Extract<Action, { kind: "media" }>> | null = null;
+    for (const [id, s] of state) {
+      let el = mediaTiles.current.get(id);
+      if (!el) {
+        if (!showActions) {
+          showActions = new Map();
+          for (const { action } of fold) if (action.kind === "media") showActions.set(action.id, action);
+        }
+        const a = showActions.get(id);
+        if (!a) continue; // no show action reached yet for this id (shouldn't happen: mediaStateAt only emits ids it has seen)
+        el = makeMediaEl(a);
+        stageParent()?.appendChild(el);
+        mediaTiles.current.set(id, el);
+      }
+      el.style.left = `${s.x * 100}%`;
+      el.style.top = `${s.y * 100}%`;
+      el.style.opacity = String(s.opacity);
+      gsap.set(el, { scale: s.scale });
+    }
   }
 
   /** Shared ease selector: builds the reveal-effect timeline for a text line's (possibly
@@ -524,6 +559,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     let counterValueP = 1;     // progress for interpolating counter.value (last show/to/add entry)
     let counterEntranceP = 1;  // progress for the counter_show action's own entrance
     let counterHideP: number | null = null; // in-flight counter_hide's own progress, else null
+    // Media actions are collected here (in fold order) and handed to the pure mediaStateAt
+    // reducer once the loop completes, then painted — same "fold, then paint" shape as the
+    // counter above (design spec §7b §6).
+    const mediaFold: MediaFold[] = [];
     for (const f of foldAt(slots.beat.timeline, t)) {
       if (f.action.kind === "counter_show") {
         counter = { a: f.action, from: f.action.value ?? 0, to: f.action.value ?? 0 };
@@ -570,7 +609,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         gsap.set([host, ...lineBoxes.current], { opacity: 1 - f.p });
         continue;
       }
-      if (f.action.kind !== "text") continue; // other kinds: Tasks 6-8
+      if (f.action.kind === "media" || f.action.kind === "media_move" || f.action.kind === "media_out") {
+        mediaFold.push({ action: f.action, p: f.p });
+        continue;
+      }
+      if (f.action.kind !== "text") continue; // other kinds: Tasks 7-8
       let entry = built.current.get(f.index);
       if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
       if (!entry.tl) continue; // rendered at rest
@@ -582,6 +625,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       else entry.tl.time(t - f.start);
     }
     paintCounter(counter, counterValueP, counterEntranceP, counterHideP);
+    paintMedia(mediaFold, mediaStateAt(mediaFold, t));
     lastT.current = t;
   }
 
