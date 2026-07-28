@@ -77,3 +77,63 @@ test("BACKWARD SEEK: scrubbing back past a settled counter_to returns the earlie
   expect(counterValueText(host)).toBe(expected);
   expect(counterValueText(host)).not.toBe(formatCounterValue(100));
 });
+
+// --- counter_add chaining (fix round 1: review finding) -----------------------------------
+//
+// The fold tracks each action's `from` as the PREVIOUS action's `to` — not the originally
+// seeded value. counter_add has zero prior coverage of this, and an endpoint-only assertion
+// (settled value before / settled value after) cannot distinguish "add interpolates from the
+// running total" from "add interpolates from the original seed" — both converge on the same
+// settled endpoints. Only a MID-FLIGHT assertion, which depends on the interpolation's start
+// point, pins the chaining rule down. See the "PROOF" block below, which mutates the fold to
+// use the original seed and confirms exactly the mid-flight assertions go red.
+
+// counter_show(0) [0, 0.4) → counter_to(100) [0.4, 1.2) → counter_add(+50) [1.2, 2.0)
+const showToAdd: Action[] = [
+  { kind: "counter_show", pos: { x: 0.5, y: 0.5 }, value: 0 },
+  { kind: "counter_to", value: 100 },
+  { kind: "counter_add", delta: 50 },
+];
+
+test("counter_add chains off the running total: show(0) -> to(100) -> add(+50) lands at 150", () => {
+  const { host, renderAt } = mountCounterSlide(showToAdd);
+
+  renderAt(1.2); // settled after counter_to
+  expect(counterValueText(host)).toBe(formatCounterValue(100));
+
+  // Mid-flight inside counter_add's own [1.2, 2.0) window: local p = (1.6 - 1.2) / 0.8 = 0.5.
+  // This is the assertion that pins the interpolation's ORIGIN at 100 (the running total),
+  // not 0 (the original seed) — an endpoint-only test cannot tell these apart.
+  renderAt(1.6);
+  const midFlight = formatCounterValue(counterValueAt(100, 150, 0.5));
+  expect(counterValueText(host)).toBe(midFlight);
+  expect(counterValueText(host)).not.toBe(formatCounterValue(counterValueAt(0, 50, 0.5))); // wrong origin
+
+  renderAt(2.0); // settled after counter_add
+  expect(counterValueText(host)).toBe(formatCounterValue(150));
+});
+
+// counter_show(0) [0, 0.4) → counter_add(+50) [0.4, 1.2) → counter_add(+30) [1.2, 2.0)
+// Composes twice, so the fold's running total (not just a single delta) is pinned.
+const addAdd: Action[] = [
+  { kind: "counter_show", pos: { x: 0.5, y: 0.5 }, value: 0 },
+  { kind: "counter_add", delta: 50 },
+  { kind: "counter_add", delta: 30 },
+];
+
+test("counter_add composes across two consecutive adds: show(0) -> add(+50) -> add(+30) lands at 80", () => {
+  const { host, renderAt } = mountCounterSlide(addAdd);
+
+  renderAt(1.2); // settled after the first add
+  expect(counterValueText(host)).toBe(formatCounterValue(50));
+
+  // Mid-flight inside the SECOND add's own [1.2, 2.0) window: local p = (1.6 - 1.2) / 0.8 = 0.5.
+  // Pins the origin at 50 (running total after the first add), not 0.
+  renderAt(1.6);
+  const midFlight = formatCounterValue(counterValueAt(50, 80, 0.5));
+  expect(counterValueText(host)).toBe(midFlight);
+  expect(counterValueText(host)).not.toBe(formatCounterValue(counterValueAt(0, 30, 0.5))); // wrong origin
+
+  renderAt(2.0); // settled after both adds
+  expect(counterValueText(host)).toBe(formatCounterValue(80));
+});
