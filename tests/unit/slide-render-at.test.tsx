@@ -123,6 +123,21 @@ const clearing: Action[] = [
 const lineTextAt = (host: HTMLElement) =>
   [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
 
+// --- static mode (Task 11): staticMode is now renderAt(duration()), not a hand-rolled fold ---
+//
+// This is a CHARACTERISATION test, not a red-first TDD test (task 11 brief, deliberate
+// deviation from the usual rhythm): it pins the EXISTING static-mode behaviour — folding a
+// beat's timeline to its settled end state, for reduced motion / a hidden tab / animate=false —
+// before the hand-written loop underneath it is replaced with `renderAt(duration())`. It must
+// PASS immediately against the pre-refactor code; there is no new behaviour to drive out here,
+// only existing behaviour to protect against regression while the implementation is swapped.
+test("static mode renders the settled end state", () => {
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat }} animate={false} runtime={noopRuntime} />,
+  );
+  expect(lineTextAt(container.querySelector(".cin")!)).toEqual(["first", "second"]);
+});
+
 test("SEEK SYMMETRY across a clear: seeking back re-shows the cleared line", () => {
   const transport = createRef<SlideTransport>();
   const { container } = render(

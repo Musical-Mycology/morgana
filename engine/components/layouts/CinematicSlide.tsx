@@ -188,42 +188,37 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // would be stuck invisible). Show end art + all text at rest, then wait.
     const staticMode = !animate || document.visibilityState !== "visible";
     if (staticMode) {
+      // Establish the FULL, self-contained end-state art stack directly (design spec §7b §7,
+      // ambiguity res. #3): resolveEnd() folds this beat's entry op AND every one of its
+      // mid-timeline `art` actions across the WHOLE deck from beat 0 — unlike the non-static
+      // path below (which folds incrementally onto ArtStage's own carried-over live stack,
+      // valid only because live playback always visits beats in sequence), static mode may be
+      // the very first (and only) render of this beat's CinematicSlide instance — e.g. a PDF
+      // page for beat 5 with beats 0-4 never mounted in this component tree — so it cannot rely
+      // on any prior beat having primed ArtStage's live stack. `renderAt(duration())` below
+      // still re-reaches this beat's own mid-timeline `art`/`nightlight` actions and re-issues
+      // them through the normal applyArt/setNightlight diffing path; for every `art` action in
+      // this codebase today (none use `keep`/`out`) that is a harmless no-op re-confirmation —
+      // applyArt with no `keep`/`out` always resets to exactly `[...to]` regardless of the
+      // stack it's folded onto, so it converges back to the same layers `resolveEnd()` already
+      // painted. A future `keep`/`out` transition on a beat that ALSO carries other mid-timeline
+      // art would not get this guarantee (see task 11 report) — flagged, not fixed, per the
+      // brief's literal replacement.
       runtime.art(runtime.resolveEnd(), "cut");
-      // Replay the timeline's text steps to the settled end-state, honoring `clear`
-      // (so a beat that clears then shows new text doesn't stack both).
-      let counterStatic: { a: Extract<Action, { kind: "counter_show" }>; value: number } | null = null;
-      const mediaStatic = new Map<string, Extract<Action, { kind: "media" }>>();
-      for (const a of slots.beat.timeline) {
-        if (a.kind === "clear" || a.kind === "fade_out") { textHost.innerHTML = ""; clearLineBoxes(); }
-        else if (a.kind === "text") {
-          if (print && a.screenOnly) continue;
-          const el = a.append
-            ? appendFragment(a.value)
-            : appendText(a.pos ? makeLineBox(a.pos, a.align) : textHost, a.value, a.size, a.align, a.dots, true, a.tone);
-          if (a.in === "cursive") el.classList.add("cin__line--cursive");
-        }
-        else if (a.kind === "rotateList" && a.items[0]) appendText(textHost, a.items[0], a.size ?? "md", undefined, false, true);
-        else if (a.kind === "reveal_again") setAgainRevealed(true);
-        else if (a.kind === "counter_show") counterStatic = { a, value: a.value ?? 0 };
-        else if (a.kind === "counter_to" && counterStatic) counterStatic.value = a.value;
-        else if (a.kind === "counter_add" && counterStatic) counterStatic.value += a.delta;
-        else if (a.kind === "counter_hide") counterStatic = null;
-        else if (a.kind === "media") mediaStatic.set(a.id, a);
-        else if (a.kind === "media_move") { const m = mediaStatic.get(a.id); if (m) mediaStatic.set(a.id, { ...m, pos: a.to }); }
-        else if (a.kind === "media_out") { if (a.id) mediaStatic.delete(a.id); else mediaStatic.clear(); }
-      }
-      if (counterStatic) showCounter({ ...counterStatic.a, value: counterStatic.value });
-      mediaStatic.forEach((m) => { const el = makeMediaEl(m); stageParent()?.appendChild(el); mediaTiles.current.set(m.id, el); });
+      // The settled state IS the fold at the end of the axis: every action kind (text, clear,
+      // fade_out, counters, media, art, nightlight, rotateList, reveal_again, the one-shot
+      // arrows/pulse calls) already renders correctly from renderAt(t) — Tasks 5-8 built exactly
+      // that. Folding to `duration()` in one call reaches every action fully settled, so this
+      // replaces the old hand-written replay loop with no behaviour left to hand-maintain here.
+      renderAt(duration());
       runtime.onWaiting(true);
-      // Static mode never calls renderAt (nothing to scrub), so it must fire onTime itself, at
-      // the beat's settled end — otherwise a host driving sibling stages off onTime (Task 10)
-      // would leave notes/objects stuck at t=0 whenever animate=false or the tab is hidden.
-      onTime?.(duration());
       // Task 9 review finding 2: `play()` is now externally reachable via `transport` — before
       // this task, nothing outside this effect could ever start a ticker in static mode, so no
       // cleanup was needed here. That's no longer true (even though no production caller does
       // this yet — Task 10 wires one), so this branch needs the same pause()-on-unmount/rerun
-      // guarantee the non-static branch has below.
+      // guarantee the non-static branch has below. renderAt() itself never starts a ticker (only
+      // play() does), so this stays synchronous and one-shot; pause() here is just symmetry with
+      // the non-static branch's cleanup, guarding against any future caller reaching `transport`.
       return () => { pause(); };
     }
 
