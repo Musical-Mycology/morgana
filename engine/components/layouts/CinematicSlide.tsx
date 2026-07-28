@@ -86,6 +86,16 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // backward seek strands an empty positioned box in the stage (and a detached node in
   // lineBoxes.current) every time it lands inside an in-flight fade_out.
   const built = useRef<Map<number, { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement }>>(new Map());
+  // Last-issued art transition (JSON of its ArtTransition, since object identity changes every
+  // render) and nightlight target. ArtStage.show() runs its own crossfade as a side effect on a
+  // SIBLING component — calling it on every scrub frame would restart that crossfade
+  // continuously, so renderAt's fold loop below only calls into the runtime when the folded
+  // value actually differs from what was last issued (design spec §7b §7, ambiguity res. #1).
+  // resetFrom(0) clears both so a backward seek past this beat's start re-issues (ambiguity
+  // res. #3) — an art/nightlight action is never itself torn down by resetFrom (it builds no
+  // `built` cache entry), so without this the ref would go stale after a rebuild.
+  const appliedArt = useRef<string | null>(null);
+  const appliedNight = useRef<number | null>(null);
   const lastT = useRef(0);
   const [againRevealed, setAgainRevealed] = useState(false);
 
@@ -519,6 +529,13 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  used both for the backward-seek boundary and for a settled clear/fade_out, which
    *  wipe everything built before them (design spec §7b §4.3). */
   function resetFrom(index: number) {
+    // A reset from the very start of the timeline also invalidates any art/nightlight already
+    // issued to the (external, sibling) ArtStage — otherwise a backward seek to before this
+    // beat's first art/nightlight action leaves the stage showing state from time already left
+    // (ambiguity res. #3). Only index 0 qualifies: resetting from a later index means art before
+    // it is still correctly applied and must NOT be re-issued (that would restart its crossfade
+    // for no reason).
+    if (index === 0) { appliedArt.current = null; appliedNight.current = null; }
     for (const [i, entry] of built.current) {
       if (i < index) continue;
       entry.tl?.kill();
@@ -613,7 +630,30 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         mediaFold.push({ action: f.action, p: f.p });
         continue;
       }
-      if (f.action.kind !== "text") continue; // other kinds: Tasks 7-8
+      if (f.action.kind === "art") {
+        // Diff against the last-issued transition, not the fold's own phase: the fold re-emits
+        // this same entry on every frame within the action's window (settled or in-flight), and
+        // ArtStage.show() runs its own crossfade as a side effect, so re-issuing on every frame
+        // would restart that crossfade continuously (design spec §7b §7). Compare by a stable
+        // JSON serialisation since the action's object identity changes every render.
+        const key = JSON.stringify(f.action.art);
+        if (appliedArt.current !== key) {
+          appliedArt.current = key;
+          // Settled → land instantly (duration 0, snap-like). In-flight → let ArtStage run its
+          // own crossfade once, over the action's own authored duration (ambiguity res. #2,
+          // mirroring seek.ts's applyAt settled/in-flight split for `art`).
+          runtime.applyArt(f.action.art, f.phase === "settled" ? 0 : f.action.art.durationMs);
+        }
+        continue;
+      }
+      if (f.action.kind === "nightlight") {
+        if (appliedNight.current !== f.action.to) {
+          appliedNight.current = f.action.to;
+          runtime.setNightlight(f.action.to, f.phase === "settled" ? 0 : f.action.durationMs);
+        }
+        continue;
+      }
+      if (f.action.kind !== "text") continue; // other kinds (rotateList): Task 8
       let entry = built.current.get(f.index);
       if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
       if (!entry.tl) continue; // rendered at rest

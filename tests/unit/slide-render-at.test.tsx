@@ -139,3 +139,51 @@ test("backward seek into an in-flight fade_out does not leak positioned line box
                                  // fold replays it as in-flight, which never calls clearLineBoxes.
   expect(boxCount()).toBe(2);   // shared box + rebuilt "before" box — no leaked "after" box
 });
+
+// --- art / nightlight diffing (Task 7) ------------------------------------------------------
+//
+// ArtStage.show() runs its own crossfade side effect, so calling applyArt/setNightlight on
+// every scrub frame would restart that crossfade continuously. renderAt must issue them only
+// when the folded value actually changes across a run of frames — this is the load-bearing
+// property this whole task exists to add; see ambiguity resolution #4 in the brief for the
+// mutation check that proves this test actually bites.
+test("scrubbing within one art window issues no repeated runtime calls", () => {
+  const calls: string[] = [];
+  const runtime = { ...noopRuntime, applyArt: () => calls.push("art"), setNightlight: () => calls.push("night") };
+  const tl: Action[] = [
+    { kind: "text", value: "x", in: "fade" },
+    { kind: "art", art: { to: "3.02", mode: "fade" } },
+    { kind: "nightlight", to: 0.4 },
+    { kind: "wait", ms: 2000 },
+  ];
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a", timeline: tl } }} animate runtime={runtime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  for (const t of [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]) host.__renderAt!(t);
+  expect(calls).toEqual(["art", "night"]);   // once each, not once per frame
+});
+
+// A backward seek across the destructive boundary (index 0, via resetFrom) must re-issue art
+// and nightlight — otherwise ArtStage keeps showing state from a time already left behind
+// (ambiguity resolution #3). This is the part the brief's own pseudocode can't verify by
+// inspection: it proves resetFrom's ref-clearing actually fires on a real backward seek, not
+// just that the diffing guard exists.
+test("backward seek past the reset boundary re-issues art and nightlight", () => {
+  const calls: string[] = [];
+  const runtime = { ...noopRuntime, applyArt: () => calls.push("art"), setNightlight: () => calls.push("night") };
+  const tl: Action[] = [
+    { kind: "art", art: { to: "3.02", mode: "fade" } },
+    { kind: "nightlight", to: 0.4 },
+    { kind: "wait", ms: 2000 },
+  ];
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a2", timeline: tl } }} animate runtime={runtime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  host.__renderAt!(1.0);
+  expect(calls).toEqual(["art", "night"]);
+  host.__renderAt!(0.0); // BACK to before the art/nightlight actions — resetFrom(0) must clear refs
+  host.__renderAt!(1.0); // forward again: must re-issue, not skip on a stale "already applied" ref
+  expect(calls).toEqual(["art", "night", "art", "night"]);
+});
