@@ -337,3 +337,37 @@ test("ROUND TRIP: backward seek across a `clear`, then forward again, leaves onl
   renderAt(1.5);                // FORWARD again, past the clear once more
   expect(textAtNow()).toEqual(["after"]); // NOT ["before", "after"]
 });
+
+// Review round 3: the two ROUND TRIP tests above both involve a backward seek — neither pins
+// down the SECOND, independently-discovered variant of the same defect class, which needs no
+// backward seek at all. Once a `clear`'s one-time wipe fires, `foldAt` still re-emits the
+// pre-clear text action on every LATER forward-only frame (it recomputes from index 0 every
+// call); without the `f.index < wipeBoundary` skip-guard, that text gets rebuilt from scratch —
+// and, since the wipe already fired once and won't fire again for the same boundary, is never
+// removed again, leaking back into the DOM as a second stray line alongside the post-clear text.
+// This is a DISTINCT scenario from the ROUND TRIP tests (no `renderAt` call here ever decreases
+// t), named accordingly so the two are not mistaken for duplicates.
+//
+// Uses querySelectorAll (the FULL set of rendered lines), not querySelector (first match only):
+// "after" was built first (on the very first forward frame) and stays the first DOM child even
+// after "before" leaks back in as a second, later-appended sibling — a first-match assertion
+// would keep passing while the bug was live, which is exactly how it escaped round 2's tests.
+test("FORWARD-ONLY (no backward seek): scrubbing forward across several frames past a `clear` never re-shows the pre-clear text", () => {
+  const tl: Action[] = [
+    { kind: "text", value: "before", in: "fade" }, // [0, 0.8)
+    { kind: "clear" },                              // at 0.8
+    { kind: "text", value: "after", in: "fade" },  // [0.8, 1.6)
+  ];
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "fwd-only", timeline: tl } }} animate runtime={noopRuntime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  const renderAt = (t: number) => host.__renderAt!(t);
+  const allTexts = () => [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
+
+  // Every one of these is STRICTLY greater than the previous — never a backward seek.
+  for (const t of [1.0, 1.05, 1.1, 1.15, 1.2]) {
+    renderAt(t);
+    expect(allTexts()).toEqual(["after"]); // NOT ["after", "before"] — "before" must never reappear
+  }
+});
