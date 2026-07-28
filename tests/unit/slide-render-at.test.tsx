@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { createRef } from "react";
-import { render, cleanup } from "@testing-library/react";
+import { render, cleanup, act } from "@testing-library/react";
 import { CinematicSlide, type SlideTransport } from "@/engine/components/layouts/CinematicSlide";
 import { ROTATE_STEP, rotateItemAt } from "@/engine/components/effects/cinematic-anim";
 import type { Action, Beat } from "@/engine/deck/types";
@@ -534,4 +534,97 @@ test("seeking to a gate's exact time then calling play() does not immediately re
   // waitUntil would time out instead of ever seeing waitingCalls reach 1 (ambiguity res. #2).
   await waitUntil(() => waitingCalls === 1);
   expect(gateCalls).toBe(0); // must not pause again on the gate it was already sitting on
+});
+
+// --- one-shot side effects: reveal_arrows / pulse_arrow / reveal_again (review round 1) ----
+//
+// These three were handled by scheduleAction before this task and had NO replacement after it
+// deleted — a false premise in the plan's own self-review assumed the forward ticker gave them
+// "for free," which is only true of DERIVABLE state (reveal_again), not of genuinely one-shot
+// external calls (reveal_arrows/pulse_arrow) that have no readable value to fold over.
+
+test("reveal_arrows and pulse_arrow fire once on a forward scrub across many frames, not once per frame", () => {
+  const calls: string[] = [];
+  const runtime = {
+    ...noopRuntime,
+    revealArrows: () => calls.push("arrows"),
+    pulseArrow: (which: "next" | "prev", scale: number) => calls.push(`pulse:${which}:${scale}`),
+  };
+  const tl: Action[] = [
+    { kind: "text", value: "x", in: "fade" },          // [0, 0.8)
+    { kind: "reveal_arrows" },                          // at 0.8
+    { kind: "pulse_arrow", which: "next", scale: 3 },   // at 0.8
+    { kind: "wait", ms: 2000 },                         // [0.8, 2.8)
+  ];
+  const transport = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "arrows1", timeline: tl } }} animate runtime={runtime} transport={transport} />,
+  );
+  // Every one of these frames re-folds reveal_arrows/pulse_arrow (both at-or-before every t here) —
+  // foldAt re-emits every reached action on every call, so without the issued-guard this would
+  // fire once PER FRAME, not once total.
+  for (const t of [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]) transport.current!.seek(t);
+  expect(calls).toEqual(["arrows", "pulse:next:3"]);
+});
+
+test("backward seek past reveal_arrows/pulse_arrow, then forward re-crossing, re-fires both", () => {
+  const calls: string[] = [];
+  const runtime = {
+    ...noopRuntime,
+    revealArrows: () => calls.push("arrows"),
+    pulseArrow: (which: "next" | "prev", scale: number) => calls.push(`pulse:${which}:${scale}`),
+  };
+  const tl: Action[] = [
+    { kind: "reveal_arrows" },                          // at 0
+    { kind: "pulse_arrow", which: "next", scale: 3 },   // at 0
+    { kind: "wait", ms: 2000 },                         // [0, 2.0)
+  ];
+  const transport = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "arrows2", timeline: tl } }} animate runtime={runtime} transport={transport} />,
+  );
+  transport.current!.seek(1.0);
+  expect(calls).toEqual(["arrows", "pulse:next:3"]);
+  transport.current!.seek(0.0); // BACK to before them — the SAME mechanism appliedArt/appliedNight use
+  transport.current!.seek(1.0); // forward again: must re-fire, not skip on a stale "already issued" guard
+  expect(calls).toEqual(["arrows", "pulse:next:3", "arrows", "pulse:next:3"]);
+});
+
+// reveal_again's effect renders only on the `fin` beat (design: the ending CTA block). Unlike
+// reveal_arrows/pulse_arrow, its state IS derivable from the fold (whether reveal_again has been
+// reached), so it needs no issued-guard at all — this is demonstrated directly, not assumed:
+// hiding on a backward seek and reappearing on forward re-crossing falls out "for free" from
+// recomputing it every renderAt call, the same discipline that fixed Task 7's art/nightlight
+// round-trip bug. State updates go through React (setAgainRevealed), so each seek is wrapped in
+// act() to flush the resulting re-render synchronously before the DOM assertion.
+const revealAgainTl: Action[] = [
+  { kind: "text", value: "the end", in: "fade" }, // [0, 0.8)
+  { kind: "reveal_again" },                        // at 0.8
+  { kind: "wait", ms: 2000 },                      // [0.8, 2.8)
+];
+
+test("reveal_again is derived fold state: stable across forward frames, hides on backward seek, reshows on forward re-crossing", () => {
+  const transport = createRef<SlideTransport>();
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "fin", timeline: revealAgainTl } }} animate runtime={noopRuntime} transport={transport} />,
+  );
+  const ending = () => container.querySelector(".cin__ending");
+
+  // Forward, past reveal_again: the ending block appears, and stays the SAME DOM node across
+  // several later frames — foldAt re-emits reveal_again every call, but React bails out of
+  // re-rendering when setAgainRevealed(true) is called with the value already true.
+  act(() => { transport.current!.seek(1.0); });
+  const first = ending();
+  expect(first).not.toBeNull();
+  act(() => { transport.current!.seek(1.2); });
+  act(() => { transport.current!.seek(1.4); });
+  expect(ending()).toBe(first);
+
+  // BACK to before reveal_again: hidden again, with no issued-guard to keep in sync.
+  act(() => { transport.current!.seek(0.4); });
+  expect(ending()).toBeNull();
+
+  // FORWARD again, re-crossing reveal_again: reappears.
+  act(() => { transport.current!.seek(1.0); });
+  expect(ending()).not.toBeNull();
 });

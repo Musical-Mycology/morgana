@@ -127,6 +127,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // art/nightlight once per frame for any beat with art/nightlight after a `clear`.
   const appliedArt = useRef<string | null>(null);
   const appliedNight = useRef<number | null>(null);
+  // Fold indices of already-issued one-shot runtime side effects (reveal_arrows, pulse_arrow —
+  // review round: these have no natural "value" to diff against the way art/nightlight do, so
+  // they're guarded by INDEX instead of value, but otherwise reuse the exact same mechanism:
+  // cleared on a new beat and on any backward seek (never by resetFrom / a re-folded destructive
+  // action), so foldAt re-emitting the same reached action on every forward frame fires it only
+  // once, while a backward-seek-then-forward-re-crossing correctly re-fires it. `reveal_again` is
+  // NOT tracked here — its effect is derivable state (see renderAt), not a one-shot call.
+  const firedOnce = useRef<Set<number>>(new Set());
   // The `wipeBoundary` (see renderAt) computed as of the END of the PREVIOUS renderAt call —
   // i.e. the index of the last destructive action (clear / settled fade_out) whose full wipe
   // (resetFrom(0) + host.innerHTML="") is already reflected in the DOM. renderAt recomputes
@@ -159,6 +167,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // value would be (wrongly) skipped as a no-op diff.
     appliedArt.current = null;
     appliedNight.current = null;
+    firedOnce.current.clear();
     lastDestructive.current = -1;
     lastT.current = 0;
     clearLineBoxes();
@@ -201,7 +210,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       if (counterStatic) showCounter({ ...counterStatic.a, value: counterStatic.value });
       mediaStatic.forEach((m) => { const el = makeMediaEl(m); stageParent()?.appendChild(el); mediaTiles.current.set(m.id, el); });
       runtime.onWaiting(true);
-      return;
+      // Task 9 review finding 2: `play()` is now externally reachable via `transport` — before
+      // this task, nothing outside this effect could ever start a ticker in static mode, so no
+      // cleanup was needed here. That's no longer true (even though no production caller does
+      // this yet — Task 10 wires one), so this branch needs the same pause()-on-unmount/rerun
+      // guarantee the non-static branch has below.
+      return () => { pause(); };
     }
 
     // Entry art: resolveEntry() already folds this beat's entry transition, so show
@@ -540,9 +554,13 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       resetFrom(boundary + 1);
       if (boundary < 0) { host.innerHTML = ""; clearLineBoxes(); }
       // An actual backward seek — and ONLY a backward seek, never a re-folded `clear` on a
-      // forward frame — invalidates already-issued art/nightlight (ambiguity res. #3).
+      // forward frame — invalidates already-issued art/nightlight (ambiguity res. #3), and (by
+      // the same reasoning) already-fired one-shot side effects (reveal_arrows/pulse_arrow):
+      // clearing the whole set means anything still reached at the new `t` fires again this same
+      // call, and anything not yet re-reached fires again when forward-crossed later.
       appliedArt.current = null;
       appliedNight.current = null;
+      firedOnce.current.clear();
     }
     // Counter state is a fold over the reached actions (design spec §7b §5): counter_show
     // seeds {from,to}; counter_to/counter_add advance it, tracking `from` as the PREVIOUS
@@ -558,6 +576,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // reducer once the loop completes, then painted — same "fold, then paint" shape as the
     // counter above (design spec §7b §6).
     const mediaFold: MediaFold[] = [];
+    // reveal_again's effect (show the ending CTA block) is DERIVABLE state, not an event: it is
+    // revealed exactly when the fold has reached a reveal_again action, recomputed fresh on
+    // every call — review round finding 1. That makes it correct under backward seek for free,
+    // with no issued-guard to keep in sync (unlike reveal_arrows/pulse_arrow below, which have
+    // no readable state to derive from and so stay genuinely edge-triggered).
+    let revealAgain = false;
 
     const foldEntries = foldAt(slots.beat.timeline, t);
 
@@ -663,6 +687,19 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         }
         continue;
       }
+      if (f.action.kind === "reveal_again") { revealAgain = true; continue; }
+      // Genuinely one-shot external calls with nothing to diff against by value (unlike
+      // art/nightlight) — guarded by fold INDEX in `firedOnce` instead, so foldAt re-emitting
+      // the same reached action on every forward frame fires it only once, and a backward seek
+      // (which clears `firedOnce` wholesale, above) re-fires it on forward re-crossing.
+      if (f.action.kind === "reveal_arrows") {
+        if (!firedOnce.current.has(f.index)) { firedOnce.current.add(f.index); runtime.revealArrows(); }
+        continue;
+      }
+      if (f.action.kind === "pulse_arrow") {
+        if (!firedOnce.current.has(f.index)) { firedOnce.current.add(f.index); runtime.pulseArrow(f.action.which, f.action.scale ?? 3); }
+        continue;
+      }
       // Permanently wiped by a LATER destructive action (clear / settled fade_out) — never
       // rebuild it. Without this guard, an action before wipeBoundary that isn't (yet, or
       // any longer) in the `built` cache would be rebuilt here every time it's reached, only to
@@ -700,6 +737,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     }
     paintCounter(counter, counterValueP, counterEntranceP, counterHideP);
     paintMedia(mediaFold, mediaStateAt(mediaFold, t));
+    setAgainRevealed(revealAgain);
     lastT.current = t;
   }
 
