@@ -30,6 +30,19 @@ function boxAnchor(pos: StagePoint, align?: TextAlign): { left: string; right: s
   return { left: `${pos.x * 100}%`, right: "", transform: "" };
 }
 
+/** Stable dedup key for an ArtTransition, for renderAt's applied-art diffing (below). Built from
+ *  an EXPLICIT, fixed field order — NOT `JSON.stringify(transition)` directly, whose output
+ *  depends on the object's own property insertion order. Review round 1, finding 2:
+ *  `lib/editor/paths.ts`'s `setPath()` shallow-spreads `{...obj}` then assigns the edited field,
+ *  so a field set for the first time (e.g. `durationMs`) lands at the END of insertion order —
+ *  two value-identical transitions edited in a different order would otherwise serialise
+ *  differently and spuriously re-trigger ArtStage's crossfade. An explicit field list also fails
+ *  loudly (a TS error) if ArtTransition gains a field this key doesn't know about, rather than
+ *  silently changing diffing behaviour. */
+function artKey(a: ArtTransition): string {
+  return JSON.stringify([a.to, a.mode, a.durationMs ?? null, a.keep ?? null, a.out ?? null]);
+}
+
 
 export interface CinematicRuntime {
   /** Cross-fade to an absolute layer set (entry transitions). */
@@ -91,11 +104,19 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // SIBLING component — calling it on every scrub frame would restart that crossfade
   // continuously, so renderAt's fold loop below only calls into the runtime when the folded
   // value actually differs from what was last issued (design spec §7b §7, ambiguity res. #1).
-  // resetFrom(0) clears both so a backward seek past this beat's start re-issues (ambiguity
-  // res. #3) — an art/nightlight action is never itself torn down by resetFrom (it builds no
-  // `built` cache entry), so without this the ref would go stale after a rebuild.
+  // Cleared ONLY on an actual backward seek (the `t < lastT.current` preamble in renderAt), never
+  // by resetFrom / a re-folded `clear` — review round 1 finding 1: `clear` wiping text has no
+  // bearing on what art is on screen, and foldAt re-emits every reached action (including
+  // `clear`) on EVERY forward frame, so nulling these refs from inside resetFrom re-fired
+  // art/nightlight once per frame for any beat with art/nightlight after a `clear`.
   const appliedArt = useRef<string | null>(null);
   const appliedNight = useRef<number | null>(null);
+  // Index of the destructive action (clear / settled fade_out) whose full wipe (resetFrom(0) +
+  // host.innerHTML="") has already been applied. foldAt re-emits every reached action on every
+  // call, so without this guard the SAME `clear` gets re-processed — and the entire `built` text
+  // cache torn down and rebuilt from scratch — on every forward frame for the rest of the beat
+  // (review round 1, finding 3). Reset alongside appliedArt/appliedNight on a backward seek.
+  const lastDestructive = useRef(-1);
   const lastT = useRef(0);
   const [againRevealed, setAgainRevealed] = useState(false);
 
@@ -113,6 +134,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     loopers.current = [];
     built.current.forEach((entry) => entry.tl?.kill());
     built.current.clear();
+    // A new beat starts with nothing yet issued to the runtime and nothing yet destructively
+    // wiped, regardless of what the PREVIOUS beat last applied — otherwise a new beat whose
+    // first mid-timeline art/nightlight action happens to match the previous beat's last-issued
+    // value would be (wrongly) skipped as a no-op diff.
+    appliedArt.current = null;
+    appliedNight.current = null;
+    lastDestructive.current = -1;
+    lastT.current = 0;
     clearLineBoxes();
     clearCounter();
     clearMedia();
@@ -529,13 +558,13 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  used both for the backward-seek boundary and for a settled clear/fade_out, which
    *  wipe everything built before them (design spec §7b §4.3). */
   function resetFrom(index: number) {
-    // A reset from the very start of the timeline also invalidates any art/nightlight already
-    // issued to the (external, sibling) ArtStage — otherwise a backward seek to before this
-    // beat's first art/nightlight action leaves the stage showing state from time already left
-    // (ambiguity res. #3). Only index 0 qualifies: resetting from a later index means art before
-    // it is still correctly applied and must NOT be re-issued (that would restart its crossfade
-    // for no reason).
-    if (index === 0) { appliedArt.current = null; appliedNight.current = null; }
+    // Deliberately does NOT touch appliedArt/appliedNight: resetFrom(0) is also called from the
+    // forward-fold `clear`/settled-`fade_out` branches below, which are re-run on EVERY forward
+    // frame once reached (foldAt re-emits every reached action, every call) — nulling the art
+    // refs here would re-issue art/nightlight once per frame for any beat with one after a
+    // `clear` (review round 1, finding 1). Clearing text has no bearing on what art is on
+    // screen. Only an actual backward seek invalidates already-issued art/nightlight state; see
+    // the `t < lastT.current` preamble in renderAt.
     for (const [i, entry] of built.current) {
       if (i < index) continue;
       entry.tl?.kill();
@@ -565,6 +594,15 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       const boundary = rebuildBoundary(slots.beat.timeline, t);
       resetFrom(boundary + 1);
       if (boundary < 0) { host.innerHTML = ""; clearLineBoxes(); }
+      // An actual backward seek — and ONLY a backward seek, never a re-folded `clear` on a
+      // forward frame — invalidates already-issued art/nightlight (ambiguity res. #3) and the
+      // record of which destructive action's wipe has already run. `boundary` is the index of
+      // the destructive action (if any) now at-or-before the new t: its wipe already happened
+      // as part of the resetFrom/host.innerHTML above, so mark it done (-1 when there is none)
+      // rather than letting the fold loop redundantly re-wipe when it re-reaches that same index.
+      appliedArt.current = null;
+      appliedNight.current = null;
+      lastDestructive.current = boundary;
     }
     // Counter state is a fold over the reached actions (design spec §7b §5): counter_show
     // seeds {from,to}; counter_to/counter_add advance it, tracking `from` as the PREVIOUS
@@ -605,19 +643,31 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       }
       if (f.action.kind === "clear") {
         // Settled the instant it's reached (0 duration): drop everything built before it.
-        resetFrom(0);
-        host.innerHTML = "";
-        clearLineBoxes();
+        // foldAt re-emits this SAME entry on every forward frame for the rest of the beat (it
+        // recomputes from index 0 every call), so guard the wipe by index — otherwise every
+        // frame tears down and rebuilds the entire `built` text cache from scratch (review
+        // round 1, finding 3), and (before that fix) also nulled the art/nightlight refs every
+        // frame (finding 1). Once index `f.index`'s wipe has run, re-reaching it is a no-op.
+        if (f.index > lastDestructive.current) {
+          resetFrom(0);
+          host.innerHTML = "";
+          clearLineBoxes();
+          lastDestructive.current = f.index;
+        }
         continue;
       }
       if (f.action.kind === "fade_out") {
         if (f.phase === "settled") {
           // Terminal: the fade has fully played out — same teardown as `clear`. Only takes
-          // effect once settled; see the in-flight branch below for the scrubbable ramp.
-          resetFrom(0);
-          host.innerHTML = "";
-          clearLineBoxes();
-          gsap.set(host, { clearProps: "opacity" });
+          // effect once settled; see the in-flight branch below for the scrubbable ramp. Same
+          // re-fold idempotency guard as `clear` above (finding 1 / finding 3).
+          if (f.index > lastDestructive.current) {
+            resetFrom(0);
+            host.innerHTML = "";
+            clearLineBoxes();
+            gsap.set(host, { clearProps: "opacity" });
+            lastDestructive.current = f.index;
+          }
           continue;
         }
         // In-flight: scrub the opacity ramp from local progress (pure, from beatTimeline —
@@ -634,9 +684,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         // Diff against the last-issued transition, not the fold's own phase: the fold re-emits
         // this same entry on every frame within the action's window (settled or in-flight), and
         // ArtStage.show() runs its own crossfade as a side effect, so re-issuing on every frame
-        // would restart that crossfade continuously (design spec §7b §7). Compare by a stable
-        // JSON serialisation since the action's object identity changes every render.
-        const key = JSON.stringify(f.action.art);
+        // would restart that crossfade continuously (design spec §7b §7). Compare by a stable,
+        // field-order-independent key (artKey, above) since the action's object identity changes
+        // every render and its own key insertion order is not guaranteed stable (finding 2).
+        const key = artKey(f.action.art);
         if (appliedArt.current !== key) {
           appliedArt.current = key;
           // Settled → land instantly (duration 0, snap-like). In-flight → let ArtStage run its

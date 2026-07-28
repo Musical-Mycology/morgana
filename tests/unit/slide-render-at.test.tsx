@@ -187,3 +187,86 @@ test("backward seek past the reset boundary re-issues art and nightlight", () =>
   host.__renderAt!(1.0); // forward again: must re-issue, not skip on a stale "already applied" ref
   expect(calls).toEqual(["art", "night", "art", "night"]);
 });
+
+// Review round 1, Finding 1 (Critical): foldAt recomputes ALL reached actions from index 0 on
+// every renderAt call — a `clear` at or before t is re-folded on every forward frame, not just
+// once. The `clear` branch calls resetFrom(0) every time it is re-folded; a prior (buggy) version
+// of the art/nightlight diffing guard nulled appliedArt/appliedNight inside resetFrom itself,
+// which meant ANY beat with an art/nightlight action after a `clear` re-issued on every single
+// forward frame — exactly the crossfade-restart-per-frame bug this task exists to prevent.
+// Clearing text has no bearing on what art is on screen; only an actual backward seek should
+// invalidate already-issued art/nightlight state.
+test("art/nightlight after a `clear` are issued once, not re-issued on every forward frame", () => {
+  const calls: string[] = [];
+  const runtime = { ...noopRuntime, applyArt: () => calls.push("art"), setNightlight: () => calls.push("night") };
+  const tl: Action[] = [
+    { kind: "text", value: "x", in: "fade" },                    // [0, 0.8)
+    { kind: "clear" },                                            // at 0.8
+    { kind: "art", art: { to: "3.02", mode: "fade" } },           // at 0.8
+    { kind: "nightlight", to: 0.4 },                              // at 0.8
+    { kind: "wait", ms: 2000 },                                   // [0.8, 2.8)
+  ];
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a3", timeline: tl } }} animate runtime={runtime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  // Every one of these frames re-folds the `clear` at 0.8 (it is at-or-before every t here).
+  for (const t of [1.0, 1.2, 1.4, 1.6, 1.8, 2.0]) host.__renderAt!(t);
+  expect(calls).toEqual(["art", "night"]);   // once each, not once per frame past the clear
+});
+
+// Review round 1, Finding 3: the same unconditional resetFrom(0) call in the `clear` branch
+// tears down EVERY entry in the `built` text cache (not just art/nightlight refs) on every
+// forward frame that re-folds a `clear` — which is every frame from the clear onward, for the
+// rest of the beat. That makes the `built` cache (the whole point of which is to avoid rebuilding
+// a text action's GSAP timeline / SplitText instance every frame — design spec §7b §4.2) inert
+// for any beat containing a `clear`. Confirmed empirically before this fix: with instrumentation,
+// two consecutive renderAt calls landing in the SAME text action's in-flight window (after a
+// clear) produced two DIFFERENT <p> DOM node instances — a fresh rebuild each call. This test
+// pins that down via DOM node identity (not text content, which would be identical either way).
+test("BUILD CACHE: text after a `clear` is built once, not rebuilt on every re-fold of the clear", () => {
+  const tl: Action[] = [
+    { kind: "text", value: "before", in: "fade" }, // [0, 0.8)
+    { kind: "clear" },                              // at 0.8
+    { kind: "text", value: "after", in: "fade" },  // [0.8, 1.6)
+  ];
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "cache1", timeline: tl } }} animate runtime={noopRuntime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  const renderAt = (t: number) => host.__renderAt!(t);
+
+  renderAt(1.0);                                   // inside "after"'s in-flight window
+  const first = host.querySelector("p.cin__line");
+  renderAt(1.05);                                  // still inside the SAME window — no new action reached
+  const second = host.querySelector("p.cin__line");
+  expect(second).toBe(first); // same DOM node instance: the cached build survived the re-fold
+});
+
+// Review round 1, Finding 2: the diffing key must not depend on the ArtTransition object's own
+// property INSERTION ORDER. `lib/editor/paths.ts`'s `setPath()` shallow-spreads `{...obj}` then
+// assigns the edited field, so a field set for the first time lands at the END of key order —
+// two value-identical transitions authored via a different edit sequence can end up with
+// different insertion order despite having identical field values. A raw
+// `JSON.stringify(transition)` key would treat those as "different" and spuriously re-fire.
+// Simulate that here with two `art` actions holding the SAME values but built with `to`/`mode`
+// declared in reversed order (mimicking two different edit histories reaching the same value).
+test("art diffing key is independent of the transition object's own key insertion order", () => {
+  const calls: string[] = [];
+  const runtime = { ...noopRuntime, applyArt: () => calls.push("art") };
+  const naturalOrder: Action = { kind: "art", art: { to: "3.02", mode: "fade" } };     // to, mode
+  const reversedOrder: Action = { kind: "art", art: { mode: "fade", to: "3.02" } };    // mode, to — same values
+  const tl: Action[] = [
+    naturalOrder,                    // at 0
+    { kind: "wait", ms: 500 },       // [0, 0.5)
+    reversedOrder,                   // at 0.5 — value-identical to naturalOrder, different key order
+    { kind: "wait", ms: 500 },       // [0.5, 1.0)
+  ];
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "a4", timeline: tl } }} animate runtime={runtime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  host.__renderAt!(0.1);  // reaches naturalOrder
+  host.__renderAt!(0.6);  // reaches reversedOrder — same VALUE as naturalOrder, must be a no-op
+  expect(calls).toEqual(["art"]); // fired once, not once per differently-key-ordered-but-equal action
+});
