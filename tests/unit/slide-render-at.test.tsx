@@ -25,8 +25,11 @@ function mountSlide() {
   return { host, renderAt: (t: number) => host.__renderAt!(t) };
 }
 
+// Compares text content AND the inline style GSAP writes as it seeks (opacity, transform,
+// etc.) — text-only would still pass if every .time()/.progress() call were a no-op, as
+// long as element order matched. That's exactly the divergence seek symmetry must rule out.
 const textAt = (host: HTMLElement) =>
-  [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
+  [...host.querySelectorAll("p.cin__line")].map((p) => [p.textContent, p.getAttribute("style")]);
 
 test("renderAt is deterministic: the same t twice yields the same DOM", () => {
   const { host, renderAt } = mountSlide();
@@ -51,4 +54,19 @@ test("SEEK SYMMETRY: forward play, backward seek, and direct jump agree at the s
 
   expect(textAt(back.host)).toEqual(textAt(fwd.host));
   expect(textAt(jump.host)).toEqual(textAt(fwd.host));
+});
+
+// A pure path-symmetry check can pass even if seeking is a total no-op: if every render
+// converges on the same (wrong, un-advanced) DOM regardless of path, "they all agree" is
+// true but vacuous. This test pins down that renderAt actually moves the paused timeline
+// by comparing two different in-flight times *within the same action's window* (both calls
+// land on "first" only — its [0, 0.8) window — so no new element ever appears between them;
+// the only thing that can make the two snapshots differ is the tween's progress).
+test("renderAt actually advances the paused timeline (not a no-op)", () => {
+  const { host, renderAt } = mountSlide();
+  renderAt(0.1);
+  const early = textAt(host);
+  renderAt(0.7);
+  const late = textAt(host);
+  expect(late).not.toEqual(early);
 });

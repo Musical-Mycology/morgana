@@ -433,12 +433,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): { el: HTMLElement; tl: gsap.core.Timeline | null } {
     const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive"];
     const effIn: TextIn = hasInlineMarkup(a.value) && perPiece.includes(a.in) ? "fade" : a.in;
+    // instantText / no-reveal lines have no entrance: they render at rest, and (matching
+    // scheduleAction's equivalent branch) their dots render already-faded-in via `instant`.
+    const instant = !!(instantText && !a.reveal);
     const el = a.append
       ? appendFragment(a.value)
-      : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, false, a.tone);
+      : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, instant, a.tone);
     if (a.in === "cursive") el.classList.add("cin__line--cursive");
-    // instantText / no-reveal lines have no entrance: they render at rest.
-    if (instantText && !a.reveal) return { el, tl: null };
+    if (instant) return { el, tl: null };
     const tl = buildTextEffect(el, effIn, a);
     tl.pause(0);
     return { el, tl };
@@ -455,7 +457,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       let entry = built.current.get(f.index);
       if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
       if (!entry.tl) continue; // rendered at rest
-      entry.tl.time(f.phase === "settled" ? entry.tl.duration() : t - f.start);
+      // Settled: jump to end by PROGRESS, not by reading the timeline's own .duration() —
+      // that would derive a duration off a built GSAP timeline, which the pure beatTimeline()
+      // clock (not GSAP) must remain the sole source of truth for (design spec §7b, Global
+      // Constraints). In-flight: map absolute t onto this action's local elapsed time.
+      if (f.phase === "settled") entry.tl.progress(1);
+      else entry.tl.time(t - f.start);
     }
     lastT.current = t;
   }
