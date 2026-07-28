@@ -10,7 +10,7 @@ import { renderPanelHTML } from "@/engine/deck/panel";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
 import { parseInlineLinks, hasInlineMarkup } from "@/engine/deck/inline-links";
-import { formatCounterValue, counterTarget } from "@/engine/deck/counter";
+import { formatCounterValue, counterTarget, counterValueAt } from "@/engine/deck/counter";
 import {
   flyUp, fadeIn, fadeSide, dotFade, rotateList, lineAndDots,
   letterFly, letterUp, wordUp, blurIn, typewriter,
@@ -72,7 +72,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   const lineBoxes = useRef<HTMLElement[]>([]); // free-positioned per-line text boxes (text action `pos`)
   const currentLine = useRef<HTMLElement | null>(null); // last line, for inline `append` fragments
   const fadeRef = useRef<gsap.core.Tween | null>(null); // active fade_out tween, killed on beat change
-  const counterRef = useRef<{ valueEl: HTMLElement; value: number; prefix: string } | null>(null);
+  // `a` is the counter_show action that built this box — renderAt compares against it (by
+  // reference) to know whether the fold's current counter is the one already on screen, or
+  // whether it needs to rebuild (design spec §7b §5). `value` is bookkeeping for the old
+  // wall-clock scheduleAction path only (counter_add's relative delta); renderAt never reads it.
+  const counterRef = useRef<{ box: HTMLElement; valueEl: HTMLElement; prefix: string; value: number; a: Extract<Action, { kind: "counter_show" }> } | null>(null);
   const mediaTiles = useRef<Map<string, HTMLElement>>(new Map());
   // Built, PAUSED effect timelines keyed by action index. Nothing here ever runs on
   // wall-clock — renderAt is the only thing that advances them (design spec §7b §4.2).
@@ -279,6 +283,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return scope.current?.querySelector<HTMLElement>(".cin__stage") ?? scope.current;
   }
 
+  /** Build the counter's DOM at rest (opacity 1, no offset) — no entrance animation here.
+   *  Both the old wall-clock scheduleAction path (instant show) and renderAt's paint step
+   *  (which applies the eased entrance itself, driven by fold progress) call this to (re)build
+   *  the box; only renderAt scrubs its opacity/offset afterward (design spec §7b §5). */
   function showCounter(a: Extract<Action, { kind: "counter_show" }>) {
     clearCounter();
     const box = document.createElement("div");
@@ -301,39 +309,57 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     valueEl.textContent = formatCounterValue(value, prefix);
     box.appendChild(valueEl);
     stageParent()?.appendChild(box);
-    counterRef.current = { valueEl, value, prefix };
-    gsap.from(box, { opacity: 0, y: 12, duration: 0.4, ease: "power2.out" });
+    counterRef.current = { box, valueEl, prefix, value, a };
   }
 
-  function tweenCounter(
-    a: { kind: "counter_to"; value: number } | { kind: "counter_add"; delta: number },
-    ms: number,
-  ) {
+  /** Old wall-clock scheduleAction path only: an instant snap to the counter's new target via
+   *  the same pure counterValueAt renderAt uses (p=1, i.e. fully settled) — no GSAP tween.
+   *  **Behaviour change**: this path used to animate the digits over `durationMs`; it no longer
+   *  does (design spec §7b §5). renderAt's paintCounter is what makes this scrubbable/eased,
+   *  driven by the fold's own progress — this function has no `p` to animate with. */
+  function tweenCounter(a: { kind: "counter_to"; value: number } | { kind: "counter_add"; delta: number }) {
     const c = counterRef.current;
     if (!c) return;
     const target = counterTarget(c.value, a);
-    const proxy = { v: c.value };
-    gsap.to(proxy, {
-      v: target,
-      duration: ms / 1000,
-      ease: "power2.out",
-      onUpdate: () => { c.valueEl.textContent = formatCounterValue(proxy.v, c.prefix); },
-      onComplete: () => { c.valueEl.textContent = formatCounterValue(target, c.prefix); },
-    });
+    c.valueEl.textContent = formatCounterValue(counterValueAt(c.value, target, 1), c.prefix);
     c.value = target;
   }
 
-  function hideCounter(ms: number) {
+  /** Fade the counter to opacity `1 - p` — a direct write, not a tween (design spec §7b §5,
+   *  ambiguity res. #3). At `p >= 1` it is fully hidden, so it is torn down. Used both by
+   *  renderAt's paint step (varying `p` per frame) and the old scheduleAction path (a single
+   *  `p = 1` call — an instant hide, replacing what used to fade over `durationMs`). */
+  function hideCounter(p: number) {
     const c = counterRef.current;
     if (!c) return;
-    const box = c.valueEl.parentElement;
-    counterRef.current = null;
-    if (box) gsap.to(box, { opacity: 0, duration: ms / 1000, onComplete: () => box.remove() });
+    if (p >= 1) { clearCounter(); return; }
+    c.box.style.opacity = String(1 - p);
   }
 
   function clearCounter() {
-    counterRef.current?.valueEl.parentElement?.remove();
+    counterRef.current?.box.remove();
     counterRef.current = null;
+  }
+
+  /** Paint the counter's displayed value + entrance/exit visuals at fold-derived progress —
+   *  a pure read of counterValueAt, never a GSAP tween (design spec §7b §5). `counter` is null
+   *  when no counter_show has been reached, or the reached one has fully hidden. `valueP` eases
+   *  the displayed number between `from`/`to`; `entranceP` eases the counter_show entrance
+   *  (opacity 0→1, y 12→0, mirroring the old gsap.from); `hideP` is the in-flight counter_hide's
+   *  own progress, or null when no hide is in flight. */
+  function paintCounter(
+    counter: { a: Extract<Action, { kind: "counter_show" }>; from: number; to: number } | null,
+    valueP: number,
+    entranceP: number,
+    hideP: number | null,
+  ) {
+    if (!counter) { clearCounter(); return; }
+    if (!counterRef.current || counterRef.current.a !== counter.a) showCounter(counter.a);
+    const c = counterRef.current!;
+    c.valueEl.textContent = formatCounterValue(counterValueAt(counter.from, counter.to, valueP), c.prefix);
+    if (hideP != null) { hideCounter(hideP); return; }
+    c.box.style.opacity = String(counterValueAt(0, 1, entranceP));
+    c.box.style.transform = `translateX(-50%) translateY(${counterValueAt(12, 0, entranceP)}px)`;
   }
 
   function makeMediaEl(a: { id: string; pos: StagePoint; src?: string; label?: string; width?: number; round?: boolean; panel?: PanelSpec }): HTMLElement {
@@ -474,9 +500,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     }
   }
 
-  /** Paint the beat's visual state at beat-local time `t` (text + clear/fade_out actions —
-   *  Tasks 5-8 bring the other kinds under this path). PAUSED timelines only; renderAt is the
-   *  sole thing that ever advances them (design spec §7b §4.2). */
+  /** Paint the beat's visual state at beat-local time `t` (text, clear/fade_out, and counter
+   *  actions — Tasks 6-8 bring media/art/nightlight/rotateList under this path). PAUSED
+   *  timelines only; renderAt is the sole thing that ever advances them (design spec §7b §4.2). */
   function renderAt(t: number) {
     const host = scope.current?.querySelector<HTMLElement>(".cin__text");
     if (!host) return;
@@ -488,7 +514,39 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       resetFrom(boundary + 1);
       if (boundary < 0) { host.innerHTML = ""; clearLineBoxes(); }
     }
+    // Counter state is a fold over the reached actions (design spec §7b §5): counter_show
+    // seeds {from,to}; counter_to/counter_add advance it, tracking `from` as the PREVIOUS
+    // target so an in-flight counter_to/counter_add still eases from where the counter was,
+    // not from 0; counter_hide clears it once settled. Painted once after the loop, at the
+    // in-flight entry's own progress — never a GSAP tween. Because this is recomputed from
+    // scratch on every call (not carried as tween state), backward seek falls out for free.
+    let counter: { a: Extract<Action, { kind: "counter_show" }>; from: number; to: number } | null = null;
+    let counterValueP = 1;     // progress for interpolating counter.value (last show/to/add entry)
+    let counterEntranceP = 1;  // progress for the counter_show action's own entrance
+    let counterHideP: number | null = null; // in-flight counter_hide's own progress, else null
     for (const f of foldAt(slots.beat.timeline, t)) {
+      if (f.action.kind === "counter_show") {
+        counter = { a: f.action, from: f.action.value ?? 0, to: f.action.value ?? 0 };
+        counterValueP = 1;
+        counterEntranceP = f.p;
+        counterHideP = null;
+        continue;
+      }
+      if (f.action.kind === "counter_to") {
+        if (counter) counter = { ...counter, from: counter.to, to: f.action.value };
+        counterValueP = f.p;
+        continue;
+      }
+      if (f.action.kind === "counter_add") {
+        if (counter) counter = { ...counter, from: counter.to, to: counter.to + f.action.delta };
+        counterValueP = f.p;
+        continue;
+      }
+      if (f.action.kind === "counter_hide") {
+        counterHideP = f.p;
+        if (f.phase === "settled") counter = null; // fully hidden: paintCounter tears it down
+        continue;
+      }
       if (f.action.kind === "clear") {
         // Settled the instant it's reached (0 duration): drop everything built before it.
         resetFrom(0);
@@ -512,7 +570,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         gsap.set([host, ...lineBoxes.current], { opacity: 1 - f.p });
         continue;
       }
-      if (f.action.kind !== "text") continue; // other kinds: Tasks 5-8
+      if (f.action.kind !== "text") continue; // other kinds: Tasks 6-8
       let entry = built.current.get(f.index);
       if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
       if (!entry.tl) continue; // rendered at rest
@@ -523,6 +581,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       if (f.phase === "settled") entry.tl.progress(1);
       else entry.tl.time(t - f.start);
     }
+    paintCounter(counter, counterValueP, counterEntranceP, counterHideP);
     lastT.current = t;
   }
 
@@ -613,11 +672,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       case "counter_to":
       case "counter_add": {
         const ms = a.durationMs ?? 800;
-        master.add(() => tweenCounter(a, ms));
+        master.add(() => tweenCounter(a));
         master.to({}, { duration: ms / 1000 });
         break;
       }
-      case "counter_hide": master.add(() => hideCounter(a.durationMs ?? 400)); break;
+      case "counter_hide": master.add(() => hideCounter(1)); break;
       case "media": master.add(() => showMedia(a)); master.to({}, { duration: (a.durationMs ?? 600) / 1000 }); break;
       case "media_move": master.add(() => moveMedia(a)); master.to({}, { duration: (a.durationMs ?? 800) / 1000 }); break;
       case "media_out": master.add(() => outMedia(a)); master.to({}, { duration: (a.durationMs ?? 500) / 1000 }); break;

@@ -14,3 +14,13 @@ export function counterTarget(
 ): number {
   return action.kind === "counter_to" ? action.value : current + action.delta;
 }
+
+/** GSAP "power2.out" (cubic out) — the ease tweenCounter uses. */
+const powerOut2 = (p: number): number => 1 - Math.pow(1 - p, 3);
+
+/** A counter's displayed value at local progress `p` (0–1). Pure: this is what makes
+ *  a counter scrubbable rather than wall-clock-animated (design spec §7b §5). */
+export function counterValueAt(from: number, to: number, p: number): number {
+  const c = p < 0 ? 0 : p > 1 ? 1 : p;
+  return from + (to - from) * powerOut2(c);
+}
