@@ -92,6 +92,12 @@ mm-jenkins CI, an MM auth requirement to run) is out of scope by construction.
   investor-hub cinematic deck (GSAP + tsParticles). Package extraction into a
   shared `@musical-mycology/morgana` engine package is a Tier-3 roadmap item,
   gated on a `DeckDoc` format-version freeze (see the end-state design §14a).
+  **The lineage is one-way, and `engine/` has now materially diverged** (§7a,
+  2026-07-27): `CinematicRuntime` lost five members, `NoteField` was rewritten
+  reducer-driven, and `makeNote`/`emitNote`/`launchNote` were deleted. Nothing
+  downstream broke — the vendoring direction is *from* mm-website, not to it —
+  but a future re-vendor in either direction will conflict in those files and
+  should be treated as a merge, not a copy.
 - **Export round-trip.** `deckDocToModule` (`lib/bridge/export-ts.ts`) emits a
   deck's scenes as a TS module the site can import; the round-trip closes when
   mm-website's hand-authored `investor-hub/lib/deck/` modules are authored in
@@ -126,6 +132,18 @@ there is no version negotiation on the tool surface — so the tool's own
 `description` and the README were updated in the same change. Treat any future
 change to a shipped tool's semantics the same way: the description is the only
 contract a remote model reads.
+
+**Contract widening via the registry (2026-07-27, §7a):** `lib/mcp/tool-defs.ts`
+derives `ACTION_KINDS` from `Object.keys(REGISTRY)` and publishes it as the
+`enum` for `add_action.kind` and `convert_action.new_kind`. So **adding a
+descriptor to `lib/editor/registry.ts` silently widens the MCP tool surface** —
+completing the note descriptors added `note_circle`, `stop_notes`, and
+`stop_circle` as callable kinds for connected Claude clients, and changing
+`note_emitter`'s `decay` default (`1` → `1000`; it was one *millisecond*,
+clamped by the engine to a 0.1s floor) changed what `add_action` inserts.
+Neither needed a tool-description edit, but both reached remote clients the
+moment they shipped. Remember this coupling when touching the registry: it is
+an editor-metadata file with a published-API side effect.
 
 ## CI / ops
 
