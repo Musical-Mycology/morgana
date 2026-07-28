@@ -111,11 +111,16 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // art/nightlight once per frame for any beat with art/nightlight after a `clear`.
   const appliedArt = useRef<string | null>(null);
   const appliedNight = useRef<number | null>(null);
-  // Index of the destructive action (clear / settled fade_out) whose full wipe (resetFrom(0) +
-  // host.innerHTML="") has already been applied. foldAt re-emits every reached action on every
-  // call, so without this guard the SAME `clear` gets re-processed — and the entire `built` text
-  // cache torn down and rebuilt from scratch — on every forward frame for the rest of the beat
-  // (review round 1, finding 3). Reset alongside appliedArt/appliedNight on a backward seek.
+  // The `wipeBoundary` (see renderAt) computed as of the END of the PREVIOUS renderAt call —
+  // i.e. the index of the last destructive action (clear / settled fade_out) whose full wipe
+  // (resetFrom(0) + host.innerHTML="") is already reflected in the DOM. renderAt recomputes
+  // wipeBoundary FRESH from `t` on every call (forward or backward) and compares it against this
+  // ref to decide whether a NEW wipe is needed, then unconditionally resyncs it to the fresh
+  // value. That resync (not a one-way "mark done and never look back" flag) is what makes a
+  // backward-seek-then-forward-again round trip re-trigger the wipe correctly — review round 2's
+  // critical finding was exactly a version of this ref that only ever moved forward, which a
+  // backward seek into an in-flight `fade_out` (still not settled, so no wipe should have counted
+  // as done yet) left stuck past where it should have re-armed.
   const lastDestructive = useRef(-1);
   const lastT = useRef(0);
   const [againRevealed, setAgainRevealed] = useState(false);
@@ -595,14 +600,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       resetFrom(boundary + 1);
       if (boundary < 0) { host.innerHTML = ""; clearLineBoxes(); }
       // An actual backward seek — and ONLY a backward seek, never a re-folded `clear` on a
-      // forward frame — invalidates already-issued art/nightlight (ambiguity res. #3) and the
-      // record of which destructive action's wipe has already run. `boundary` is the index of
-      // the destructive action (if any) now at-or-before the new t: its wipe already happened
-      // as part of the resetFrom/host.innerHTML above, so mark it done (-1 when there is none)
-      // rather than letting the fold loop redundantly re-wipe when it re-reaches that same index.
+      // forward frame — invalidates already-issued art/nightlight (ambiguity res. #3).
       appliedArt.current = null;
       appliedNight.current = null;
-      lastDestructive.current = boundary;
     }
     // Counter state is a fold over the reached actions (design spec §7b §5): counter_show
     // seeds {from,to}; counter_to/counter_add advance it, tracking `from` as the PREVIOUS
@@ -618,7 +618,51 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // reducer once the loop completes, then painted — same "fold, then paint" shape as the
     // counter above (design spec §7b §6).
     const mediaFold: MediaFold[] = [];
-    for (const f of foldAt(slots.beat.timeline, t)) {
+
+    const foldEntries = foldAt(slots.beat.timeline, t);
+
+    // The index of the LAST destructive action (`clear`, or a `fade_out` that has fully
+    // SETTLED) among the actions reached by t — recomputed FRESH from `t` on every call,
+    // forward or backward, the same way counter/media state is above (never carried forward as
+    // incremental "already applied" tween state). Any text action before this index must never
+    // render: `clear` and a settled `fade_out` permanently wipe everything built before them
+    // (design spec §7b §4.3). `clear` is always settled instantly (0 duration); an in-flight
+    // `fade_out` has NOT wiped anything yet — it takes the scrubbable opacity-ramp branch below,
+    // not this one — so it must not suppress text still fading through it.
+    //
+    // Review round 2 critical: computing this FRESH every call (rather than remembering a
+    // "highest destructive index already torn down" flag that only ever moves forward) is what
+    // fixes the round-trip bug. The previous version marked a destructive index "done" the first
+    // time it was reached, including while still in-flight; a backward seek into that in-flight
+    // window, followed by a forward re-seek past its settlement, then saw "already done" and
+    // skipped the real teardown, stranding the pre-fade text permanently. It also (independently)
+    // surfaces on a purely FORWARD multi-frame scrub with no backward seek at all: once `clear`'s
+    // one-time wipe ran, the fold loop still re-reaches the pre-clear text action on every later
+    // frame (foldAt re-emits every reached action every call) — with no skip-guard, that text
+    // gets rebuilt from scratch each frame (wastefully) and, because the wipe was already marked
+    // "done", is never removed again, leaking back into the DOM alongside the post-clear text.
+    let wipeBoundary = -1;
+    for (const f of foldEntries) {
+      if (f.action.kind === "clear") wipeBoundary = f.index;
+      else if (f.action.kind === "fade_out" && f.phase === "settled") wipeBoundary = f.index;
+    }
+    // Physically wipe the built text cache/DOM exactly when wipeBoundary has grown past what was
+    // already torn down — never on every re-fold of the same settled boundary (review round 1,
+    // finding 3: that defeated the `built` cache, and independently kept re-nulling the
+    // art/nightlight refs, for any beat with a `clear`/`fade_out`). A backward seek that LOWERS
+    // wipeBoundary does not re-wipe here (moving backward destroys nothing new — the preamble
+    // above already tore down what a backward seek invalidates); it only resyncs the tracked
+    // value below, so a LATER forward re-crossing of the same boundary correctly re-triggers this
+    // wipe rather than seeing a stale "already applied" value from before the round trip.
+    if (wipeBoundary > lastDestructive.current) {
+      resetFrom(0);
+      host.innerHTML = "";
+      clearLineBoxes();
+      gsap.set(host, { clearProps: "opacity" }); // harmless no-op when the boundary was a `clear`, which never touches opacity
+    }
+    lastDestructive.current = wipeBoundary;
+
+    for (const f of foldEntries) {
       if (f.action.kind === "counter_show") {
         counter = { a: f.action, from: f.action.value ?? 0, to: f.action.value ?? 0 };
         counterValueP = 1;
@@ -641,35 +685,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         if (f.phase === "settled") counter = null; // fully hidden: paintCounter tears it down
         continue;
       }
-      if (f.action.kind === "clear") {
-        // Settled the instant it's reached (0 duration): drop everything built before it.
-        // foldAt re-emits this SAME entry on every forward frame for the rest of the beat (it
-        // recomputes from index 0 every call), so guard the wipe by index — otherwise every
-        // frame tears down and rebuilds the entire `built` text cache from scratch (review
-        // round 1, finding 3), and (before that fix) also nulled the art/nightlight refs every
-        // frame (finding 1). Once index `f.index`'s wipe has run, re-reaching it is a no-op.
-        if (f.index > lastDestructive.current) {
-          resetFrom(0);
-          host.innerHTML = "";
-          clearLineBoxes();
-          lastDestructive.current = f.index;
-        }
-        continue;
-      }
+      if (f.action.kind === "clear") continue; // its (idempotent) teardown already ran above, via wipeBoundary
       if (f.action.kind === "fade_out") {
-        if (f.phase === "settled") {
-          // Terminal: the fade has fully played out — same teardown as `clear`. Only takes
-          // effect once settled; see the in-flight branch below for the scrubbable ramp. Same
-          // re-fold idempotency guard as `clear` above (finding 1 / finding 3).
-          if (f.index > lastDestructive.current) {
-            resetFrom(0);
-            host.innerHTML = "";
-            clearLineBoxes();
-            gsap.set(host, { clearProps: "opacity" });
-            lastDestructive.current = f.index;
-          }
-          continue;
-        }
+        // Settled: its teardown already ran above, via wipeBoundary — nothing left to do here.
+        if (f.phase === "settled") continue;
         // In-flight: scrub the opacity ramp from local progress (pure, from beatTimeline —
         // never from a built tween's .duration()). Nothing is deleted yet, so a seek that
         // lands mid-fade can still scrub back out of it without a rebuild.
@@ -705,6 +724,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         continue;
       }
       if (f.action.kind !== "text") continue; // other kinds (rotateList): Task 8
+      // Permanently wiped by a LATER destructive action (clear / settled fade_out) — never
+      // rebuild it. Without this guard, a text action before wipeBoundary that isn't (yet, or
+      // any longer) in the `built` cache would be rebuilt here every time it's reached, only to
+      // rely on the (now idempotent, no-op-after-the-first-time) `clear`/`fade_out` branch above
+      // to remove it again — which no longer happens on repeat visits, stranding it in the DOM.
+      if (f.index < wipeBoundary) continue;
       let entry = built.current.get(f.index);
       if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
       if (!entry.tl) continue; // rendered at rest

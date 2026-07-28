@@ -138,6 +138,13 @@ test("backward seek into an in-flight fade_out does not leak positioned line box
                                  // rebuildBoundary finds the fade_out itself (not -1), and the
                                  // fold replays it as in-flight, which never calls clearLineBoxes.
   expect(boxCount()).toBe(2);   // shared box + rebuilt "before" box — no leaked "after" box
+
+  // Review round 2, test requirement 3: the Task 4 version of this test stopped here — it never
+  // scrubbed forward again after the backward seek, so it could not see the round-2 critical bug
+  // (stale pre-fade boxes surviving a backward-then-forward round trip across an in-flight
+  // fade_out). Extend it, without weakening the assertions above, to close that gap.
+  renderAt(2.6);                // FORWARD again, past the fade_out's settlement, into "after"'s window
+  expect(boxCount()).toBe(2);   // shared box + rebuilt "after" box — "before"'s box must be gone
 });
 
 // --- art / nightlight diffing (Task 7) ------------------------------------------------------
@@ -269,4 +276,64 @@ test("art diffing key is independent of the transition object's own key insertio
   host.__renderAt!(0.1);  // reaches naturalOrder
   host.__renderAt!(0.6);  // reaches reversedOrder — same VALUE as naturalOrder, must be a no-op
   expect(calls).toEqual(["art"]); // fired once, not once per differently-key-ordered-but-equal action
+});
+
+// --- review round 2: destructive-boundary round trip ----------------------------------------
+//
+// The round-1 fix (lastDestructive, a one-way "already torn down" flag) over-corrected: it
+// marked a destructive action's teardown "done" the moment it was FIRST reached, even if it was
+// still in-flight (not yet settled) at that t. A backward seek landing INSIDE an in-flight
+// fade_out's own window then set that stale "done" marker regardless — so a later forward
+// re-seek past the fade_out's actual settlement saw "already done" and skipped the real
+// teardown, permanently stranding the pre-fade text. review round 2, test requirement 1.
+const roundTripFade: Action[] = [
+  { kind: "text", value: "before", in: "fade" }, // [0, 0.8)
+  { kind: "fade_out" },                           // [0.8, 1.3)
+  { kind: "text", value: "after", in: "fade" },  // [1.3, 2.1)
+];
+
+test("ROUND TRIP: backward seek into an in-flight fade_out, then forward past settlement, leaves only the post-fade text", () => {
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "rtf", timeline: roundTripFade } }} animate runtime={noopRuntime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  const renderAt = (t: number) => host.__renderAt!(t);
+  const textAtNow = () => [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
+
+  renderAt(2.5);                // forward, past the fade_out, settled into "after"
+  expect(textAtNow()).toEqual(["after"]);
+
+  renderAt(1.0);                // BACK, landing INSIDE the fade_out's in-flight window [0.8, 1.3)
+  expect(textAtNow()).toEqual(["before"]);
+
+  renderAt(2.6);                // FORWARD again, past the fade_out's actual settlement
+  expect(textAtNow()).toEqual(["after"]); // NOT ["before", "after"] — "before" must not survive
+});
+
+// Symmetric check for `clear`: since a `clear` is always instantaneous (0 duration), it is
+// always "settled" the moment it's reached — there is no in-flight window to land inside, so
+// this class of bug cannot manifest for `clear` the same way. Verify rather than assume (review
+// round 2, test requirement 2).
+const roundTripClear: Action[] = [
+  { kind: "text", value: "before", in: "fade" }, // [0, 0.8)
+  { kind: "clear" },                              // at 0.8
+  { kind: "text", value: "after", in: "fade" },  // [0.8, 1.6)
+];
+
+test("ROUND TRIP: backward seek across a `clear`, then forward again, leaves only the post-clear text", () => {
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "rtc", timeline: roundTripClear } }} animate runtime={noopRuntime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  const renderAt = (t: number) => host.__renderAt!(t);
+  const textAtNow = () => [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
+
+  renderAt(1.4);                // forward, past the clear, into "after"
+  expect(textAtNow()).toEqual(["after"]);
+
+  renderAt(0.5);                // BACK, to before the clear (clear can only be reached or not — no in-flight state)
+  expect(textAtNow()).toEqual(["before"]);
+
+  renderAt(1.5);                // FORWARD again, past the clear once more
+  expect(textAtNow()).toEqual(["after"]); // NOT ["before", "after"]
 });
