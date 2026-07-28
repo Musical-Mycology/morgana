@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { descriptorFor } from "@/lib/editor/registry";
-import { isSeekable } from "@/engine/authoring/seek";
+import { isSeekable } from "@/engine/authoring/beat-clock";
 import type { Action } from "@/engine/deck/types";
 
 test("all four note kinds have real descriptors, not the GENERIC fallback", () => {

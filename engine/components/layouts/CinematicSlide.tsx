@@ -15,35 +15,7 @@ import {
   flyUp, fadeIn, fadeSide, dotFade, rotateList, lineAndDots,
   letterFly, letterUp, wordUp, blurIn, typewriter,
 } from "../effects/cinematic-anim";
-
-// First-pass intro durations (mirror the builders in cinematic-anim.ts); used to
-// reserve master-timeline time so onWaiting fires after a line settles, not before.
-// Letter/word effects run longer (per-piece stagger). Pacing is tuned live.
-const INTRO_DUR: Record<TextIn, number> = {
-  flyUp: 0.6, fade: 0.8, fadeSide: 0.7, cursive: 1.0,
-  letterFly: 1.6, letterUp: 1.6, wordUp: 1.3, blurIn: 1.6, typewriter: 1.5,
-};
-const DOTFADE_TAIL = 2.02; // dotFade total ≈ tick-on 0.62 + hold 0.8 + fade 0.6
-// Time to reserve before the next timeline step, ≈ this line's actual reveal duration.
-// For per-letter/word effects it's derived from the real char/word count × stagger, so a
-// slower `speed` only lengthens the letters (no inflated dead time); line effects use a
-// fixed base. Mirrors the stagger constants in cinematic-anim.ts.
-function introDuration(a: { in: TextIn; value: string; dots?: true; speed?: number }): number {
-  const sp = a.speed ?? (a.in === "cursive" ? 0.2 : 1); // cursive defaults to a slow type-on
-  const chars = a.value.length;
-  const words = a.value.trim().split(/\s+/).length;
-  let base: number;
-  switch (a.in) {
-    case "cursive": // cursive reveals via typewriter
-    case "typewriter": base = 0.1 + chars * 0.045; break;
-    case "letterFly":
-    case "letterUp":
-    case "blurIn":     base = 0.5 + chars * 0.03; break;
-    case "wordUp":     base = 0.6 + words * 0.08; break;
-    default:           base = INTRO_DUR[a.in]; // line-level fixed
-  }
-  return (base + (a.dots ? DOTFADE_TAIL : 0)) / sp;
-}
+import { introDuration } from "@/engine/authoring/beat-clock";
 
 /**
  * Position a text box at `pos` per its align. Right boxes anchor their RIGHT edge (via the

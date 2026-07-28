@@ -2,7 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { sampleBeat } from "@/engine/authoring/sample-beat";
-import { beatDuration, renderBeatAt } from "@/engine/authoring/seek";
+import { renderBeatAt } from "@/engine/authoring/seek";
+import { beatDuration } from "@/engine/authoring/beat-clock";
 
 export default function Spike() {
   const art = useRef<ArtStageHandle>(null);

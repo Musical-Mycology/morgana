@@ -1,6 +1,6 @@
 import type { Scene, SceneObject, ObjectTransform, Action } from "@/engine/deck/types";
 import { revealedObjectIds } from "@/lib/editor/object-gating";
-import { beatTimeline } from "@/engine/authoring/seek";
+import { beatTimeline } from "@/engine/authoring/beat-clock";
 
 /** Resolved playback state of one object at an absolute time. Stage-fraction 0–1;
  *  rot in degrees; opacity 0–1; scale is a transient entrance multiplier (default 1). */

@@ -2,7 +2,7 @@
 import type { RefObject } from "react";
 import { useEditor } from "@/lib/editor/store";
 import type { CanvasHandle } from "./DeckCanvas";
-import { actionDuration } from "@/engine/authoring/seek";
+import { actionDuration } from "@/engine/authoring/beat-clock";
 import { REGISTRY } from "@/lib/editor/registry";
 
 const ADD_KIND_OPTIONS = Object.values(REGISTRY).map((d) => ({ value: d.kind, label: d.label }));

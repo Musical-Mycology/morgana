@@ -5,7 +5,7 @@
 
 import type { Action, Scene } from "@/engine/deck/types";
 import { NOTE_GLYPHS, type NoteGlyph } from "@/engine/deck/story-assets";
-import { beatTimeline, beatDuration } from "@/engine/authoring/seek";
+import { beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
 
 /** Reference stage width the engine's px constants were authored against. */
 export const REF_W = 1920;

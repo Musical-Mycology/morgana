@@ -8,7 +8,7 @@ import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { NoteField, type NoteFieldHandle } from "@/engine/components/NoteField";
 import { CinematicSlide } from "@/engine/components/layouts/CinematicSlide";
 import { ObjectStage, type ObjectStageHandle } from "@/components/editor/ObjectStage";
-import { beatTimeline } from "@/engine/authoring/seek";
+import { beatTimeline } from "@/engine/authoring/beat-clock";
 import { makeAuthoringRuntime } from "./runtime";
 
 export function BeatStage({
