@@ -698,6 +698,14 @@ test("media_move interpolates position at local progress", () => {
   expect(s.x).toBeLessThan(0.8);
 });
 
+// moveMedia uses ease "power3.inOut", which is SYMMETRIC — exactly half-way at p=0.5.
+// An ease-out curve would put the midpoint well past halfway, so this pins the shape,
+// not just the endpoints, and would catch the power2/power3 off-by-one in GSAP's naming.
+test("media_move's ease is symmetric in-out, matching playback", () => {
+  const s = mediaStateAt([{ action: show, p: 1 }, { action: move, p: 0.5 }], 0).get("m")!;
+  expect(s.x).toBeCloseTo(0.5, 4);
+});
+
 test("media_out drives opacity to zero", () => {
   const out: Extract<Action, { kind: "media_out" }> = { kind: "media_out", id: "m" };
   expect(mediaStateAt([{ action: show, p: 1 }, { action: out, p: 1 }], 0).get("m")!.opacity).toBeCloseTo(0);
@@ -719,7 +727,22 @@ import type { Action } from "@/engine/deck/types";
 export interface MediaRenderState { x: number; y: number; scale: number; opacity: number }
 export interface MediaFold { action: Action; p: number }
 
-const powerOut3 = (p: number): number => 1 - Math.pow(1 - p, 3);   // GSAP power3.inOut approx at out end
+// GSAP's power names are one ahead of their exponent: power1 = quad (^2),
+// power2 = cubic (^3), power3 = quart (^4). engine/components/effects/note-state.ts's
+// powerOut1 being quadratic is the in-repo confirmation. Getting this wrong makes a
+// scrubbed frame disagree with playback — exactly the drift §7b exists to remove.
+const powerOut2 = (p: number): number => 1 - Math.pow(1 - p, 3);        // showMedia fade/fadeSide
+const powerOut3 = (p: number): number => 1 - Math.pow(1 - p, 4);        // showMedia flyUp
+const backOut2 = (p: number): number => { const q = p - 1; return q * q * (3 * q + 2) + 1; }; // showMedia pop
+/** GSAP "power3.inOut" (quart in-out) — the ease moveMedia actually uses. */
+const powerInOut3 = (p: number): number =>
+  p < 0.5 ? 8 * Math.pow(p, 4) : 1 - Math.pow(-2 * p + 2, 4) / 2;
+
+/** Entrance ease per `media.in` mode, mirroring showMedia's per-mode gsap.from calls. */
+const ENTRANCE: Record<string, (p: number) => number> = {
+  flyUp: powerOut3, pop: backOut2, fadeSide: powerOut2, fade: powerOut2,
+};
+
 const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
 
 /** Fold reached media actions to each tile's render state. Pure. */
@@ -727,11 +750,12 @@ export function mediaStateAt(entries: MediaFold[], _t: number): Map<string, Medi
   const out = new Map<string, MediaRenderState>();
   for (const { action: a, p } of entries) {
     if (a.kind === "media") {
-      out.set(a.id, { x: a.pos.x, y: a.pos.y, scale: 1, opacity: p });
+      const ease = ENTRANCE[a.in ?? "fade"] ?? powerOut2;
+      out.set(a.id, { x: a.pos.x, y: a.pos.y, scale: 1, opacity: ease(p) });
     } else if (a.kind === "media_move") {
       const cur = out.get(a.id);
       if (!cur) continue;
-      const e = powerOut3(p);
+      const e = powerInOut3(p);
       out.set(a.id, {
         ...cur,
         x: lerp(cur.x, a.to.x, e),
