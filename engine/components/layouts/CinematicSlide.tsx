@@ -90,9 +90,14 @@ interface Props {
   /** Imperative handle onto this beat's transport — seek/play/pause/duration over the single
    *  time axis (design spec §7b §4.1). Optional: most callers just let it autoplay. */
   transport?: Ref<SlideTransport>;
+  /** Fired at the end of every renderAt call with the beat-local `t` just painted (design spec
+   *  §7b Task 10). This is the single clock: a host that also drives sibling stages (notes,
+   *  objects) reads THIS `t` — never a second ticker — so every stage stays paused/playing/
+   *  seeked in lockstep, including across click_gate pauses. */
+  onTime?: (t: number) => void;
 }
 
-export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport }: Props) {
+export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
   // The single gsap.ticker listener currently driving playback, or null when paused. play()
@@ -210,6 +215,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       if (counterStatic) showCounter({ ...counterStatic.a, value: counterStatic.value });
       mediaStatic.forEach((m) => { const el = makeMediaEl(m); stageParent()?.appendChild(el); mediaTiles.current.set(m.id, el); });
       runtime.onWaiting(true);
+      // Static mode never calls renderAt (nothing to scrub), so it must fire onTime itself, at
+      // the beat's settled end — otherwise a host driving sibling stages off onTime (Task 10)
+      // would leave notes/objects stuck at t=0 whenever animate=false or the tab is hidden.
+      onTime?.(duration());
       // Task 9 review finding 2: `play()` is now externally reachable via `transport` — before
       // this task, nothing outside this effect could ever start a ticker in static mode, so no
       // cleanup was needed here. That's no longer true (even though no production caller does
@@ -739,6 +748,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     paintMedia(mediaFold, mediaStateAt(mediaFold, t));
     setAgainRevealed(revealAgain);
     lastT.current = t;
+    // The one clock (design spec §7b Task 10, ambiguity res. #1): every renderAt call notifies
+    // the host with the exact `t` it just painted, so a host driving sibling stages (notes,
+    // objects) off THIS callback — instead of a second ticker of its own — stays in lockstep,
+    // including pausing exactly when playback pauses at a click_gate.
+    onTime?.(t);
   }
 
   // --- SlideTransport: one time axis + gate boundaries, replacing the old per-segment GSAP
