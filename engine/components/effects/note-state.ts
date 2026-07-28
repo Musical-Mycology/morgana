@@ -4,8 +4,7 @@
  *  2026-07-27-time-pure-particles-7a-design.md §3. */
 
 import type { Action, Scene } from "@/engine/deck/types";
-import type { NoteGlyph } from "@/engine/deck/story-assets";
-import { randomGlyph } from "./notes";
+import { NOTE_GLYPHS, type NoteGlyph } from "@/engine/deck/story-assets";
 import { beatTimeline, beatDuration } from "@/engine/authoring/seek";
 
 /** Reference stage width the engine's px constants were authored against. */
@@ -54,6 +53,12 @@ export function backOut2(p: number): number {
 export const powerOut1 = (p: number): number => 1 - (1 - p) * (1 - p);
 /** GSAP "power1.in" (quad in). */
 export const powerIn1 = (p: number): number => p * p;
+
+/** The glyph subset the note effects draw from — the melodic notes, not clefs or rests. */
+const GLYPHS = NOTE_GLYPHS.filter((g) => g.startsWith("Notes")) as NoteGlyph[];
+/** Glyph for the i-th sprite of a source. Despite the name it is deterministic —
+ *  a plain index cycle — which is what keeps a scrubbed frame reproducible. */
+export function randomGlyph(i: number): NoteGlyph { return GLYPHS[i % GLYPHS.length]; }
 
 /** One live note sprite at an absolute time. x/y are normalized 0–1 stage coordinates.
  *  `key` is a stable pool slot — the renderer reuses the DOM node with the same key. */
