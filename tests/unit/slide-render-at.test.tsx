@@ -70,3 +70,35 @@ test("renderAt actually advances the paused timeline (not a no-op)", () => {
   const late = textAt(host);
   expect(late).not.toEqual(early);
 });
+
+const clearing: Action[] = [
+  { kind: "text", value: "before", in: "fade" },   // [0, 0.8)
+  { kind: "clear" },                                // at 0.8
+  { kind: "text", value: "after", in: "fade" },    // [0.8, 1.6)
+];
+
+// Structural (text-content-only) check for the clear/rebuild test below: it asserts WHICH
+// lines exist after a seek, not their exact in-flight style — style legitimately differs
+// between the forward pass and the post-rebuild pass (a freshly built tween restarts its
+// own progress ramp), so pinning exact opacity here would over-constrain an otherwise
+// correct rebuild. (The shared textAt above intentionally stays style-sensitive — it backs
+// the seek-symmetry tests, whose whole point is comparing in-flight tween state.)
+const lineTextAt = (host: HTMLElement) =>
+  [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
+
+test("SEEK SYMMETRY across a clear: seeking back re-shows the cleared line", () => {
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "c", timeline: clearing } }} animate runtime={noopRuntime} />,
+  );
+  const host = container.querySelector<HTMLElement & { __renderAt?: (t: number) => void }>(".cin")!;
+  const renderAt = (t: number) => host.__renderAt!(t);
+
+  renderAt(0.4);
+  expect(lineTextAt(host)).toEqual(["before"]);
+
+  renderAt(1.2);                       // past the clear
+  expect(lineTextAt(host)).toEqual(["after"]);
+
+  renderAt(0.4);                       // BACK past the clear — must rebuild
+  expect(lineTextAt(host)).toEqual(["before"]);
+});

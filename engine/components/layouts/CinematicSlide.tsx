@@ -15,7 +15,7 @@ import {
   flyUp, fadeIn, fadeSide, dotFade, rotateList, lineAndDots,
   letterFly, letterUp, wordUp, blurIn, typewriter,
 } from "../effects/cinematic-anim";
-import { introDuration, foldAt } from "@/engine/authoring/beat-clock";
+import { introDuration, foldAt, rebuildBoundary } from "@/engine/authoring/beat-clock";
 
 /**
  * Position a text box at `pos` per its align. Right boxes anchor their RIGHT edge (via the
@@ -446,13 +446,57 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return { el, tl };
   }
 
-  /** Paint the beat's visual state at beat-local time `t` (text actions only — Tasks 5-8
-   *  bring the other kinds under this path). PAUSED timelines only; renderAt is the sole
-   *  thing that ever advances them (design spec §7b §4.2). */
+  /** Drop every cached entry from `index` onward, killing its (paused) tween and removing
+   *  its DOM. A rebuild then re-runs those actions from scratch on the next renderAt —
+   *  used both for the backward-seek boundary and for a settled clear/fade_out, which
+   *  wipe everything built before them (design spec §7b §4.3). */
+  function resetFrom(index: number) {
+    for (const [i, entry] of built.current) {
+      if (i < index) continue;
+      entry.tl?.kill();
+      entry.el.remove();
+      built.current.delete(i);
+    }
+  }
+
+  /** Paint the beat's visual state at beat-local time `t` (text + clear/fade_out actions —
+   *  Tasks 5-8 bring the other kinds under this path). PAUSED timelines only; renderAt is the
+   *  sole thing that ever advances them (design spec §7b §4.2). */
   function renderAt(t: number) {
     const host = scope.current?.querySelector<HTMLElement>(".cin__text");
     if (!host) return;
+    // Backward seek: rebuild from the last destructive boundary at or before t. Deletion
+    // (clear / settled fade_out) can't be undone by rewinding a tween, so everything built
+    // at/after that boundary must be torn down; the fold loop below re-runs it from scratch.
+    if (t < lastT.current) {
+      const boundary = rebuildBoundary(slots.beat.timeline, t);
+      resetFrom(boundary + 1);
+      if (boundary < 0) { host.innerHTML = ""; clearLineBoxes(); }
+    }
     for (const f of foldAt(slots.beat.timeline, t)) {
+      if (f.action.kind === "clear") {
+        // Settled the instant it's reached (0 duration): drop everything built before it.
+        resetFrom(0);
+        host.innerHTML = "";
+        clearLineBoxes();
+        continue;
+      }
+      if (f.action.kind === "fade_out") {
+        if (f.phase === "settled") {
+          // Terminal: the fade has fully played out — same teardown as `clear`. Only takes
+          // effect once settled; see the in-flight branch below for the scrubbable ramp.
+          resetFrom(0);
+          host.innerHTML = "";
+          clearLineBoxes();
+          gsap.set(host, { clearProps: "opacity" });
+          continue;
+        }
+        // In-flight: scrub the opacity ramp from local progress (pure, from beatTimeline —
+        // never from a built tween's .duration()). Nothing is deleted yet, so a seek that
+        // lands mid-fade can still scrub back out of it without a rebuild.
+        gsap.set([host, ...lineBoxes.current], { opacity: 1 - f.p });
+        continue;
+      }
       if (f.action.kind !== "text") continue; // other kinds: Tasks 5-8
       let entry = built.current.get(f.index);
       if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
