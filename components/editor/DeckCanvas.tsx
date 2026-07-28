@@ -62,7 +62,11 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
             CinematicSlide isn't mounted on this route, so this wrapper is otherwise static and paints BELOW
             NoteField's positioned z-index:2 regardless of DOM order. Pin it explicitly above notes (z-index:2)
             and below PosHandle (5) / ObjectStage (6), matching BeatStage's effective art -> notes -> text -> objects order. */}
-        <div className="cin" style={{ position: "absolute", inset: 0, zIndex: 3 }}><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
+        {/* Display-only caption layer: renderBeatAt only ever paints text nodes here, nothing
+            interactive. Every sibling layer in this stack states its pointer-events intent
+            explicitly (NoteField, ObjectStage, ObjectsLayer, PosHandle) — match that convention
+            so this box doesn't silently swallow clicks meant for a future lower layer. */}
+        <div className="cin" style={{ position: "absolute", inset: 0, zIndex: 3, pointerEvents: "none" }}><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
         <ObjectStage ref={objStage} scene={scene ?? { id: "", beats: [] }} active={preview} />
         <PosHandle hostRef={host} redraw={draw} />
         {!preview && <ObjectsLayer hostRef={host} />}
