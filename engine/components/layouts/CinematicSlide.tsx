@@ -13,7 +13,7 @@ import { parseInlineLinks, hasInlineMarkup } from "@/engine/deck/inline-links";
 import { formatCounterValue, counterTarget, counterValueAt } from "@/engine/deck/counter";
 import { mediaStateAt, type MediaFold, type MediaRenderState } from "@/engine/deck/media-state";
 import {
-  flyUp, fadeIn, fadeSide, dotFade, rotateList, lineAndDots,
+  flyUp, fadeIn, fadeSide, dotFade, rotateItemAt, lineAndDots,
   letterFly, letterUp, wordUp, blurIn, typewriter,
 } from "../effects/cinematic-anim";
 import { introDuration, foldAt, rebuildBoundary } from "@/engine/authoring/beat-clock";
@@ -81,7 +81,6 @@ interface Props {
 export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
-  const loopers = useRef<gsap.core.Timeline[]>([]);
   const masterRef = useRef<gsap.core.Timeline | null>(null);
   const lineBoxes = useRef<HTMLElement[]>([]); // free-positioned per-line text boxes (text action `pos`)
   const currentLine = useRef<HTMLElement | null>(null); // last line, for inline `append` fragments
@@ -130,13 +129,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     if (!host) return;
     const textHost = host.querySelector<HTMLElement>(".cin__text")!;
     // useGSAP defers context cleanup to unmount (not dependency change), so kill the
-    // previous beat's master timeline + loopers explicitly to avoid zombie timelines
-    // playing stale text/art into the new beat.
+    // previous beat's master timeline explicitly to avoid zombie timelines playing stale
+    // text/art into the new beat.
     masterRef.current?.kill();
     fadeRef.current?.kill();
     fadeRef.current = null;
-    loopers.current.forEach((t) => t.kill());
-    loopers.current = [];
     built.current.forEach((entry) => entry.tl?.kill());
     built.current.clear();
     // A new beat starts with nothing yet issued to the runtime and nothing yet destructively
@@ -223,12 +220,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // Test-only handle; Task 9 replaces this with the SlideTransport ref.
     (host.closest(".cin") as HTMLElement & { __renderAt?: (t: number) => void }).__renderAt = renderAt;
 
-    // master + rotateList loops are created here / in deferred callbacks; kill them
-    // on unmount (deps re-run also kills them at the top of the effect above).
+    // master timeline + built effect timelines are created here / in deferred callbacks;
+    // kill them on unmount (deps re-run also kills them at the top of the effect above).
     return () => {
       masterRef.current?.kill();
-      loopers.current.forEach((t) => t.kill());
-      loopers.current = [];
       built.current.forEach((entry) => entry.tl?.kill());
       built.current.clear();
       clearLineBoxes();
@@ -586,8 +581,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     }
   }
 
-  /** Paint the beat's visual state at beat-local time `t` (text, clear/fade_out, and counter
-   *  actions — Tasks 6-8 bring media/art/nightlight/rotateList under this path). PAUSED
+  /** Paint the beat's visual state at beat-local time `t` — text, clear/fade_out, counter,
+   *  media, art, nightlight, and rotateList actions all render from here now (Tasks 5-8). PAUSED
    *  timelines only; renderAt is the sole thing that ever advances them (design spec §7b §4.2). */
   function renderAt(t: number) {
     const host = scope.current?.querySelector<HTMLElement>(".cin__text");
@@ -723,13 +718,31 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         }
         continue;
       }
-      if (f.action.kind !== "text") continue; // other kinds (rotateList): Task 8
       // Permanently wiped by a LATER destructive action (clear / settled fade_out) — never
-      // rebuild it. Without this guard, a text action before wipeBoundary that isn't (yet, or
+      // rebuild it. Without this guard, an action before wipeBoundary that isn't (yet, or
       // any longer) in the `built` cache would be rebuilt here every time it's reached, only to
       // rely on the (now idempotent, no-op-after-the-first-time) `clear`/`fade_out` branch above
       // to remove it again — which no longer happens on repeat visits, stranding it in the DOM.
+      // Shared by both `built`-cached kinds below (text and rotateList).
       if (f.index < wipeBoundary) continue;
+      if (f.action.kind === "rotateList") {
+        // No GSAP loop, no `tl` — an infinite `repeat: -1` loop can't be seeked as a tween, so
+        // the visible item is derived from elapsed time instead (design spec §7b §5, ambiguity
+        // res. #1/#2). `actionDuration` returns 0 for rotateList (it occupies no time on the
+        // axis), so `f.p` is always 1 the instant it's reached — phase must be measured from
+        // this action's own `start`, i.e. `t - f.start`, not `t` or `f.p`.
+        let entry = built.current.get(f.index);
+        if (!entry) {
+          const slot = document.createElement("span");
+          slot.className = `cin__rotslot cin__line--${f.action.size ?? "md"}`;
+          host.appendChild(slot);
+          entry = { el: slot, tl: null };
+          built.current.set(f.index, entry);
+        }
+        entry.el.textContent = rotateItemAt(f.action.items, t - f.start);
+        continue;
+      }
+      if (f.action.kind !== "text") continue;
       let entry = built.current.get(f.index);
       if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
       if (!entry.tl) continue; // rendered at rest
@@ -778,21 +791,24 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         master.to({}, { duration: introDuration({ ...a, in: effIn }) });
         break;
       }
+      // Old wall-clock scheduleAction path only: an instant snap to the first item, no loop.
+      // **Behaviour change**: this used to spin up an infinite `repeat: -1` GSAP loop cycling
+      // through items on wall-clock time; it no longer does (design spec §7b §5). An infinite
+      // loop can't be seeked as a tween, so renderAt's fold loop derives which item is showing
+      // from elapsed time via rotateItemAt instead — there is no longer a loop anywhere to kill
+      // (ambiguity res. #3), same shape as Task 5/6's counter/media conversion.
       case "rotateList": {
         master.add(() => {
           const slot = document.createElement("span");
           slot.className = `cin__rotslot cin__line--${a.size ?? "md"}`; // size from cinematic-style (default md)
           host.appendChild(slot);
-          const loop = rotateList(slot, a.items);
-          loopers.current.push(loop);
+          slot.textContent = rotateItemAt(a.items, 0);
         });
         break;
       }
       // Clears the text/free-lines only — the intro logo+tagline persist (they leave when
       // the beat unmounts on advance), so clearing a CTA line doesn't drop the splash.
-      case "clear": master.add(() => {
-        loopers.current.forEach((t) => t.kill()); loopers.current = []; host.innerHTML = ""; clearLineBoxes();
-      }); break;
+      case "clear": master.add(() => { host.innerHTML = ""; clearLineBoxes(); }); break;
       case "art": master.add(() => runtime.applyArt(a.art, a.art.durationMs)); break;
       case "nightlight": master.add(() => runtime.setNightlight(a.to, a.durationMs)); break;
       // cue / note_emitter / note_circle / stop_circle / stop_notes are NOT scheduled here.
@@ -819,8 +835,6 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         master.add(() => {
           fadeRef.current?.kill();
           fadeRef.current = null;
-          loopers.current.forEach((t) => t.kill());
-          loopers.current = [];
           host.innerHTML = "";
           clearLineBoxes();
           gsap.set(host, { clearProps: "opacity" }); // restore the box so the next line is visible
