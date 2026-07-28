@@ -73,3 +73,47 @@ export function beatTimeline(timeline: Action[]): Window[] {
 export function beatDuration(timeline: Action[]): number {
   return beatTimeline(timeline).reduce((m, w) => Math.max(m, w.end), 0);
 }
+
+export type FoldPhase = "settled" | "in-flight";
+
+/** One reached action's state at time t. `p` is local progress 0–1. */
+export interface FoldEntry {
+  index: number;
+  action: Action;
+  start: number;
+  phase: FoldPhase;
+  p: number;
+}
+
+/** Every action reached by time `t`, with its local progress. At most one entry is
+ *  "in-flight", because beatTimeline lays actions out sequentially. */
+export function foldAt(timeline: Action[], t: number): FoldEntry[] {
+  const out: FoldEntry[] = [];
+  const windows = beatTimeline(timeline);
+  for (let index = 0; index < windows.length; index++) {
+    const { action, start, end } = windows[index];
+    if (start > t) break;                       // not reached yet (strictly after t)
+    const dur = end - start;
+    const p = dur <= 0 ? 1 : Math.min(1, (t - start) / dur);
+    out.push({ index, action, start, phase: p >= 1 ? "settled" : "in-flight", p });
+  }
+  return out;
+}
+
+/** Actions that DELETE nodes. Seeking backwards past one cannot be undone by
+ *  rewinding a tween, so it forces a rebuild (design spec §7b §4.3). */
+const DESTRUCTIVE = new Set<Action["kind"]>(["clear", "fade_out"]);
+
+/** Index of the last destructive action at or before `t`; -1 if there is none.
+ *  A rebuild may start here rather than at 0 — a clear wipes all prior text state
+ *  by definition, so nothing before it is observable. */
+export function rebuildBoundary(timeline: Action[], t: number): number {
+  let idx = -1;
+  const windows = beatTimeline(timeline);
+  for (let index = 0; index < windows.length; index++) {
+    const { action, start } = windows[index];
+    if (start > t) break;
+    if (DESTRUCTIVE.has(action.kind)) idx = index;
+  }
+  return idx;
+}

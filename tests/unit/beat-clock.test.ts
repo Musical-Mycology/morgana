@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { actionDuration, isSeekable, beatTimeline } from "@/engine/authoring/beat-clock";
+import { actionDuration, isSeekable, beatTimeline, foldAt, rebuildBoundary } from "@/engine/authoring/beat-clock";
 import type { Action } from "@/engine/deck/types";
 
 test("actionDuration mirrors the engine's reservations", () => {
@@ -26,4 +26,34 @@ test("beatTimeline assigns sequential [start,end) windows", () => {
   expect(win[0].start).toBeCloseTo(0);
   expect(win[1].start).toBeCloseTo(0.8, 1);
   expect(win[2].start).toBeCloseTo(1.0, 1);   // art has 0 duration but starts at 1.0
+});
+
+const TL: Action[] = [
+  { kind: "text", value: "a", in: "fade" },   // dur 0.8 → [0, 0.8)
+  { kind: "wait", ms: 200 },                  // dur 0.2 → [0.8, 1.0)
+  { kind: "clear" },                          // dur 0   → at 1.0
+  { kind: "text", value: "b", in: "fade" },   // dur 0.8 → [1.0, 1.8)
+];
+
+test("foldAt reports at most one in-flight action, and never one not yet reached", () => {
+  const fold = foldAt(TL, 0.4);
+  expect(fold.map((f) => f.index)).toEqual([0]);
+  expect(fold[0].phase).toBe("in-flight");
+  expect(fold[0].p).toBeCloseTo(0.5, 2);
+});
+
+test("foldAt settles everything at or past the end", () => {
+  const fold = foldAt(TL, 99);
+  expect(fold.map((f) => f.index)).toEqual([0, 1, 2, 3]);
+  expect(fold.every((f) => f.phase === "settled" && f.p === 1)).toBe(true);
+});
+
+test("foldAt treats a zero-duration action as settled the instant it is reached", () => {
+  const fold = foldAt(TL, 1.0);
+  expect(fold.find((f) => f.index === 2)!.phase).toBe("settled");
+});
+
+test("rebuildBoundary finds the last destructive action at or before t", () => {
+  expect(rebuildBoundary(TL, 0.5)).toBe(-1);  // nothing destructive yet
+  expect(rebuildBoundary(TL, 1.4)).toBe(2);   // the clear at 1.0
 });
