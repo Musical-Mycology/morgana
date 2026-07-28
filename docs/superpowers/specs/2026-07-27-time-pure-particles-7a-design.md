@@ -313,7 +313,7 @@ move 3b made for objects ("renders via a parallel stage, not by teaching the run
 | File | Removed |
 | --- | --- |
 | `engine/components/NoteField.tsx` | `emit`, `stopEmit`, `swirl`, and the `emitTimer` / `swirlTl` / `swirlRadius` refs |
-| `engine/components/effects/notes.ts` | `emitNote`, `makeNote`, `launchNote` (its math ports into `note-state.ts`); `makeNoteHex` and `randomGlyph` are retained |
+| `engine/components/effects/notes.ts` | `emitNote`, `makeNote`, `launchNote` (its math ports into `note-state.ts`); `makeNoteHex` is retained. `randomGlyph` moved to `note-state.ts` post-merge — it is pure, and leaving it here gave the pure core an import edge back into this DOM-touching module |
 | `engine/components/layouts/CinematicSlide.tsx` | `CinematicRuntime.{cue, emitter, noteCircle, stopNotes, stopCircles}` and the five matching `scheduleAction` cases |
 | `engine/authoring/runtime.ts` | the matching `AuthoringHooks` / `makeAuthoringRuntime` members |
 

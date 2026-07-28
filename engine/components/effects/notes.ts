@@ -1,4 +1,4 @@
-import { NOTE_GLYPHS, type NoteGlyph, type StoryAsset } from "@/engine/deck/story-assets";
+import type { NoteGlyph, StoryAsset } from "@/engine/deck/story-assets";
 import { NOTE_SIZE_N } from "./note-state";
 
 /** Build a note sprite tinted to an arbitrary HEX (glyph is white line-art → mask + bg color).
@@ -20,6 +20,3 @@ export function makeNoteHex(hex: string, glyph: NoteGlyph, resolveStory: (key: S
   el.dataset.glyph = glyph;
   return el;
 }
-
-const GLYPHS = NOTE_GLYPHS.filter((g) => g.startsWith("Notes")) as NoteGlyph[];
-export function randomGlyph(i: number): NoteGlyph { return GLYPHS[i % GLYPHS.length]; }

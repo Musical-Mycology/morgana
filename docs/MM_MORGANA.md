@@ -70,6 +70,13 @@ Notable in-repo docs:
   `stopCircles` — the `cue` *action kind* survives in `types.ts` for deck-format
   compatibility but is inert. Do not re-add per-sprite GSAP tweens: a second note animation
   implementation is exactly the drift liability §7 exists to remove.
+  **Purity is a one-way import rule, and nothing enforces it.** `note-state.ts` must not
+  import from `notes.ts` — that module calls `document.createElement` — so the dependency
+  runs `notes.ts` → `note-state.ts` and never back. §7a shipped with exactly that edge
+  (`randomGlyph` lived in `notes.ts`); it was hoisted into `note-state.ts` on 2026-07-28.
+  Note what that near-miss cost: **nothing**. Both sides deferred the import to call time,
+  so the cycle resolved, `tsc` was clean and all 461 unit tests passed. A regression here is
+  invisible to CI — the only gate is reading the import block.
 
 When syncing this deep-dive after a Morgana change, remember the split:
 architecture/role/contract facts belong **here**; feature design detail belongs
