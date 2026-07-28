@@ -55,6 +55,21 @@ Notable in-repo docs:
   Tier 2 (Depth) is next.
 - `docs/superpowers/specs/` + `docs/superpowers/plans/` — per-feature design
   specs and implementation plans.
+- **Tier 2 §7 is decomposed** into §7a (time-pure note particles — spec
+  `docs/superpowers/specs/2026-07-27-time-pure-particles-7a-design.md`), §7b (the seekable
+  transport surface) and §7c (canvas swap + parity gate + `seek.ts` deletion). §7a is the
+  first landed. **Gotcha — `CinematicSlide`'s GSAP master is a callback scheduler with time
+  spacers, not a seekable representation**: effects are scheduled via `master.add(fn)` (a
+  `delayedCall`), so the timelines the effect builders return are orphaned and run on
+  wall-clock, which is why durations are re-declared as `master.to({}, {duration})` spacers
+  and why `seek.ts` carries a second copy of `introDuration`. `master.seek(t)` therefore
+  does *not* work today — §7b is a restructure, not a control surface.
+- **Note particles are pure functions of time** (`engine/components/effects/note-state.ts`).
+  `NoteField` holds no time state: both `DeckCanvas` and `BeatStage` mount it and supply a
+  clock. `CinematicRuntime` no longer carries `cue`/`emitter`/`noteCircle`/`stopNotes`/
+  `stopCircles` — the `cue` *action kind* survives in `types.ts` for deck-format
+  compatibility but is inert. Do not re-add per-sprite GSAP tweens: a second note animation
+  implementation is exactly the drift liability §7 exists to remove.
 
 When syncing this deep-dive after a Morgana change, remember the split:
 architecture/role/contract facts belong **here**; feature design detail belongs
@@ -77,6 +92,12 @@ mm-jenkins CI, an MM auth requirement to run) is out of scope by construction.
   investor-hub cinematic deck (GSAP + tsParticles). Package extraction into a
   shared `@musical-mycology/morgana` engine package is a Tier-3 roadmap item,
   gated on a `DeckDoc` format-version freeze (see the end-state design §14a).
+  **The lineage is one-way, and `engine/` has now materially diverged** (§7a,
+  2026-07-27): `CinematicRuntime` lost five members, `NoteField` was rewritten
+  reducer-driven, and `makeNote`/`emitNote`/`launchNote` were deleted. Nothing
+  downstream broke — the vendoring direction is *from* mm-website, not to it —
+  but a future re-vendor in either direction will conflict in those files and
+  should be treated as a merge, not a copy.
 - **Export round-trip.** `deckDocToModule` (`lib/bridge/export-ts.ts`) emits a
   deck's scenes as a TS module the site can import; the round-trip closes when
   mm-website's hand-authored `investor-hub/lib/deck/` modules are authored in
@@ -111,6 +132,18 @@ there is no version negotiation on the tool surface — so the tool's own
 `description` and the README were updated in the same change. Treat any future
 change to a shipped tool's semantics the same way: the description is the only
 contract a remote model reads.
+
+**Contract widening via the registry (2026-07-27, §7a):** `lib/mcp/tool-defs.ts`
+derives `ACTION_KINDS` from `Object.keys(REGISTRY)` and publishes it as the
+`enum` for `add_action.kind` and `convert_action.new_kind`. So **adding a
+descriptor to `lib/editor/registry.ts` silently widens the MCP tool surface** —
+completing the note descriptors added `note_circle`, `stop_notes`, and
+`stop_circle` as callable kinds for connected Claude clients, and changing
+`note_emitter`'s `decay` default (`1` → `1000`; it was one *millisecond*,
+clamped by the engine to a 0.1s floor) changed what `add_action` inserts.
+Neither needed a tool-description edit, but both reached remote clients the
+moment they shipped. Remember this coupling when touching the registry: it is
+an editor-metadata file with a published-API side effect.
 
 ## CI / ops
 

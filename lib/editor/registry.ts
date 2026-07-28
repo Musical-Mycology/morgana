@@ -36,12 +36,30 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
     defaults: () => ({ kind: "clear" }) },
   fade_out: { kind: "fade_out", label: "Fade out", icon: "ti-square-rounded-x", seekable: true, schema: [{ key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 }],
     defaults: () => ({ kind: "fade_out", durationMs: 500 }) },
-  note_emitter: { kind: "note_emitter", label: "Note emitter", icon: "ti-music", seekable: false, schema: [
+  note_emitter: { kind: "note_emitter", label: "Note emitter", icon: "ti-music", seekable: true, schema: [
     { key: "color", label: "Color", type: "text" },
     { key: "pos.x", label: "Pos X", type: "number", min: 0, max: 1, step: 0.01 },
     { key: "pos.y", label: "Pos Y", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "dir", label: "Direction° (0 = up)", type: "number", min: 0, max: 360, step: 1 },
+    { key: "var", label: "Spread°", type: "range", min: 0, max: 180, step: 1 },
+    { key: "decay", label: "Lifetime ms", type: "number", min: 100, step: 100 },
     { key: "freq", label: "Notes/sec", type: "number", min: 0, step: 0.5 },
-  ], defaults: () => ({ kind: "note_emitter", color: "#ffffff", pos: { x: 0.5, y: 0.5 }, dir: 0, decay: 1, freq: 2 }) },
+  ], defaults: () => ({ kind: "note_emitter", color: "#ffffff", pos: { x: 0.5, y: 0.5 }, dir: 0, decay: 1000, freq: 2 }) },
+  // hex (string[]) is intentionally absent: FieldType has no array kind, exactly as
+  // rotateList omits its items[]. A `stringList` field type would close both gaps.
+  note_circle: { kind: "note_circle", label: "Note ring", icon: "ti-circle-dotted", seekable: true, schema: [
+    { key: "pos.x", label: "Center X", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "pos.y", label: "Center Y", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "width", label: "Width (0–1)", type: "range", min: 0.05, max: 1, step: 0.01 },
+    { key: "height", label: "Height (0–1)", type: "range", min: 0.05, max: 1, step: 0.01 },
+    { key: "bounce", label: "Bounce", type: "range", min: 0, max: 1, step: 0.05 },
+    { key: "notes", label: "Note count", type: "number", min: 1, max: 64, step: 1 },
+    { key: "speed", label: "Ms per orbit", type: "number", min: 100, step: 100 },
+  ], defaults: () => ({ kind: "note_circle", pos: { x: 0.5, y: 0.5 }, width: 0.3, height: 0.3, hex: ["#ffffff"], bounce: 0, notes: 8, speed: 6000 }) },
+  stop_notes: { kind: "stop_notes", label: "Stop all notes", icon: "ti-player-stop", seekable: true, schema: [],
+    defaults: () => ({ kind: "stop_notes" }) },
+  stop_circle: { kind: "stop_circle", label: "Stop note rings", icon: "ti-player-stop", seekable: true, schema: [],
+    defaults: () => ({ kind: "stop_circle" }) },
   rotateList: { kind: "rotateList", label: "Rotating list", icon: "ti-list", seekable: true, schema: [
     { key: "size", label: "Size", type: "select", options: opts("lg", "md", "sm") },
   ], defaults: () => ({ kind: "rotateList", items: ["Item 1", "Item 2"] }) },
@@ -99,7 +117,7 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
 };
 
 const GENERIC = (kind: string): EffectDescriptor => ({
-  kind, label: kind, icon: "ti-square", seekable: kind !== "note_circle" && kind !== "cue", schema: [],
+  kind, label: kind, icon: "ti-square", seekable: kind !== "cue", schema: [],
   defaults: () => ({ kind }) as Action,
 });
 

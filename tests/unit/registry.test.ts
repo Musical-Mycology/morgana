@@ -11,6 +11,6 @@ test("every Action kind resolves to a descriptor (generic fallback)", () => {
     expect(descriptorFor({ kind } as never).kind).toBeDefined();
   }
 });
-test("note_emitter is non-seekable", () => {
-  expect(descriptorFor({ kind: "note_emitter" } as never).seekable).toBe(false);
+test("note_emitter is seekable", () => {
+  expect(descriptorFor({ kind: "note_emitter" } as never).seekable).toBe(true);
 });

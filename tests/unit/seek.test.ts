@@ -9,10 +9,11 @@ test("actionDuration mirrors the engine's reservations", () => {
   expect(actionDuration({ kind: "text", value: "hi", in: "fade" })).toBeCloseTo(0.8, 1);
 });
 
-test("seekability: tween effects are seekable, particles are not", () => {
+test("seekability: every effect is seekable except the inert `cue`", () => {
   expect(isSeekable({ kind: "text", value: "x", in: "fade" })).toBe(true);
   expect(isSeekable({ kind: "art", art: { to: "3.02", mode: "fade" } })).toBe(true);
-  expect(isSeekable({ kind: "note_emitter", color: "#fff", pos: { x: 0, y: 0 }, dir: 0, decay: 1000, freq: 5 })).toBe(false);
+  expect(isSeekable({ kind: "note_emitter", color: "#fff", pos: { x: 0, y: 0 }, dir: 0, decay: 1000, freq: 5 })).toBe(true);
+  expect(isSeekable({ kind: "cue", cue: { effect: "noteEmit", action: "start" } })).toBe(false);
 });
 
 test("beatTimeline assigns sequential [start,end) windows", () => {

@@ -1,6 +1,7 @@
 "use client";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
+import { NoteField, type NoteFieldHandle } from "@/engine/components/NoteField";
 import { beatDuration, renderBeatAt } from "@/engine/authoring/seek";
 import { useEditor } from "@/lib/editor/store";
 import { descriptorFor } from "@/lib/editor/registry";
@@ -17,6 +18,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     const art = useRef<ArtStageHandle>(null);
     const textHost = useRef<HTMLDivElement>(null);
     const objStage = useRef<ObjectStageHandle>(null);
+    const notes = useRef<NoteFieldHandle>(null);
     const t = useRef(0);
     const raf = useRef<number | null>(null);
     const [night, setNight] = useState(0.6);
@@ -30,6 +32,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     const draw = () => {
       if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight });
       if (scene) objStage.current?.renderAt(scene, beatIndex, t.current);
+      if (scene) notes.current?.renderAt(scene, beatIndex, t.current);
     };
     const cancel = () => { if (raf.current != null) cancelAnimationFrame(raf.current); raf.current = null; };
 
@@ -54,7 +57,16 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     return (
       <div ref={host} className="ed__canvas-host" style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", maxHeight: "100%", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
         <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />
-        <div className="cin"><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
+        <NoteField ref={notes} reduced={false} />
+        {/* CinematicSlide's own `.cin` rule (position:relative) + `.cin__stage` (z-index:2) never apply here —
+            CinematicSlide isn't mounted on this route, so this wrapper is otherwise static and paints BELOW
+            NoteField's positioned z-index:2 regardless of DOM order. Pin it explicitly above notes (z-index:2)
+            and below PosHandle (5) / ObjectStage (6), matching BeatStage's effective art -> notes -> text -> objects order. */}
+        {/* Display-only caption layer: renderBeatAt only ever paints text nodes here, nothing
+            interactive. Every sibling layer in this stack states its pointer-events intent
+            explicitly (NoteField, ObjectStage, ObjectsLayer, PosHandle) — match that convention
+            so this box doesn't silently swallow clicks meant for a future lower layer. */}
+        <div className="cin" style={{ position: "absolute", inset: 0, zIndex: 3, pointerEvents: "none" }}><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
         <ObjectStage ref={objStage} scene={scene ?? { id: "", beats: [] }} active={preview} />
         <PosHandle hostRef={host} redraw={draw} />
         {!preview && <ObjectsLayer hostRef={host} />}

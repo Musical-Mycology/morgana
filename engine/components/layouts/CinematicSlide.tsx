@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import type { ArtMode, ArtTransition, CinematicSlideSlots, Action, EffectCue, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
+import type { ArtMode, ArtTransition, CinematicSlideSlots, Action, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
 import type { StoryAsset } from "@/engine/deck/story-assets";
 import type { DeckChrome } from "@/engine/deck-doc";
 import { renderPanelHTML } from "@/engine/deck/panel";
@@ -64,15 +64,6 @@ export interface CinematicRuntime {
   /** Fold one transition onto the live stack (mid-timeline art actions). */
   applyArt(transition: ArtTransition, durationMs?: number): void;
   setNightlight(to: number, ms?: number): void;
-  cue(c: EffectCue): void;
-  /** Start a placeable directional note emitter (note_emitter action). */
-  emitter(opts: { color: string; x: number; y: number; dir: number; spread: number; decayMs: number; freq: number }): void;
-  /** Start a placeable orbiting note ring (note_circle action). speed is ms per orbit. */
-  noteCircle(opts: { x: number; y: number; width: number; height: number; hex: string[]; bounce: number; notes: number; speed: number }): void;
-  /** Stop all note sources (stop_notes action). */
-  stopNotes(): void;
-  /** Stop only the orbiting note rings (stop_circle action). */
-  stopCircles(): void;
   /** Beat hit a click_gate: it's paused; `resume` continues this beat's timeline. */
   onGate(resume: () => void): void;
   /** Spawn (fade in) the nav arrows (reveal_arrows action). */
@@ -497,16 +488,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       }); break;
       case "art": master.add(() => runtime.applyArt(a.art, a.art.durationMs)); break;
       case "nightlight": master.add(() => runtime.setNightlight(a.to, a.durationMs)); break;
-      case "cue": master.add(() => runtime.cue(a.cue)); break;
-      case "note_emitter": master.add(() => runtime.emitter({
-        color: a.color, x: a.pos.x, y: a.pos.y, dir: a.dir, spread: a.var ?? 0, decayMs: a.decay, freq: a.freq,
-      })); break;
-      case "note_circle": master.add(() => runtime.noteCircle({
-        x: a.pos.x, y: a.pos.y, width: a.width, height: a.height, hex: a.hex,
-        bounce: a.bounce ?? 0, notes: a.notes ?? 8, speed: a.speed ?? 6000,
-      })); break;
-      case "stop_circle": master.add(() => runtime.stopCircles()); break;
-      case "stop_notes": master.add(() => runtime.stopNotes()); break;
+      // cue / note_emitter / note_circle / stop_circle / stop_notes are NOT scheduled here.
+      // Note sources render from the pure noteFieldStateAt reducer via NoteField (see
+      // engine/components/effects/note-state.ts), driven by whatever clock the host supplies —
+      // the same split objects use. `cue` is inert; the kind survives in types.ts for
+      // deck-format compatibility only.
       // click_gate is a segment boundary handled in useGSAP (timeline segmentation), not here.
       case "click_gate": break;
       case "reveal_arrows": master.add(() => runtime.revealArrows()); break;

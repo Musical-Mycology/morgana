@@ -27,7 +27,7 @@ export function BeatStage({
 
   const runtime = useMemo(
     () => makeAuthoringRuntime({
-      art, notes, setNight,
+      art, setNight,
       resolveEntry: () => entryLayers,
       resolveEnd: () => endLayers,
       onGate: () => {}, onWaiting: () => {},
@@ -50,14 +50,23 @@ export function BeatStage({
   // limitation for 3b — the real fix (attaching the proxy to each of CinematicSlide's segment
   // timelines) requires exposing masterRef/segment state outside CinematicSlide, which is out of
   // scope here and deferred alongside the north-star §7 "real GSAP transport surface" work.
+  //   NoteField now rides this same proxy, so it inherits the identical desync. §7b's
+  //   transport work should re-point BOTH stages at CinematicSlide's real segment timelines.
   useEffect(() => {
     if (!scene) return;
     const span = beatTimeline(beat.timeline).reduce((m, w) => Math.max(m, w.end), 0);
-    if (!animate || span <= 0) { objStage.current?.renderAt(scene, beatIndex, span || 1e9); return; }
+    if (!animate || span <= 0) {
+      objStage.current?.renderAt(scene, beatIndex, span || 1e9);
+      notes.current?.renderAt(scene, beatIndex, span);   // notes settle at the beat's span
+      return;
+    }
     const proxy = { p: 0 };
     const tl = gsap.timeline().to(proxy, {
       p: 1, duration: span, ease: "none",
-      onUpdate: () => objStage.current?.renderAt(scene, beatIndex, proxy.p * span),
+      onUpdate: () => {
+        objStage.current?.renderAt(scene, beatIndex, proxy.p * span);
+        notes.current?.renderAt(scene, beatIndex, proxy.p * span);
+      },
     });
     return () => { tl.kill(); };
   }, [scene, beat, beatIndex, animate]);
