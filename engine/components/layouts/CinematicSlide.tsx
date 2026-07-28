@@ -15,7 +15,7 @@ import {
   flyUp, fadeIn, fadeSide, dotFade, rotateList, lineAndDots,
   letterFly, letterUp, wordUp, blurIn, typewriter,
 } from "../effects/cinematic-anim";
-import { introDuration } from "@/engine/authoring/beat-clock";
+import { introDuration, foldAt } from "@/engine/authoring/beat-clock";
 
 /**
  * Position a text box at `pos` per its align. Right boxes anchor their RIGHT edge (via the
@@ -74,6 +74,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   const fadeRef = useRef<gsap.core.Tween | null>(null); // active fade_out tween, killed on beat change
   const counterRef = useRef<{ valueEl: HTMLElement; value: number; prefix: string } | null>(null);
   const mediaTiles = useRef<Map<string, HTMLElement>>(new Map());
+  // Built, PAUSED effect timelines keyed by action index. Nothing here ever runs on
+  // wall-clock — renderAt is the only thing that advances them (design spec §7b §4.2).
+  const built = useRef<Map<number, { el: HTMLElement; tl: gsap.core.Timeline | null }>>(new Map());
+  const lastT = useRef(0);
   const [againRevealed, setAgainRevealed] = useState(false);
 
   useGSAP(() => {
@@ -88,6 +92,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     fadeRef.current = null;
     loopers.current.forEach((t) => t.kill());
     loopers.current = [];
+    built.current.forEach((entry) => entry.tl?.kill());
+    built.current.clear();
     clearLineBoxes();
     clearCounter();
     clearMedia();
@@ -161,12 +167,17 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     };
     playSegment();
 
+    // Test-only handle; Task 9 replaces this with the SlideTransport ref.
+    (host.closest(".cin") as HTMLElement & { __renderAt?: (t: number) => void }).__renderAt = renderAt;
+
     // master + rotateList loops are created here / in deferred callbacks; kill them
     // on unmount (deps re-run also kills them at the top of the effect above).
     return () => {
       masterRef.current?.kill();
       loopers.current.forEach((t) => t.kill());
       loopers.current = [];
+      built.current.forEach((entry) => entry.tl?.kill());
+      built.current.clear();
       clearLineBoxes();
       clearCounter();
       clearMedia();
@@ -399,6 +410,56 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     mediaTiles.current.clear();
   }
 
+  /** Shared ease selector: builds the reveal-effect timeline for a text line's (possibly
+   *  downgraded) `in` style. Used by both the scheduled autoplay path (scheduleAction) and
+   *  the paused seekable path (buildText) so the branch mapping lives in exactly one place. */
+  function buildTextEffect(el: HTMLElement, effIn: TextIn, a: Extract<Action, { kind: "text" }>): gsap.core.Timeline {
+    const dir = a.align === "right" ? "right" : "left"; // letterFly follows justification
+    const tl =
+      effIn === "flyUp" ? flyUp(el, a.speed) :
+      effIn === "fadeSide" ? fadeSide(el, a.speed) :
+      effIn === "cursive" ? typewriter(el, a.speed ?? 0.2) :
+      effIn === "letterFly" ? letterFly(el, dir, a.speed) :
+      effIn === "letterUp" ? letterUp(el, a.speed) :
+      effIn === "wordUp" ? wordUp(el, a.speed, !a.append) :
+      effIn === "blurIn" ? blurIn(el, a.speed) :
+      effIn === "typewriter" ? typewriter(el, a.speed) : fadeIn(el, a.speed);
+    if (a.dots) { const d = el.querySelector<HTMLElement>(".dots"); if (d) tl.add(dotFade(d)); }
+    return tl;
+  }
+
+  /** Build one text action's element + its real reveal timeline, paused at 0. Reuses the same
+   *  el-creation + effect-selection logic as scheduleAction's `text` case (design spec §7b §4.2). */
+  function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): { el: HTMLElement; tl: gsap.core.Timeline | null } {
+    const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive"];
+    const effIn: TextIn = hasInlineMarkup(a.value) && perPiece.includes(a.in) ? "fade" : a.in;
+    const el = a.append
+      ? appendFragment(a.value)
+      : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, false, a.tone);
+    if (a.in === "cursive") el.classList.add("cin__line--cursive");
+    // instantText / no-reveal lines have no entrance: they render at rest.
+    if (instantText && !a.reveal) return { el, tl: null };
+    const tl = buildTextEffect(el, effIn, a);
+    tl.pause(0);
+    return { el, tl };
+  }
+
+  /** Paint the beat's visual state at beat-local time `t` (text actions only — Tasks 5-8
+   *  bring the other kinds under this path). PAUSED timelines only; renderAt is the sole
+   *  thing that ever advances them (design spec §7b §4.2). */
+  function renderAt(t: number) {
+    const host = scope.current?.querySelector<HTMLElement>(".cin__text");
+    if (!host) return;
+    for (const f of foldAt(slots.beat.timeline, t)) {
+      if (f.action.kind !== "text") continue; // other kinds: Tasks 5-8
+      let entry = built.current.get(f.index);
+      if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
+      if (!entry.tl) continue; // rendered at rest
+      entry.tl.time(f.phase === "settled" ? entry.tl.duration() : t - f.start);
+    }
+    lastT.current = t;
+  }
+
   function scheduleAction(master: gsap.core.Timeline, a: Action, host: HTMLElement) {
     switch (a.kind) {
       case "text": {
@@ -425,18 +486,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
             ? appendFragment(a.value) // inline fragment on the current line
             : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, false, a.tone);
           if (a.in === "cursive") el.classList.add("cin__line--cursive"); // script font + larger size
-          const dir = a.align === "right" ? "right" : "left"; // letterFly follows justification
-          const tl =
-            effIn === "flyUp" ? flyUp(el, a.speed) :
-            effIn === "fadeSide" ? fadeSide(el, a.speed) :
-            effIn === "cursive" ? typewriter(el, a.speed ?? 0.2) :
-            effIn === "letterFly" ? letterFly(el, dir, a.speed) :
-            effIn === "letterUp" ? letterUp(el, a.speed) :
-            effIn === "wordUp" ? wordUp(el, a.speed, !a.append) :
-            effIn === "blurIn" ? blurIn(el, a.speed) :
-            effIn === "typewriter" ? typewriter(el, a.speed) : fadeIn(el, a.speed);
-          if (a.dots) { const d = el.querySelector<HTMLElement>(".dots"); if (d) tl.add(dotFade(d)); }
-          return tl;
+          return buildTextEffect(el, effIn, a);
         });
         // Reserve ≈ this line's intro duration so the master's onComplete (→ onWaiting)
         // fires after the line settles, not before. Tune pacing/overlap live in Phase 2.
