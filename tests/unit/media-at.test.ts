@@ -32,6 +32,18 @@ test("media_out drives opacity to zero", () => {
   expect(mediaStateAt([{ action: show, p: 1 }, { action: out, p: 1 }], 0).get("m")!.opacity).toBeCloseTo(0);
 });
 
+// outMedia's real gsap call is a bare `gsap.to(el, { opacity: 0, duration })` with no explicit
+// `ease` — GSAP's default is "power1.out" (quadratic out), not linear. An endpoint-only check
+// (opacity 0 at p=1, 1 at p=0) can't tell that ease apart from a straight `1 - p` ramp; only a
+// MID-FLIGHT value pins the curve's shape. power1.out(0.5) = 1 - (1-0.5)^2 = 0.75, so opacity at
+// p=0.5 should be 1 - 0.75 = 0.25 — well below the 0.5 a linear ramp would give at the midpoint.
+test("media_out's fade follows power1.out (quadratic), not a linear ramp", () => {
+  const out: Extract<Action, { kind: "media_out" }> = { kind: "media_out", id: "m" };
+  const s = mediaStateAt([{ action: show, p: 1 }, { action: out, p: 0.5 }], 0).get("m")!;
+  expect(s.opacity).toBeCloseTo(0.25, 4);
+  expect(s.opacity).not.toBeCloseTo(0.5, 1); // rules out the old linear (1 - p) shape
+});
+
 // --- media_move chaining (ambiguity resolution #2) -----------------------------------------
 //
 // A second media_move on the same tile must start from where the FIRST one ended, not from

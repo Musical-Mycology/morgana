@@ -14,6 +14,7 @@ export interface MediaFold { action: Action; p: number }
 const powerOut2 = (p: number): number => 1 - Math.pow(1 - p, 3);        // showMedia fade/fadeSide ("power2.out")
 const powerOut3 = (p: number): number => 1 - Math.pow(1 - p, 4);        // showMedia flyUp ("power3.out")
 const backOut2 = (p: number): number => { const q = p - 1; return q * q * (3 * q + 2) + 1; }; // showMedia pop ("back.out(2)")
+const powerOut1 = (p: number): number => 1 - Math.pow(1 - p, 2);        // outMedia fade ("power1.out", GSAP's default ease)
 /** GSAP "power3.inOut" (quart in-out) — the ease moveMedia actually uses. Symmetric: exactly
  *  0.5 at p=0.5, unlike an ease-out curve. */
 const powerInOut3 = (p: number): number =>
@@ -52,10 +53,14 @@ export function mediaStateAt(entries: MediaFold[], _t: number): Map<string, Medi
         scale: a.scale != null ? lerp(cur.scale, a.scale, e) : cur.scale,
       });
     } else if (a.kind === "media_out") {
+      // outMedia's real call is a bare `gsap.to(el, { opacity: 0, duration })` — no explicit
+      // `ease`, so GSAP applies its default, "power1.out" (quadratic out), NOT a linear ramp.
+      // A raw `1 - p` here would make a scrubbed fade-out disagree with actual playback —
+      // exactly the drift this task exists to remove.
       const ids = a.id ? [a.id] : [...out.keys()];
       for (const id of ids) {
         const cur = out.get(id);
-        if (cur) out.set(id, { ...cur, opacity: 1 - p });
+        if (cur) out.set(id, { ...cur, opacity: 1 - powerOut1(p) });
       }
     }
   }
