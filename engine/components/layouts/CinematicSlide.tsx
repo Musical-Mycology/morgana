@@ -591,6 +591,17 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // with no issued-guard to keep in sync (unlike reveal_arrows/pulse_arrow below, which have
     // no readable state to derive from and so stay genuinely edge-triggered).
     let revealAgain = false;
+    // The shared text box's (and any live line box's) opacity is likewise DERIVABLE, not an
+    // event: `null` means "no reached, in-flight fade_out" (the default, unset opacity);
+    // otherwise it's that fade_out's own local progress, painted below by ONE unconditional
+    // write after the loop. This is what final review's Critical finding was missing — every
+    // other fold output here (counter, media, revealAgain, wipeBoundary) is recomputed fresh
+    // and painted unconditionally every call; opacity used to be the lone exception, written
+    // only *while* a fade_out was in flight with no "else, restore the default" branch, so a
+    // backward seek landing before that fade_out's start never un-wrote it. Computing the value
+    // here and painting it unconditionally (rather than a targeted "clear it on backward seek
+    // past a fade_out" special case) removes the class of bug, not just this reproduction.
+    let fadeOutP: number | null = null;
 
     const foldEntries = foldAt(slots.beat.timeline, t);
 
@@ -662,10 +673,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       if (f.action.kind === "fade_out") {
         // Settled: its teardown already ran above, via wipeBoundary — nothing left to do here.
         if (f.phase === "settled") continue;
-        // In-flight: scrub the opacity ramp from local progress (pure, from beatTimeline —
-        // never from a built tween's .duration()). Nothing is deleted yet, so a seek that
-        // lands mid-fade can still scrub back out of it without a rebuild.
-        gsap.set([host, ...lineBoxes.current], { opacity: 1 - f.p });
+        // In-flight: record the opacity ramp's local progress (pure, from beatTimeline — never
+        // from a built tween's .duration()). Nothing is deleted yet, so a seek that lands
+        // mid-fade can still scrub back out of it without a rebuild. The actual DOM write is
+        // unconditional, after the loop (see fadeOutP above) — not here — so there is no
+        // incremental write for a later, non-fade_out frame to fail to un-write.
+        fadeOutP = f.p;
         continue;
       }
       if (f.action.kind === "media" || f.action.kind === "media_move" || f.action.kind === "media_out") {
@@ -753,6 +766,15 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       if (f.phase === "settled") entry.tl.progress(1);
       else entry.tl.time(t - f.start);
     }
+    // Paint the derived opacity UNCONDITIONALLY, every call — not only while a fade_out is in
+    // flight. Default (no reached, in-flight fade_out): clearProps, matching a fresh mount's
+    // never-touched inline style exactly (a plain `opacity: 1` would leave a non-empty style
+    // attribute a fresh mount never has, which a symmetry check against a fresh mount would
+    // catch). Otherwise: that fade_out's own local progress. Using `[host, ...lineBoxes.current]`
+    // here (the final, post-loop set) rather than inline mid-loop also means a line box created
+    // by a later-in-fold-order text action still gets the same treatment.
+    if (fadeOutP == null) gsap.set([host, ...lineBoxes.current], { clearProps: "opacity" });
+    else gsap.set([host, ...lineBoxes.current], { opacity: 1 - fadeOutP });
     paintCounter(counter, counterValueP, counterEntranceP, counterHideP);
     paintMedia(mediaFold, mediaStateAt(mediaFold, t));
     setAgainRevealed(revealAgain);

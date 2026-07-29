@@ -223,6 +223,41 @@ test("backward seek into an in-flight fade_out does not leak positioned line box
   expect(boxCount()).toBe(2);   // shared box + rebuilt "after" box — "before"'s box must be gone
 });
 
+// Final whole-branch review, Critical finding: the shared text box's opacity used to be written
+// only WHILE a fade_out was in flight (`gsap.set(host, { opacity: 1 - f.p })`), with no "else,
+// restore the default" branch anywhere. A backward seek landing BEFORE that fade_out's own start
+// left `host.style.opacity` stranded at its last in-flight value forever — nothing in renderAt
+// ever un-writes it, because the write only happens while a fade_out is reached and in flight,
+// and a seek to 0.4 here never reaches one. This is a genuine SEEK SYMMETRY test, not a pinned
+// snapshot: it compares the seeked-back instance against a FRESH instance jumped straight to the
+// same t, so it fails on any divergence rather than on any particular hardcoded style string —
+// exactly the kind of check the brief asks for (compare against a fresh mount, not a literal).
+function mountPosFading() {
+  const transport = createRef<SlideTransport>();
+  const { container } = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "pf2", timeline: posFading } }} animate runtime={noopRuntime} transport={transport} />,
+  );
+  // The persistent shared box is always the FIRST `.cin__text` under `.cin__stage`: it's
+  // rendered directly by React in the initial JSX, before any `pos`-bearing line's own box is
+  // appended via makeLineBox — see the `boxCount` comment above.
+  const sharedBox = () => container.querySelector<HTMLElement>(".cin__text")!;
+  return {
+    renderAt: (t: number) => transport.current!.seek(t),
+    textStyle: () => sharedBox().getAttribute("style"),
+  };
+}
+
+test("SEEK SYMMETRY: backward seek before an in-flight fade_out's start restores the shared box's default opacity", () => {
+  const seeked = mountPosFading();
+  seeked.renderAt(1.0);  // inside fade_out's in-flight window [0.8, 1.3) — opacity written to 1-p
+  seeked.renderAt(0.4);  // BACK, before the fade_out's own start [0.8) — must restore the default
+
+  const fresh = mountPosFading();
+  fresh.renderAt(0.4);   // direct jump straight to 0.4 — opacity never touched on this path
+
+  expect(seeked.textStyle()).toBe(fresh.textStyle());
+});
+
 // --- art / nightlight diffing (Task 7) ------------------------------------------------------
 //
 // ArtStage.show() runs its own crossfade side effect, so calling applyArt/setNightlight on
