@@ -1,0 +1,165 @@
+import { afterEach, expect, test } from "vitest";
+import { render, cleanup } from "@testing-library/react";
+import { createElement, createRef } from "react";
+import { mediaStateAt } from "@/engine/deck/media-state";
+import { CinematicSlide, type SlideTransport } from "@/engine/components/layouts/CinematicSlide";
+import type { Action, Beat } from "@/engine/deck/types";
+
+// CinematicSlide autoplays via a real gsap.ticker as soon as it mounts (Task 9) — unmount
+// between tests so each mount's ticker gets paused (via the effect's cleanup) rather than
+// leaking into later tests.
+afterEach(cleanup);
+
+const show: Extract<Action, { kind: "media" }> = { kind: "media", id: "m", pos: { x: 0.2, y: 0.3 } };
+const move: Extract<Action, { kind: "media_move" }> = { kind: "media_move", id: "m", to: { x: 0.8, y: 0.3 }, durationMs: 1000 };
+
+test("a shown tile fades in over its duration", () => {
+  expect(mediaStateAt([{ action: show, p: 0 }], 0).get("m")!.opacity).toBeCloseTo(0);
+  expect(mediaStateAt([{ action: show, p: 1 }], 0).get("m")!.opacity).toBeCloseTo(1);
+});
+
+test("media_move interpolates position at local progress", () => {
+  const s = mediaStateAt([{ action: show, p: 1 }, { action: move, p: 0.5 }], 0).get("m")!;
+  expect(s.x).toBeGreaterThan(0.2);
+  expect(s.x).toBeLessThan(0.8);
+});
+
+// moveMedia uses ease "power3.inOut", which is SYMMETRIC — exactly half-way at p=0.5.
+// An ease-out curve would put the midpoint well past halfway, so this pins the shape,
+// not just the endpoints, and would catch the power2/power3 off-by-one in GSAP's naming.
+test("media_move's ease is symmetric in-out, matching playback", () => {
+  const s = mediaStateAt([{ action: show, p: 1 }, { action: move, p: 0.5 }], 0).get("m")!;
+  expect(s.x).toBeCloseTo(0.5, 4);
+});
+
+test("media_out drives opacity to zero", () => {
+  const out: Extract<Action, { kind: "media_out" }> = { kind: "media_out", id: "m" };
+  expect(mediaStateAt([{ action: show, p: 1 }, { action: out, p: 1 }], 0).get("m")!.opacity).toBeCloseTo(0);
+});
+
+// outMedia's real gsap call is a bare `gsap.to(el, { opacity: 0, duration })` with no explicit
+// `ease` — GSAP's default is "power1.out" (quadratic out), not linear. An endpoint-only check
+// (opacity 0 at p=1, 1 at p=0) can't tell that ease apart from a straight `1 - p` ramp; only a
+// MID-FLIGHT value pins the curve's shape. power1.out(0.5) = 1 - (1-0.5)^2 = 0.75, so opacity at
+// p=0.5 should be 1 - 0.75 = 0.25 — well below the 0.5 a linear ramp would give at the midpoint.
+test("media_out's fade follows power1.out (quadratic), not a linear ramp", () => {
+  const out: Extract<Action, { kind: "media_out" }> = { kind: "media_out", id: "m" };
+  const s = mediaStateAt([{ action: show, p: 1 }, { action: out, p: 0.5 }], 0).get("m")!;
+  expect(s.opacity).toBeCloseTo(0.25, 4);
+  expect(s.opacity).not.toBeCloseTo(0.5, 1); // rules out the old linear (1 - p) shape
+});
+
+// --- media_move chaining (ambiguity resolution #2) -----------------------------------------
+//
+// A second media_move on the same tile must start from where the FIRST one ended, not from
+// the original `media` pos. An endpoint-only assertion can't distinguish "chains off the
+// running position" from "chains off the original pos" — both converge on the same settled
+// endpoint for x once move1 has fully played out. Only a MID-FLIGHT assertion inside move2's
+// own window, checking that x does NOT drift back toward the original pos, pins it down.
+test("media_move chains off the running position: two consecutive moves compose", () => {
+  const show2: Extract<Action, { kind: "media" }> = { kind: "media", id: "m2", pos: { x: 0, y: 0 } };
+  const move1: Extract<Action, { kind: "media_move" }> = { kind: "media_move", id: "m2", to: { x: 1, y: 0 }, durationMs: 1000 };
+  const move2: Extract<Action, { kind: "media_move" }> = { kind: "media_move", id: "m2", to: { x: 1, y: 1 }, durationMs: 1000 };
+
+  const afterFirst = mediaStateAt([{ action: show2, p: 1 }, { action: move1, p: 1 }], 0).get("m2")!;
+  expect(afterFirst.x).toBeCloseTo(1);
+
+  // move2 only moves y (0 -> 1); x must STAY at 1 throughout. A "wrong origin" bug (chaining
+  // off the original pos, x=0) would instead interpolate x partway back toward 0.
+  const midSecond = mediaStateAt(
+    [{ action: show2, p: 1 }, { action: move1, p: 1 }, { action: move2, p: 0.5 }], 0,
+  ).get("m2")!;
+  expect(midSecond.x).toBeCloseTo(1);
+  expect(midSecond.y).toBeCloseTo(0.5);
+});
+
+// --- renderAt integration: media is fold-derived state, not a wall-clock tween -------------
+//
+// No JSX here deliberately — this file is a .ts module, so CinematicSlide is mounted via
+// React.createElement rather than JSX syntax (same pattern as tests/unit/counter-at.test.ts).
+
+const noopRuntime = {
+  art: () => {}, applyArt: () => {}, setNightlight: () => {}, onGate: () => {},
+  revealArrows: () => {}, pulseArrow: () => {}, onWaiting: () => {},
+  resolveEntry: () => [], resolveEnd: () => [], jumpTo: () => {},
+};
+
+function mountMediaSlide(timeline: Action[]) {
+  const beat: Beat = { id: "media-beat", timeline };
+  const transport = createRef<SlideTransport>();
+  const { container } = render(
+    createElement(CinematicSlide, { slots: { sceneId: "s", beat }, animate: true, runtime: noopRuntime, transport }),
+  );
+  const host = container.querySelector<HTMLElement>(".cin")!;
+  return { host, transport, renderAt: (t: number) => transport.current!.seek(t) };
+}
+
+// media(600ms default) [0, 0.6) -> media_move(1000ms) [0.6, 1.6)
+const showThenMove: Action[] = [
+  { kind: "media", id: "m", pos: { x: 0.2, y: 0.3 } },
+  { kind: "media_move", id: "m", to: { x: 0.8, y: 0.3 }, durationMs: 1000 },
+];
+
+test("BACKWARD SEEK: scrubbing back into an in-flight media_move returns the earlier eased position", () => {
+  const { host, renderAt } = mountMediaSlide(showThenMove);
+  const tile = () => host.querySelector<HTMLElement>(".cin__media")!;
+
+  renderAt(2.0); // forward, well past media_move's window: settled at the target
+  expect(tile().style.left).toBe("80%");
+
+  renderAt(1.1); // BACK into media_move's own in-flight window: local p = (1.1 - 0.6) / 1.0 = 0.5
+  expect(parseFloat(tile().style.left)).toBeCloseTo(50, 4); // symmetric in-out: exactly the midpoint of 0.2..0.8
+  expect(tile().style.left).not.toBe("80%");
+});
+
+// wait(500ms) [0, 0.5) -> media(600ms default) [0.5, 1.1)
+const waitThenShow: Action[] = [
+  { kind: "wait", ms: 500 },
+  { kind: "media", id: "m", pos: { x: 0.2, y: 0.3 } },
+];
+
+test("BACKWARD SEEK: scrubbing back before a tile's `media` action tears it down", () => {
+  const { host, renderAt } = mountMediaSlide(waitThenShow);
+
+  renderAt(0.8); // inside media's window: tile built
+  expect(host.querySelector(".cin__media")).not.toBeNull();
+
+  renderAt(0.2); // BACK before media's own start (0.5): not yet reached
+  expect(host.querySelector(".cin__media")).toBeNull();
+});
+
+// --- PLAYBACK: media tiles must actually animate under play(), not snap instantly ---------
+//
+// Tasks 5/6 deleted the wall-clock gsap.to tweens the OLD scheduleAction path used to animate
+// media moves — accepted as a temporary regression on the explicit condition that task 9
+// restores it, because the ticker now drives renderAt continuously (task 9 brief, required
+// check 1). This test drives the REAL ticker (no manual seek) and samples mid-flight via a
+// real wall-clock wait, so it would fail if playback still snapped straight to the target
+// position instead of easing through it.
+test("PLAYBACK: a media_move actually animates under play(), not a snap (required check 1)", async () => {
+  // `media`'s show window is shortened to 0.2s; media_move runs a full 1s on top of that.
+  // Rather than sampling at one fixed real-time instant (flaky under a loaded test run, where
+  // scheduling jitter can push a single sample past settlement), poll repeatedly through the
+  // whole window and assert SOME sample landed strictly between the start and end positions —
+  // robust to timing jitter as long as the poll interval is well under the animation's own
+  // duration.
+  const playTimeline: Action[] = [
+    { kind: "media", id: "m", pos: { x: 0.2, y: 0.3 }, durationMs: 200 },
+    { kind: "media_move", id: "m", to: { x: 0.8, y: 0.3 }, durationMs: 1000 },
+  ];
+  const beat: Beat = { id: "media-play", timeline: playTimeline };
+  const { container } = render(
+    createElement(CinematicSlide, { slots: { sceneId: "s", beat }, animate: true, runtime: noopRuntime }),
+  );
+  const tile = () => container.querySelector<HTMLElement>(".cin__media");
+
+  let sawIntermediate = false;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const el = tile();
+    const left = el ? parseFloat(el.style.left) : NaN;
+    if (!Number.isNaN(left) && left > 20 && left < 80) { sawIntermediate = true; break; }
+    await new Promise<void>((resolve) => setTimeout(resolve, 15));
+  }
+  expect(sawIntermediate).toBe(true); // caught it mid-ease — never just start or end
+});

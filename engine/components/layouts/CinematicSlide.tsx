@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import type { ArtMode, ArtTransition, CinematicSlideSlots, Action, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
@@ -10,40 +10,13 @@ import { renderPanelHTML } from "@/engine/deck/panel";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
 import { parseInlineLinks, hasInlineMarkup } from "@/engine/deck/inline-links";
-import { formatCounterValue, counterTarget } from "@/engine/deck/counter";
+import { formatCounterValue, counterValueAt } from "@/engine/deck/counter";
+import { mediaStateAt, type MediaFold, type MediaRenderState } from "@/engine/deck/media-state";
 import {
-  flyUp, fadeIn, fadeSide, dotFade, rotateList, lineAndDots,
+  flyUp, fadeIn, fadeSide, dotFade, rotateItemAt, lineAndDots,
   letterFly, letterUp, wordUp, blurIn, typewriter,
 } from "../effects/cinematic-anim";
-
-// First-pass intro durations (mirror the builders in cinematic-anim.ts); used to
-// reserve master-timeline time so onWaiting fires after a line settles, not before.
-// Letter/word effects run longer (per-piece stagger). Pacing is tuned live.
-const INTRO_DUR: Record<TextIn, number> = {
-  flyUp: 0.6, fade: 0.8, fadeSide: 0.7, cursive: 1.0,
-  letterFly: 1.6, letterUp: 1.6, wordUp: 1.3, blurIn: 1.6, typewriter: 1.5,
-};
-const DOTFADE_TAIL = 2.02; // dotFade total ≈ tick-on 0.62 + hold 0.8 + fade 0.6
-// Time to reserve before the next timeline step, ≈ this line's actual reveal duration.
-// For per-letter/word effects it's derived from the real char/word count × stagger, so a
-// slower `speed` only lengthens the letters (no inflated dead time); line effects use a
-// fixed base. Mirrors the stagger constants in cinematic-anim.ts.
-function introDuration(a: { in: TextIn; value: string; dots?: true; speed?: number }): number {
-  const sp = a.speed ?? (a.in === "cursive" ? 0.2 : 1); // cursive defaults to a slow type-on
-  const chars = a.value.length;
-  const words = a.value.trim().split(/\s+/).length;
-  let base: number;
-  switch (a.in) {
-    case "cursive": // cursive reveals via typewriter
-    case "typewriter": base = 0.1 + chars * 0.045; break;
-    case "letterFly":
-    case "letterUp":
-    case "blurIn":     base = 0.5 + chars * 0.03; break;
-    case "wordUp":     base = 0.6 + words * 0.08; break;
-    default:           base = INTRO_DUR[a.in]; // line-level fixed
-  }
-  return (base + (a.dots ? DOTFADE_TAIL : 0)) / sp;
-}
+import { foldAt, rebuildBoundary, beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
 
 /**
  * Position a text box at `pos` per its align. Right boxes anchor their RIGHT edge (via the
@@ -55,6 +28,19 @@ function boxAnchor(pos: StagePoint, align?: TextAlign): { left: string; right: s
   if (align === "right") return { left: "", right: `${(1 - pos.x) * 100}%`, transform: "" };
   if (align === "center") return { left: `${pos.x * 100}%`, right: "", transform: "translateX(-50%)" };
   return { left: `${pos.x * 100}%`, right: "", transform: "" };
+}
+
+/** Stable dedup key for an ArtTransition, for renderAt's applied-art diffing (below). Built from
+ *  an EXPLICIT, fixed field order — NOT `JSON.stringify(transition)` directly, whose output
+ *  depends on the object's own property insertion order. Review round 1, finding 2:
+ *  `lib/editor/paths.ts`'s `setPath()` shallow-spreads `{...obj}` then assigns the edited field,
+ *  so a field set for the first time (e.g. `durationMs`) lands at the END of insertion order —
+ *  two value-identical transitions edited in a different order would otherwise serialise
+ *  differently and spuriously re-trigger ArtStage's crossfade. An explicit field list also fails
+ *  loudly (a TS error) if ArtTransition gains a field this key doesn't know about, rather than
+ *  silently changing diffing behaviour. */
+function artKey(a: ArtTransition): string {
+  return JSON.stringify([a.to, a.mode, a.durationMs ?? null, a.keep ?? null, a.out ?? null]);
 }
 
 
@@ -79,6 +65,17 @@ export interface CinematicRuntime {
   jumpTo(index: number): void;
 }
 
+/** The public seekable transport over a beat's single time axis (design spec §7b §4.1).
+ *  `seek` clamps to `[0, duration()]` and never throws, including on a zero-duration/empty
+ *  beat. `duration()` is always `beatDuration(beat.timeline)` — the pure beat-clock reading,
+ *  never a GSAP timeline's own `.duration()`. */
+export interface SlideTransport {
+  seek(t: number): void;
+  play(): void;
+  pause(): void;
+  duration(): number;
+}
+
 interface Props {
   slots: CinematicSlideSlots;
   animate: boolean;
@@ -90,32 +87,94 @@ interface Props {
   /** Investor deck: render narration text instantly (no per-line entrance animation).
    *  click_gates still step the timeline; only the text-in reveal is suppressed. */
   instantText?: boolean;
+  /** Imperative handle onto this beat's transport — seek/play/pause/duration over the single
+   *  time axis (design spec §7b §4.1). Optional: most callers just let it autoplay. */
+  transport?: Ref<SlideTransport>;
+  /** Fired at the end of every renderAt call with the beat-local `t` just painted (design spec
+   *  §7b Task 10). This is the single clock: a host that also drives sibling stages (notes,
+   *  objects) reads THIS `t` — never a second ticker — so every stage stays paused/playing/
+   *  seeked in lockstep, including across click_gate pauses. */
+  onTime?: (t: number) => void;
 }
 
-export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText }: Props) {
+export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
-  const loopers = useRef<gsap.core.Timeline[]>([]);
-  const masterRef = useRef<gsap.core.Timeline | null>(null);
+  // The single gsap.ticker listener currently driving playback, or null when paused. play()
+  // always pause()s first (so re-play never double-registers), and pause() nulls this after
+  // removing it — ambiguity res. #1: a leaked ticker keeps calling renderAt against a stale
+  // beat after the component moves on, and unlike a leaked tween, nothing else will kill it.
+  const ticker = useRef<((time: number, delta: number) => void) | null>(null);
   const lineBoxes = useRef<HTMLElement[]>([]); // free-positioned per-line text boxes (text action `pos`)
   const currentLine = useRef<HTMLElement | null>(null); // last line, for inline `append` fragments
   const fadeRef = useRef<gsap.core.Tween | null>(null); // active fade_out tween, killed on beat change
-  const counterRef = useRef<{ valueEl: HTMLElement; value: number; prefix: string } | null>(null);
+  // `a` is the counter_show action that built this box — renderAt compares against it (by
+  // reference) to know whether the fold's current counter is the one already on screen, or
+  // whether it needs to rebuild (design spec §7b §5).
+  const counterRef = useRef<{ box: HTMLElement; valueEl: HTMLElement; prefix: string; a: Extract<Action, { kind: "counter_show" }> } | null>(null);
   const mediaTiles = useRef<Map<string, HTMLElement>>(new Map());
+  // Built, PAUSED effect timelines keyed by action index. Nothing here ever runs on
+  // wall-clock — renderAt is the only thing that advances them (design spec §7b §4.2).
+  // `box` is set only for a `pos`-bearing text action: the separate wrapper div makeLineBox()
+  // creates (distinct from `el`, the <p> inside it). resetFrom must tear both down, or a
+  // backward seek strands an empty positioned box in the stage (and a detached node in
+  // lineBoxes.current) every time it lands inside an in-flight fade_out.
+  const built = useRef<Map<number, { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement }>>(new Map());
+  // Last-issued art transition (JSON of its ArtTransition, since object identity changes every
+  // render) and nightlight target. ArtStage.show() runs its own crossfade as a side effect on a
+  // SIBLING component — calling it on every scrub frame would restart that crossfade
+  // continuously, so renderAt's fold loop below only calls into the runtime when the folded
+  // value actually differs from what was last issued (design spec §7b §7, ambiguity res. #1).
+  // Cleared ONLY on an actual backward seek (the `t < lastT.current` preamble in renderAt), never
+  // by resetFrom / a re-folded `clear` — review round 1 finding 1: `clear` wiping text has no
+  // bearing on what art is on screen, and foldAt re-emits every reached action (including
+  // `clear`) on EVERY forward frame, so nulling these refs from inside resetFrom re-fired
+  // art/nightlight once per frame for any beat with art/nightlight after a `clear`.
+  const appliedArt = useRef<string | null>(null);
+  const appliedNight = useRef<number | null>(null);
+  // Fold indices of already-issued one-shot runtime side effects (reveal_arrows, pulse_arrow —
+  // review round: these have no natural "value" to diff against the way art/nightlight do, so
+  // they're guarded by INDEX instead of value, but otherwise reuse the exact same mechanism:
+  // cleared on a new beat and on any backward seek (never by resetFrom / a re-folded destructive
+  // action), so foldAt re-emitting the same reached action on every forward frame fires it only
+  // once, while a backward-seek-then-forward-re-crossing correctly re-fires it. `reveal_again` is
+  // NOT tracked here — its effect is derivable state (see renderAt), not a one-shot call.
+  const firedOnce = useRef<Set<number>>(new Set());
+  // The `wipeBoundary` (see renderAt) computed as of the END of the PREVIOUS renderAt call —
+  // i.e. the index of the last destructive action (clear / settled fade_out) whose full wipe
+  // (resetFrom(0) + host.innerHTML="") is already reflected in the DOM. renderAt recomputes
+  // wipeBoundary FRESH from `t` on every call (forward or backward) and compares it against this
+  // ref to decide whether a NEW wipe is needed, then unconditionally resyncs it to the fresh
+  // value. That resync (not a one-way "mark done and never look back" flag) is what makes a
+  // backward-seek-then-forward-again round trip re-trigger the wipe correctly — review round 2's
+  // critical finding was exactly a version of this ref that only ever moved forward, which a
+  // backward seek into an in-flight `fade_out` (still not settled, so no wipe should have counted
+  // as done yet) left stuck past where it should have re-armed.
+  const lastDestructive = useRef(-1);
+  const lastT = useRef(0);
   const [againRevealed, setAgainRevealed] = useState(false);
 
   useGSAP(() => {
     const host = scope.current;
     if (!host) return;
     const textHost = host.querySelector<HTMLElement>(".cin__text")!;
-    // useGSAP defers context cleanup to unmount (not dependency change), so kill the
-    // previous beat's master timeline + loopers explicitly to avoid zombie timelines
-    // playing stale text/art into the new beat.
-    masterRef.current?.kill();
+    // useGSAP defers context cleanup to unmount (not dependency change), so stop the
+    // previous beat's ticker explicitly to avoid a zombie ticker driving renderAt against
+    // stale refs after the new beat's setup below resets them.
+    pause();
     fadeRef.current?.kill();
     fadeRef.current = null;
-    loopers.current.forEach((t) => t.kill());
-    loopers.current = [];
+    built.current.forEach((entry) => entry.tl?.kill());
+    built.current.clear();
+    // A new beat starts with nothing yet issued to the runtime and nothing yet destructively
+    // wiped, regardless of what the PREVIOUS beat last applied — otherwise a new beat whose
+    // first mid-timeline art/nightlight action happens to match the previous beat's last-issued
+    // value would be (wrongly) skipped as a no-op diff.
+    appliedArt.current = null;
+    appliedNight.current = null;
+    firedOnce.current.clear();
+    lastDestructive.current = -1;
+    lastT.current = 0;
     clearLineBoxes();
     clearCounter();
     clearMedia();
@@ -129,72 +188,65 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // would be stuck invisible). Show end art + all text at rest, then wait.
     const staticMode = !animate || document.visibilityState !== "visible";
     if (staticMode) {
+      // Establish the FULL, self-contained end-state art stack directly (design spec §7b §7,
+      // ambiguity res. #3): resolveEnd() folds this beat's entry op AND every one of its
+      // mid-timeline `art` actions across the WHOLE deck from beat 0 — unlike the non-static
+      // path below (which folds incrementally onto ArtStage's own carried-over live stack,
+      // valid only because live playback always visits beats in sequence), static mode may be
+      // the very first (and only) render of this beat's CinematicSlide instance — e.g. a PDF
+      // page for beat 5 with beats 0-4 never mounted in this component tree — so it cannot rely
+      // on any prior beat having primed ArtStage's live stack. `renderAt(duration())` below
+      // still re-reaches this beat's own mid-timeline `art`/`nightlight` actions and re-issues
+      // them through the normal applyArt/setNightlight diffing path — a genuine double-issue,
+      // REDUNDANT AND HARMLESS ONLY BECAUSE no mid-timeline `art` action in this codebase today
+      // uses `keep`/`out`: applyArt with no `keep`/`out` unconditionally discards its input and
+      // resets to exactly `[...to]`, so re-folding it onto the already-resolved stack still
+      // converges to the same layers `resolveEnd()` already painted. THE INSTANT a beat's
+      // mid-timeline `art` action carries `keep` or `out`, this guarantee breaks: `keep`/`out`
+      // filter against whatever stack they're handed, and this redundant call hands them the
+      // ALREADY-FULLY-RESOLVED end stack rather than the true pre-transition stack `resolveEnd`'s
+      // own fold used — risking duplicate layer entries or a wrong final composition. Revisit
+      // this branch (e.g. suppress renderAt's art/nightlight dispatch for this one static call)
+      // if/when a `keep`/`out` mid-timeline `art` action is authored anywhere (see task 11
+      // report — flagged and deferred, not fixed, per the brief's literal replacement).
       runtime.art(runtime.resolveEnd(), "cut");
-      // Replay the timeline's text steps to the settled end-state, honoring `clear`
-      // (so a beat that clears then shows new text doesn't stack both).
-      let counterStatic: { a: Extract<Action, { kind: "counter_show" }>; value: number } | null = null;
-      const mediaStatic = new Map<string, Extract<Action, { kind: "media" }>>();
-      for (const a of slots.beat.timeline) {
-        if (a.kind === "clear" || a.kind === "fade_out") { textHost.innerHTML = ""; clearLineBoxes(); }
-        else if (a.kind === "text") {
-          if (print && a.screenOnly) continue;
-          const el = a.append
-            ? appendFragment(a.value)
-            : appendText(a.pos ? makeLineBox(a.pos, a.align) : textHost, a.value, a.size, a.align, a.dots, true, a.tone);
-          if (a.in === "cursive") el.classList.add("cin__line--cursive");
-        }
-        else if (a.kind === "rotateList" && a.items[0]) appendText(textHost, a.items[0], a.size ?? "md", undefined, false, true);
-        else if (a.kind === "reveal_again") setAgainRevealed(true);
-        else if (a.kind === "counter_show") counterStatic = { a, value: a.value ?? 0 };
-        else if (a.kind === "counter_to" && counterStatic) counterStatic.value = a.value;
-        else if (a.kind === "counter_add" && counterStatic) counterStatic.value += a.delta;
-        else if (a.kind === "counter_hide") counterStatic = null;
-        else if (a.kind === "media") mediaStatic.set(a.id, a);
-        else if (a.kind === "media_move") { const m = mediaStatic.get(a.id); if (m) mediaStatic.set(a.id, { ...m, pos: a.to }); }
-        else if (a.kind === "media_out") { if (a.id) mediaStatic.delete(a.id); else mediaStatic.clear(); }
-      }
-      if (counterStatic) showCounter({ ...counterStatic.a, value: counterStatic.value });
-      mediaStatic.forEach((m) => { const el = makeMediaEl(m); stageParent()?.appendChild(el); mediaTiles.current.set(m.id, el); });
+      // The settled state IS the fold at the end of the axis: every action kind (text, clear,
+      // fade_out, counters, media, art, nightlight, rotateList, reveal_again, the one-shot
+      // arrows/pulse calls) already renders correctly from renderAt(t) — Tasks 5-8 built exactly
+      // that. Folding to `duration()` in one call reaches every action fully settled, so this
+      // replaces the old hand-written replay loop with no behaviour left to hand-maintain here.
+      renderAt(duration());
       runtime.onWaiting(true);
-      return;
+      // Task 9 review finding 2: `play()` is now externally reachable via `transport` — before
+      // this task, nothing outside this effect could ever start a ticker in static mode, so no
+      // cleanup was needed here. That's no longer true (even though no production caller does
+      // this yet — Task 10 wires one), so this branch needs the same pause()-on-unmount/rerun
+      // guarantee the non-static branch has below. renderAt() itself never starts a ticker (only
+      // play() does), so this stays synchronous and one-shot; pause() here is just symmetry with
+      // the non-static branch's cleanup, guarding against any future caller reaching `transport`.
+      return () => { pause(); };
     }
 
     // Entry art: resolveEntry() already folds this beat's entry transition, so show
     // it as an absolute cross-fade using the entry op's mode.
     if (slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs);
 
-    // Split the timeline into segments at click_gate boundaries; play one at a time and
-    // wait for the user's forward input between them (robust intra-beat click-stepping —
-    // GSAP addPause can't reliably stop callbacks scheduled at the same tick as the pause).
-    const segments: Action[][] = [[]];
-    for (const a of slots.beat.timeline) {
-      if (a.kind === "click_gate") segments.push([]);
-      else segments[segments.length - 1].push(a);
-    }
-    let segIdx = 0;
-    const playSegment = () => {
-      const seg = gsap.timeline({
-        onComplete: () => {
-          if (segIdx < segments.length - 1) {
-            segIdx++;
-            runtime.onGate(playSegment); // pause here; the user's next forward input resumes
-          } else {
-            runtime.onWaiting(true);
-          }
-        },
-      });
-      masterRef.current = seg;
-      for (const a of segments[segIdx]) scheduleAction(seg, a, textHost);
-      if (!segments[segIdx].length) seg.to({}, { duration: 0.001 }); // empty segment still ticks → onComplete
-    };
-    playSegment();
+    // Autoplay from t=0 — observable behaviour is unchanged from the old per-segment
+    // machinery (design spec §7b §4.4): a ticker now drives the single time axis instead of
+    // N GSAP timelines, pausing at each click_gate and handing `resume` to runtime.onGate,
+    // exactly as the segment machinery did. Most callers (today) never touch `transport` at
+    // all; the ref just gives a scrubber somewhere to grab onto later.
+    play();
 
-    // master + rotateList loops are created here / in deferred callbacks; kill them
-    // on unmount (deps re-run also kills them at the top of the effect above).
+    // built effect timelines are created here / in deferred callbacks; kill them on unmount
+    // (deps re-run also kills them at the top of the effect above). The ticker itself is
+    // stopped via pause() — critical: gsap.ticker.add has no other owner, so a beat change or
+    // unmount that forgets this leaves a zombie ticker calling renderAt forever (ambiguity
+    // res. #1).
     return () => {
-      masterRef.current?.kill();
-      loopers.current.forEach((t) => t.kill());
-      loopers.current = [];
+      pause();
+      built.current.forEach((entry) => entry.tl?.kill());
+      built.current.clear();
       clearLineBoxes();
       clearCounter();
       clearMedia();
@@ -292,6 +344,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return scope.current?.querySelector<HTMLElement>(".cin__stage") ?? scope.current;
   }
 
+  /** Build the counter's DOM at rest (opacity 1, no offset) — no entrance animation here;
+   *  renderAt's paint step applies the eased entrance itself, driven by fold progress, and
+   *  scrubs opacity/offset afterward (design spec §7b §5). */
   function showCounter(a: Extract<Action, { kind: "counter_show" }>) {
     clearCounter();
     const box = document.createElement("div");
@@ -309,44 +364,47 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     }
     const valueEl = document.createElement("div");
     valueEl.className = "cin__counter-value";
-    const value = a.value ?? 0;
     const prefix = a.prefix ?? "";
-    valueEl.textContent = formatCounterValue(value, prefix);
+    valueEl.textContent = formatCounterValue(a.value ?? 0, prefix);
     box.appendChild(valueEl);
     stageParent()?.appendChild(box);
-    counterRef.current = { valueEl, value, prefix };
-    gsap.from(box, { opacity: 0, y: 12, duration: 0.4, ease: "power2.out" });
+    counterRef.current = { box, valueEl, prefix, a };
   }
 
-  function tweenCounter(
-    a: { kind: "counter_to"; value: number } | { kind: "counter_add"; delta: number },
-    ms: number,
-  ) {
+  /** Fade the counter to opacity `1 - p` — a direct write, not a tween (design spec §7b §5,
+   *  ambiguity res. #3). At `p >= 1` it is fully hidden, so it is torn down. renderAt's paint
+   *  step is the only caller, varying `p` per frame. */
+  function hideCounter(p: number) {
     const c = counterRef.current;
     if (!c) return;
-    const target = counterTarget(c.value, a);
-    const proxy = { v: c.value };
-    gsap.to(proxy, {
-      v: target,
-      duration: ms / 1000,
-      ease: "power2.out",
-      onUpdate: () => { c.valueEl.textContent = formatCounterValue(proxy.v, c.prefix); },
-      onComplete: () => { c.valueEl.textContent = formatCounterValue(target, c.prefix); },
-    });
-    c.value = target;
-  }
-
-  function hideCounter(ms: number) {
-    const c = counterRef.current;
-    if (!c) return;
-    const box = c.valueEl.parentElement;
-    counterRef.current = null;
-    if (box) gsap.to(box, { opacity: 0, duration: ms / 1000, onComplete: () => box.remove() });
+    if (p >= 1) { clearCounter(); return; }
+    c.box.style.opacity = String(1 - p);
   }
 
   function clearCounter() {
-    counterRef.current?.valueEl.parentElement?.remove();
+    counterRef.current?.box.remove();
     counterRef.current = null;
+  }
+
+  /** Paint the counter's displayed value + entrance/exit visuals at fold-derived progress —
+   *  a pure read of counterValueAt, never a GSAP tween (design spec §7b §5). `counter` is null
+   *  when no counter_show has been reached, or the reached one has fully hidden. `valueP` eases
+   *  the displayed number between `from`/`to`; `entranceP` eases the counter_show entrance
+   *  (opacity 0→1, y 12→0, mirroring the old gsap.from); `hideP` is the in-flight counter_hide's
+   *  own progress, or null when no hide is in flight. */
+  function paintCounter(
+    counter: { a: Extract<Action, { kind: "counter_show" }>; from: number; to: number } | null,
+    valueP: number,
+    entranceP: number,
+    hideP: number | null,
+  ) {
+    if (!counter) { clearCounter(); return; }
+    if (!counterRef.current || counterRef.current.a !== counter.a) showCounter(counter.a);
+    const c = counterRef.current!;
+    c.valueEl.textContent = formatCounterValue(counterValueAt(counter.from, counter.to, valueP), c.prefix);
+    if (hideP != null) { hideCounter(hideP); return; }
+    c.box.style.opacity = String(counterValueAt(0, 1, entranceP));
+    c.box.style.transform = `translateX(-50%) translateY(${counterValueAt(12, 0, entranceP)}px)`;
   }
 
   function makeMediaEl(a: { id: string; pos: StagePoint; src?: string; label?: string; width?: number; round?: boolean; panel?: PanelSpec }): HTMLElement {
@@ -386,155 +444,413 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return el;
   }
 
-  function showMedia(a: Extract<Action, { kind: "media" }>) {
-    mediaTiles.current.get(a.id)?.remove();
-    const el = makeMediaEl(a);
-    stageParent()?.appendChild(el);
-    mediaTiles.current.set(a.id, el);
-    const dur = (a.durationMs ?? 600) / 1000;
-    const mode = a.in ?? "fade";
-    if (mode === "flyUp") gsap.from(el, { y: 40, opacity: 0, duration: dur, ease: "power3.out" });
-    else if (mode === "pop") gsap.from(el, { scale: 0.8, opacity: 0, duration: dur, ease: "back.out(2)" });
-    else if (mode === "fadeSide") gsap.from(el, { x: 24, opacity: 0, duration: dur, ease: "power2.out" });
-    else gsap.from(el, { opacity: 0, duration: dur, ease: "power2.out" });
-  }
-
-  function moveMedia(a: Extract<Action, { kind: "media_move" }>) {
-    const el = mediaTiles.current.get(a.id);
-    if (!el) return;
-    gsap.to(el, {
-      left: `${a.to.x * 100}%`,
-      top: `${a.to.y * 100}%`,
-      ...(a.scale != null ? { scale: a.scale } : {}),
-      duration: (a.durationMs ?? 800) / 1000,
-      ease: "power3.inOut",
-    });
-  }
-
-  function outMedia(a: Extract<Action, { kind: "media_out" }>) {
-    const dur = (a.durationMs ?? 500) / 1000;
-    const ids = a.id ? [a.id] : [...mediaTiles.current.keys()];
-    for (const id of ids) {
-      const el = mediaTiles.current.get(id);
-      if (!el) continue;
-      mediaTiles.current.delete(id);
-      gsap.to(el, { opacity: 0, duration: dur, onComplete: () => el.remove() });
-    }
-  }
-
   function clearMedia() {
     mediaTiles.current.forEach((el) => el.remove());
     mediaTiles.current.clear();
   }
 
-  function scheduleAction(master: gsap.core.Timeline, a: Action, host: HTMLElement) {
-    switch (a.kind) {
-      case "text": {
-        // Investor deck: no text-in transition. Append the line at rest and reserve a tick so the
-        // segment still completes (→ click_gate / onWaiting). click-stepping is unaffected.
-        // A line with `reveal: true` opts back into its `in` animation (falls through below).
-        if (instantText && !a.reveal) {
-          master.add(() => {
-            const el = a.append
-              ? appendFragment(a.value)
-              : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, true, a.tone);
-            if (a.in === "cursive") el.classList.add("cin__line--cursive");
-          });
-          master.to({}, { duration: 0.01 });
-          break;
+  /** Paint every media tile's position/scale/opacity at fold-derived progress — a pure read
+   *  of mediaStateAt, never a GSAP tween (design spec §7b §6). `fold` is this renderAt call's
+   *  full run of reached media actions (in fold order); `state` is mediaStateAt's result keyed
+   *  by tile id. A tile tracked in mediaTiles.current with no entry in `state` predates the
+   *  current `media` action's reach (a backward seek past it) and is torn down; an id in
+   *  `state` with no DOM tile yet is built via makeMediaEl from its `media` show action, found
+   *  by scanning `fold`. Because this is recomputed from scratch on every call (not carried as
+   *  tween state), backward seek falls out for free. */
+  function paintMedia(fold: MediaFold[], state: Map<string, MediaRenderState>) {
+    for (const [id, el] of mediaTiles.current) {
+      if (!state.has(id)) { el.remove(); mediaTiles.current.delete(id); }
+    }
+    if (!state.size) return;
+    let showActions: Map<string, Extract<Action, { kind: "media" }>> | null = null;
+    for (const [id, s] of state) {
+      let el = mediaTiles.current.get(id);
+      if (!el) {
+        if (!showActions) {
+          showActions = new Map();
+          for (const { action } of fold) if (action.kind === "media") showActions.set(action.id, action);
         }
-        // Inline links can't survive SplitText (it re-splits the anchor text); fall back to a
-        // line-level fade when a per-piece effect is paired with a linked value. Hoisted out of
-        // the master.add callback so the time-reservation below can size by the effective effect.
-        const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive"];
-        const effIn: TextIn = hasInlineMarkup(a.value) && perPiece.includes(a.in) ? "fade" : a.in;
-        master.add(() => {
-          const el = a.append
-            ? appendFragment(a.value) // inline fragment on the current line
-            : appendText(a.pos ? makeLineBox(a.pos, a.align) : host, a.value, a.size, a.align, a.dots, false, a.tone);
-          if (a.in === "cursive") el.classList.add("cin__line--cursive"); // script font + larger size
-          const dir = a.align === "right" ? "right" : "left"; // letterFly follows justification
-          const tl =
-            effIn === "flyUp" ? flyUp(el, a.speed) :
-            effIn === "fadeSide" ? fadeSide(el, a.speed) :
-            effIn === "cursive" ? typewriter(el, a.speed ?? 0.2) :
-            effIn === "letterFly" ? letterFly(el, dir, a.speed) :
-            effIn === "letterUp" ? letterUp(el, a.speed) :
-            effIn === "wordUp" ? wordUp(el, a.speed, !a.append) :
-            effIn === "blurIn" ? blurIn(el, a.speed) :
-            effIn === "typewriter" ? typewriter(el, a.speed) : fadeIn(el, a.speed);
-          if (a.dots) { const d = el.querySelector<HTMLElement>(".dots"); if (d) tl.add(dotFade(d)); }
-          return tl;
-        });
-        // Reserve ≈ this line's intro duration so the master's onComplete (→ onWaiting)
-        // fires after the line settles, not before. Tune pacing/overlap live in Phase 2.
-        master.to({}, { duration: introDuration({ ...a, in: effIn }) });
-        break;
+        const a = showActions.get(id);
+        if (!a) continue; // no show action reached yet for this id (shouldn't happen: mediaStateAt only emits ids it has seen)
+        el = makeMediaEl(a);
+        stageParent()?.appendChild(el);
+        mediaTiles.current.set(id, el);
       }
-      case "rotateList": {
-        master.add(() => {
-          const slot = document.createElement("span");
-          slot.className = `cin__rotslot cin__line--${a.size ?? "md"}`; // size from cinematic-style (default md)
-          host.appendChild(slot);
-          const loop = rotateList(slot, a.items);
-          loopers.current.push(loop);
-        });
-        break;
-      }
-      // Clears the text/free-lines only — the intro logo+tagline persist (they leave when
-      // the beat unmounts on advance), so clearing a CTA line doesn't drop the splash.
-      case "clear": master.add(() => {
-        loopers.current.forEach((t) => t.kill()); loopers.current = []; host.innerHTML = ""; clearLineBoxes();
-      }); break;
-      case "art": master.add(() => runtime.applyArt(a.art, a.art.durationMs)); break;
-      case "nightlight": master.add(() => runtime.setNightlight(a.to, a.durationMs)); break;
-      // cue / note_emitter / note_circle / stop_circle / stop_notes are NOT scheduled here.
-      // Note sources render from the pure noteFieldStateAt reducer via NoteField (see
-      // engine/components/effects/note-state.ts), driven by whatever clock the host supplies —
-      // the same split objects use. `cue` is inert; the kind survives in types.ts for
-      // deck-format compatibility only.
-      // click_gate is a segment boundary handled in useGSAP (timeline segmentation), not here.
-      case "click_gate": break;
-      case "reveal_arrows": master.add(() => runtime.revealArrows()); break;
-      case "reveal_again": master.add(() => setAgainRevealed(true)); break;
-      case "pulse_arrow": master.add(() => runtime.pulseArrow(a.which, a.scale ?? 3)); break;
-      case "fade_out": {
-        const d = (a.durationMs ?? 500) / 1000;
-        // Fade the live text out, then clear it as a SEQUENCED master step (the clear
-        // must run before the master plays the next actions, or a following `text`
-        // append races it). Track the tween so the cleanup can KILL it before restoring
-        // opacity — otherwise the still-live tween renders its final opacity:0 frame
-        // after clearProps and leaves the (persistent, reused) box invisible.
-        master.add(() => {
-          fadeRef.current = gsap.to([host, ...lineBoxes.current], { opacity: 0, duration: d, ease: "power2.inOut" });
-        });
-        master.to({}, { duration: d }); // let the fade play out
-        master.add(() => {
-          fadeRef.current?.kill();
-          fadeRef.current = null;
-          loopers.current.forEach((t) => t.kill());
-          loopers.current = [];
-          host.innerHTML = "";
-          clearLineBoxes();
-          gsap.set(host, { clearProps: "opacity" }); // restore the box so the next line is visible
-        });
-        break;
-      }
-      case "wait": master.to({}, { duration: a.ms / 1000 }); break;
-      case "counter_show": master.add(() => showCounter(a)); master.to({}, { duration: 0.4 }); break;
-      case "counter_to":
-      case "counter_add": {
-        const ms = a.durationMs ?? 800;
-        master.add(() => tweenCounter(a, ms));
-        master.to({}, { duration: ms / 1000 });
-        break;
-      }
-      case "counter_hide": master.add(() => hideCounter(a.durationMs ?? 400)); break;
-      case "media": master.add(() => showMedia(a)); master.to({}, { duration: (a.durationMs ?? 600) / 1000 }); break;
-      case "media_move": master.add(() => moveMedia(a)); master.to({}, { duration: (a.durationMs ?? 800) / 1000 }); break;
-      case "media_out": master.add(() => outMedia(a)); master.to({}, { duration: (a.durationMs ?? 500) / 1000 }); break;
+      el.style.left = `${s.x * 100}%`;
+      el.style.top = `${s.y * 100}%`;
+      el.style.opacity = String(s.opacity);
+      gsap.set(el, { scale: s.scale });
     }
   }
+
+  /** Shared ease selector: builds the reveal-effect timeline for a text line's (possibly
+   *  downgraded) `in` style. buildText's sole caller. */
+  function buildTextEffect(el: HTMLElement, effIn: TextIn, a: Extract<Action, { kind: "text" }>): gsap.core.Timeline {
+    const dir = a.align === "right" ? "right" : "left"; // letterFly follows justification
+    const tl =
+      effIn === "flyUp" ? flyUp(el, a.speed) :
+      effIn === "fadeSide" ? fadeSide(el, a.speed) :
+      effIn === "cursive" ? typewriter(el, a.speed ?? 0.2) :
+      effIn === "letterFly" ? letterFly(el, dir, a.speed) :
+      effIn === "letterUp" ? letterUp(el, a.speed) :
+      effIn === "wordUp" ? wordUp(el, a.speed, !a.append) :
+      effIn === "blurIn" ? blurIn(el, a.speed) :
+      effIn === "typewriter" ? typewriter(el, a.speed) : fadeIn(el, a.speed);
+    if (a.dots) { const d = el.querySelector<HTMLElement>(".dots"); if (d) tl.add(dotFade(d)); }
+    return tl;
+  }
+
+  /** Build one text action's element + its real reveal timeline, paused at 0 — the only place
+   *  text elements/timelines are built (design spec §7b §4.2). */
+  function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement } {
+    const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive"];
+    const effIn: TextIn = hasInlineMarkup(a.value) && perPiece.includes(a.in) ? "fade" : a.in;
+    // instantText / no-reveal lines have no entrance: they render at rest, and their dots
+    // render already-faded-in via `instant`.
+    const instant = !!(instantText && !a.reveal);
+    // `box` is only created (and only tracked) for a non-append, `pos`-bearing line — capture
+    // it so resetFrom can tear it down alongside `el` (see the `built` ref's comment).
+    let box: HTMLElement | undefined;
+    const el = a.append
+      ? appendFragment(a.value)
+      : appendText(a.pos ? (box = makeLineBox(a.pos, a.align)) : host, a.value, a.size, a.align, a.dots, instant, a.tone);
+    if (a.in === "cursive") el.classList.add("cin__line--cursive");
+    if (instant) return { el, tl: null, box };
+    const tl = buildTextEffect(el, effIn, a);
+    tl.pause(0);
+    return { el, tl, box };
+  }
+
+  /** Drop every cached entry from `index` onward, killing its (paused) tween and removing
+   *  its DOM. A rebuild then re-runs those actions from scratch on the next renderAt —
+   *  used both for the backward-seek boundary and for a settled clear/fade_out, which
+   *  wipe everything built before them (design spec §7b §4.3). */
+  function resetFrom(index: number) {
+    // Deliberately does NOT touch appliedArt/appliedNight: resetFrom(0) is also called from the
+    // forward-fold `clear`/settled-`fade_out` branches below, which are re-run on EVERY forward
+    // frame once reached (foldAt re-emits every reached action, every call) — nulling the art
+    // refs here would re-issue art/nightlight once per frame for any beat with one after a
+    // `clear` (review round 1, finding 1). Clearing text has no bearing on what art is on
+    // screen. Only an actual backward seek invalidates already-issued art/nightlight state; see
+    // the `t < lastT.current` preamble in renderAt.
+    for (const [i, entry] of built.current) {
+      if (i < index) continue;
+      entry.tl?.kill();
+      entry.el.remove();
+      // A `pos`-bearing text action's wrapper box is a separate node from `el` (see buildText)
+      // — remove it too, and splice it out of lineBoxes.current, or it strands an empty box in
+      // the stage and a detached node in that array (design spec §7b §4.3).
+      if (entry.box) {
+        entry.box.remove();
+        const bi = lineBoxes.current.indexOf(entry.box);
+        if (bi !== -1) lineBoxes.current.splice(bi, 1);
+      }
+      built.current.delete(i);
+    }
+  }
+
+  /** Paint the beat's visual state at beat-local time `t` — text, clear/fade_out, counter,
+   *  media, art, nightlight, and rotateList actions all render from here now (Tasks 5-8). PAUSED
+   *  timelines only; renderAt is the sole thing that ever advances them (design spec §7b §4.2). */
+  function renderAt(t: number) {
+    const host = scope.current?.querySelector<HTMLElement>(".cin__text");
+    if (!host) return;
+    // Backward seek: rebuild from the last destructive boundary at or before t. Deletion
+    // (clear / settled fade_out) can't be undone by rewinding a tween, so everything built
+    // at/after that boundary must be torn down; the fold loop below re-runs it from scratch.
+    if (t < lastT.current) {
+      const boundary = rebuildBoundary(slots.beat.timeline, t);
+      resetFrom(boundary + 1);
+      if (boundary < 0) { host.innerHTML = ""; clearLineBoxes(); }
+      // An actual backward seek — and ONLY a backward seek, never a re-folded `clear` on a
+      // forward frame — invalidates already-issued art/nightlight (ambiguity res. #3), and (by
+      // the same reasoning) already-fired one-shot side effects (reveal_arrows/pulse_arrow):
+      // clearing the whole set means anything still reached at the new `t` fires again this same
+      // call, and anything not yet re-reached fires again when forward-crossed later.
+      appliedArt.current = null;
+      appliedNight.current = null;
+      firedOnce.current.clear();
+    }
+    // Counter state is a fold over the reached actions (design spec §7b §5): counter_show
+    // seeds {from,to}; counter_to/counter_add advance it, tracking `from` as the PREVIOUS
+    // target so an in-flight counter_to/counter_add still eases from where the counter was,
+    // not from 0; counter_hide clears it once settled. Painted once after the loop, at the
+    // in-flight entry's own progress — never a GSAP tween. Because this is recomputed from
+    // scratch on every call (not carried as tween state), backward seek falls out for free.
+    let counter: { a: Extract<Action, { kind: "counter_show" }>; from: number; to: number } | null = null;
+    let counterValueP = 1;     // progress for interpolating counter.value (last show/to/add entry)
+    let counterEntranceP = 1;  // progress for the counter_show action's own entrance
+    let counterHideP: number | null = null; // in-flight counter_hide's own progress, else null
+    // Media actions are collected here (in fold order) and handed to the pure mediaStateAt
+    // reducer once the loop completes, then painted — same "fold, then paint" shape as the
+    // counter above (design spec §7b §6).
+    const mediaFold: MediaFold[] = [];
+    // reveal_again's effect (show the ending CTA block) is DERIVABLE state, not an event: it is
+    // revealed exactly when the fold has reached a reveal_again action, recomputed fresh on
+    // every call — review round finding 1. That makes it correct under backward seek for free,
+    // with no issued-guard to keep in sync (unlike reveal_arrows/pulse_arrow below, which have
+    // no readable state to derive from and so stay genuinely edge-triggered).
+    let revealAgain = false;
+    // The shared text box's (and any live line box's) opacity is likewise DERIVABLE, not an
+    // event: `null` means "no reached, in-flight fade_out" (the default, unset opacity);
+    // otherwise it's that fade_out's own local progress, painted below by ONE unconditional
+    // write after the loop. This is what final review's Critical finding was missing — every
+    // other fold output here (counter, media, revealAgain, wipeBoundary) is recomputed fresh
+    // and painted unconditionally every call; opacity used to be the lone exception, written
+    // only *while* a fade_out was in flight with no "else, restore the default" branch, so a
+    // backward seek landing before that fade_out's start never un-wrote it. Computing the value
+    // here and painting it unconditionally (rather than a targeted "clear it on backward seek
+    // past a fade_out" special case) removes the class of bug, not just this reproduction.
+    let fadeOutP: number | null = null;
+
+    const foldEntries = foldAt(slots.beat.timeline, t);
+
+    // The index of the LAST destructive action (`clear`, or a `fade_out` that has fully
+    // SETTLED) among the actions reached by t — recomputed FRESH from `t` on every call,
+    // forward or backward, the same way counter/media state is above (never carried forward as
+    // incremental "already applied" tween state). Any text action before this index must never
+    // render: `clear` and a settled `fade_out` permanently wipe everything built before them
+    // (design spec §7b §4.3). `clear` is always settled instantly (0 duration); an in-flight
+    // `fade_out` has NOT wiped anything yet — it takes the scrubbable opacity-ramp branch below,
+    // not this one — so it must not suppress text still fading through it.
+    //
+    // Review round 2 critical: computing this FRESH every call (rather than remembering a
+    // "highest destructive index already torn down" flag that only ever moves forward) is what
+    // fixes the round-trip bug. The previous version marked a destructive index "done" the first
+    // time it was reached, including while still in-flight; a backward seek into that in-flight
+    // window, followed by a forward re-seek past its settlement, then saw "already done" and
+    // skipped the real teardown, stranding the pre-fade text permanently. It also (independently)
+    // surfaces on a purely FORWARD multi-frame scrub with no backward seek at all: once `clear`'s
+    // one-time wipe ran, the fold loop still re-reaches the pre-clear text action on every later
+    // frame (foldAt re-emits every reached action every call) — with no skip-guard, that text
+    // gets rebuilt from scratch each frame (wastefully) and, because the wipe was already marked
+    // "done", is never removed again, leaking back into the DOM alongside the post-clear text.
+    let wipeBoundary = -1;
+    for (const f of foldEntries) {
+      if (f.action.kind === "clear") wipeBoundary = f.index;
+      else if (f.action.kind === "fade_out" && f.phase === "settled") wipeBoundary = f.index;
+    }
+    // Physically wipe the built text cache/DOM exactly when wipeBoundary has grown past what was
+    // already torn down — never on every re-fold of the same settled boundary (review round 1,
+    // finding 3: that defeated the `built` cache, and independently kept re-nulling the
+    // art/nightlight refs, for any beat with a `clear`/`fade_out`). A backward seek that LOWERS
+    // wipeBoundary does not re-wipe here (moving backward destroys nothing new — the preamble
+    // above already tore down what a backward seek invalidates); it only resyncs the tracked
+    // value below, so a LATER forward re-crossing of the same boundary correctly re-triggers this
+    // wipe rather than seeing a stale "already applied" value from before the round trip.
+    if (wipeBoundary > lastDestructive.current) {
+      resetFrom(0);
+      host.innerHTML = "";
+      clearLineBoxes();
+      gsap.set(host, { clearProps: "opacity" }); // harmless no-op when the boundary was a `clear`, which never touches opacity
+    }
+    lastDestructive.current = wipeBoundary;
+
+    for (const f of foldEntries) {
+      if (f.action.kind === "counter_show") {
+        counter = { a: f.action, from: f.action.value ?? 0, to: f.action.value ?? 0 };
+        counterValueP = 1;
+        counterEntranceP = f.p;
+        counterHideP = null;
+        continue;
+      }
+      if (f.action.kind === "counter_to") {
+        if (counter) counter = { ...counter, from: counter.to, to: f.action.value };
+        counterValueP = f.p;
+        continue;
+      }
+      if (f.action.kind === "counter_add") {
+        if (counter) counter = { ...counter, from: counter.to, to: counter.to + f.action.delta };
+        counterValueP = f.p;
+        continue;
+      }
+      if (f.action.kind === "counter_hide") {
+        counterHideP = f.p;
+        if (f.phase === "settled") counter = null; // fully hidden: paintCounter tears it down
+        continue;
+      }
+      if (f.action.kind === "clear") continue; // its (idempotent) teardown already ran above, via wipeBoundary
+      if (f.action.kind === "fade_out") {
+        // Settled: its teardown already ran above, via wipeBoundary — nothing left to do here.
+        if (f.phase === "settled") continue;
+        // In-flight: record the opacity ramp's local progress (pure, from beatTimeline — never
+        // from a built tween's .duration()). Nothing is deleted yet, so a seek that lands
+        // mid-fade can still scrub back out of it without a rebuild. The actual DOM write is
+        // unconditional, after the loop (see fadeOutP above) — not here — so there is no
+        // incremental write for a later, non-fade_out frame to fail to un-write.
+        fadeOutP = f.p;
+        continue;
+      }
+      if (f.action.kind === "media" || f.action.kind === "media_move" || f.action.kind === "media_out") {
+        mediaFold.push({ action: f.action, p: f.p });
+        continue;
+      }
+      if (f.action.kind === "art") {
+        // Diff against the last-issued transition, not the fold's own phase: the fold re-emits
+        // this same entry on every frame within the action's window (settled or in-flight), and
+        // ArtStage.show() runs its own crossfade as a side effect, so re-issuing on every frame
+        // would restart that crossfade continuously (design spec §7b §7). Compare by a stable,
+        // field-order-independent key (artKey, above) since the action's object identity changes
+        // every render and its own key insertion order is not guaranteed stable (finding 2).
+        const key = artKey(f.action.art);
+        if (appliedArt.current !== key) {
+          appliedArt.current = key;
+          // Settled → land instantly (duration 0, snap-like). In-flight → let ArtStage run its
+          // own crossfade once, over the action's own authored duration (ambiguity res. #2,
+          // mirroring seek.ts's applyAt settled/in-flight split for `art`).
+          runtime.applyArt(f.action.art, f.phase === "settled" ? 0 : f.action.art.durationMs);
+        }
+        continue;
+      }
+      if (f.action.kind === "nightlight") {
+        if (appliedNight.current !== f.action.to) {
+          appliedNight.current = f.action.to;
+          runtime.setNightlight(f.action.to, f.phase === "settled" ? 0 : f.action.durationMs);
+        }
+        continue;
+      }
+      if (f.action.kind === "reveal_again") { revealAgain = true; continue; }
+      // Genuinely one-shot external calls with nothing to diff against by value (unlike
+      // art/nightlight) — guarded by fold INDEX in `firedOnce` instead, so foldAt re-emitting
+      // the same reached action on every forward frame fires it only once, and a backward seek
+      // (which clears `firedOnce` wholesale, above) re-fires it on forward re-crossing.
+      if (f.action.kind === "reveal_arrows") {
+        if (!firedOnce.current.has(f.index)) { firedOnce.current.add(f.index); runtime.revealArrows(); }
+        continue;
+      }
+      if (f.action.kind === "pulse_arrow") {
+        if (!firedOnce.current.has(f.index)) { firedOnce.current.add(f.index); runtime.pulseArrow(f.action.which, f.action.scale ?? 3); }
+        continue;
+      }
+      // Permanently wiped by a LATER destructive action (clear / settled fade_out) — never
+      // rebuild it. Without this guard, an action before wipeBoundary that isn't (yet, or
+      // any longer) in the `built` cache would be rebuilt here every time it's reached, only to
+      // rely on the (now idempotent, no-op-after-the-first-time) `clear`/`fade_out` branch above
+      // to remove it again — which no longer happens on repeat visits, stranding it in the DOM.
+      // Shared by both `built`-cached kinds below (text and rotateList).
+      if (f.index < wipeBoundary) continue;
+      if (f.action.kind === "rotateList") {
+        // No GSAP loop, no `tl` — an infinite `repeat: -1` loop can't be seeked as a tween, so
+        // the visible item is derived from elapsed time instead (design spec §7b §5, ambiguity
+        // res. #1/#2). `actionDuration` returns 0 for rotateList (it occupies no time on the
+        // axis), so `f.p` is always 1 the instant it's reached — phase must be measured from
+        // this action's own `start`, i.e. `t - f.start`, not `t` or `f.p`.
+        let entry = built.current.get(f.index);
+        if (!entry) {
+          const slot = document.createElement("span");
+          slot.className = `cin__rotslot cin__line--${f.action.size ?? "md"}`;
+          host.appendChild(slot);
+          entry = { el: slot, tl: null };
+          built.current.set(f.index, entry);
+        }
+        entry.el.textContent = rotateItemAt(f.action.items, t - f.start);
+        continue;
+      }
+      if (f.action.kind !== "text") continue;
+      // PDF/print suppresses screen-only lines (design: narration meant for the on-screen
+      // reveal, not the printed page) — the action still occupies its own time on the axis
+      // (it's still a reached fold entry, still counts toward wipeBoundary/lastDestructive
+      // above), only whether it gets BUILT is skipped. Mirrors the old hand-written static
+      // loop's `if (print && a.screenOnly) continue`, which this renderAt-based fold replaced;
+      // that check lived ONLY in the static loop, so unifying static mode onto renderAt (task
+      // 11) had silently dropped it for every caller — restored here, in the one shared fold,
+      // so it now also applies to a live/animated `print` render (which never honoured it).
+      if (print && f.action.screenOnly) continue;
+      let entry = built.current.get(f.index);
+      if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
+      if (!entry.tl) continue; // rendered at rest
+      // Settled: jump to end by PROGRESS, not by reading the timeline's own .duration() —
+      // that would derive a duration off a built GSAP timeline, which the pure beatTimeline()
+      // clock (not GSAP) must remain the sole source of truth for (design spec §7b, Global
+      // Constraints). In-flight: map absolute t onto this action's local elapsed time.
+      if (f.phase === "settled") entry.tl.progress(1);
+      else entry.tl.time(t - f.start);
+    }
+    // Paint the derived opacity UNCONDITIONALLY, every call — not only while a fade_out is in
+    // flight. Default (no reached, in-flight fade_out): clearProps, matching a fresh mount's
+    // never-touched inline style exactly (a plain `opacity: 1` would leave a non-empty style
+    // attribute a fresh mount never has, which a symmetry check against a fresh mount would
+    // catch). Otherwise: that fade_out's own local progress. Using `[host, ...lineBoxes.current]`
+    // here (the final, post-loop set) rather than inline mid-loop also means a line box created
+    // by a later-in-fold-order text action still gets the same treatment.
+    if (fadeOutP == null) gsap.set([host, ...lineBoxes.current], { clearProps: "opacity" });
+    else gsap.set([host, ...lineBoxes.current], { opacity: 1 - fadeOutP });
+    paintCounter(counter, counterValueP, counterEntranceP, counterHideP);
+    paintMedia(mediaFold, mediaStateAt(mediaFold, t));
+    setAgainRevealed(revealAgain);
+    lastT.current = t;
+    // The one clock (design spec §7b Task 10, ambiguity res. #1): every renderAt call notifies
+    // the host with the exact `t` it just painted, so a host driving sibling stages (notes,
+    // objects) off THIS callback — instead of a second ticker of its own — stays in lockstep,
+    // including pausing exactly when playback pauses at a click_gate.
+    onTime?.(t);
+  }
+
+  // --- SlideTransport: one time axis + gate boundaries, replacing the old per-segment GSAP
+  // timelines (design spec §7b §4.4). Gate boundaries are TIMES on the single axis: playback
+  // pauses at each, the editor scrubs straight through (D1).
+  const gates = beatTimeline(slots.beat.timeline)
+    .filter((w) => w.action.kind === "click_gate")
+    .map((w) => w.start);
+
+  /** === beatDuration(beat.timeline) — the pure beat-clock reading, never a GSAP timeline's
+   *  own .duration() (Global Constraints: no tl.duration() reads). */
+  function duration(): number {
+    return beatDuration(slots.beat.timeline);
+  }
+
+  /** Jump straight to `t`, clamped to [0, duration()] — never throws, including on a
+   *  zero-duration or empty beat (ambiguity res. #3). Always pause()s first (mirroring play(),
+   *  which already unconditionally pauses before it does anything else): a manual seek is the
+   *  caller taking control of the clock, and leaving a live ticker running is a real defect, not
+   *  a caller-side quirk to route around — play()'s tick closure captures `nextGate` once and
+   *  never recomputes it, so a seek across a gate boundary while the ticker is still live gets
+   *  silently undone by the very next real-time frame (Task 10 review). Callers must never need
+   *  to remember to pause() before seek() themselves. */
+  function seek(to: number) {
+    pause();
+    renderAt(Math.max(0, Math.min(duration(), to)));
+  }
+
+  /** Stop the ticker driving playback, if any. Idempotent — safe to call when already paused. */
+  function pause() {
+    if (ticker.current) {
+      gsap.ticker.remove(ticker.current);
+      ticker.current = null;
+    }
+  }
+
+  /** Start (or resume) playback from `lastT.current`. Always pause()s first, so calling play()
+   *  while already playing never double-registers a ticker. The "next gate" is searched with a
+   *  STRICT `>` against lastT.current — not `>=` — so resuming from a position sitting exactly
+   *  on a gate's own start (e.g. play() called as a gate's `resume`, or after seek(gateTime))
+   *  finds the gate AFTER it, not the one it's already sitting on. Using `>=` here would make
+   *  play() immediately re-pause on the same gate it just resumed from, deadlocking forever
+   *  (ambiguity res. #2). */
+  function play() {
+    pause();
+    const nextGate = gates.find((g) => g > lastT.current);
+    const tick = (_time: number, delta: number) => {
+      const t = lastT.current + delta / 1000;
+      if (nextGate != null && t >= nextGate) {
+        renderAt(nextGate);
+        pause();
+        runtime.onGate(play); // paused here; runtime.onGate's resume is this same play()
+        return;
+      }
+      if (t >= duration()) {
+        renderAt(duration());
+        pause();
+        runtime.onWaiting(true);
+        return;
+      }
+      renderAt(t);
+    };
+    ticker.current = tick;
+    gsap.ticker.add(tick);
+  }
+
+  useImperativeHandle(transport, () => ({ seek, play, pause, duration }));
 
   const pos = slots.beat.pos ?? DEFAULT_TEXT_POS;
   // Anchor the shared text box at `pos` per the first NON-free line's justification

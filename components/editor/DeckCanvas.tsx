@@ -2,7 +2,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { NoteField, type NoteFieldHandle } from "@/engine/components/NoteField";
-import { beatDuration, renderBeatAt } from "@/engine/authoring/seek";
+import { renderBeatAt } from "@/engine/authoring/seek";
+import { beatDuration } from "@/engine/authoring/beat-clock";
 import { useEditor } from "@/lib/editor/store";
 import { descriptorFor } from "@/lib/editor/registry";
 import { getPath } from "@/lib/editor/paths";

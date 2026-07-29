@@ -4,7 +4,7 @@ import { createRef } from "react";
 import { BeatStage } from "@/engine/authoring/BeatStage";
 import { DeckCanvas, type CanvasHandle } from "@/components/editor/DeckCanvas";
 import { useEditor } from "@/lib/editor/store";
-import { beatDuration } from "@/engine/authoring/seek";
+import { beatDuration } from "@/engine/authoring/beat-clock";
 import type { Scene, Action } from "@/engine/deck/types";
 import type { DeckDoc } from "@/engine/deck-doc";
 

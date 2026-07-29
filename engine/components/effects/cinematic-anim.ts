@@ -37,6 +37,25 @@ export function dotFade(dotsEl: HTMLElement): gsap.core.Timeline {
   return tl;
 }
 
+// The three components ROTATE_STEP is built from — named so rotateList's body and the
+// derived constant below can never drift apart (design spec §7b §5, ambiguity res. #1).
+const ROTATE_IN = 0.5;   // fromTo fly-in duration
+const ROTATE_DWELL = 1.1; // "+=" gap the fly-out is positioned after the fly-in ends
+const ROTATE_OUT = 0.45;  // fly-out duration
+
+/** Seconds one rotateList item occupies: in + dwell + out.
+ *  rotateList() below builds exactly this shape; the two must not drift. */
+export const ROTATE_STEP = ROTATE_IN + ROTATE_DWELL + ROTATE_OUT;
+
+/** The item visible `elapsed` seconds after a rotateList started. Deterministic —
+ *  an infinite GSAP loop is not seekable, so the item is derived instead
+ *  (design spec §7b §5, mirroring §7a's treatment of notes). */
+export function rotateItemAt(items: string[], elapsed: number): string {
+  if (!items.length) return "";
+  const e = elapsed > 0 ? elapsed : 0;
+  return items[Math.floor(e / ROTATE_STEP) % items.length];
+}
+
 /**
  * Cycle list items flying up into a fixed gap, holding, flying out, looping.
  * Returns the timeline (repeat: -1) so the caller can kill it when the beat advances.
@@ -45,8 +64,8 @@ export function rotateList(slotEl: HTMLElement, items: string[]): gsap.core.Time
   const tl = gsap.timeline({ repeat: -1 });
   items.forEach((text) => {
     tl.call(() => { slotEl.textContent = text; });
-    tl.fromTo(slotEl, { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: "power3.out" });
-    tl.to(slotEl, { y: -28, opacity: 0, duration: 0.45, ease: "power2.in" }, "+=1.1");
+    tl.fromTo(slotEl, { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: ROTATE_IN, ease: "power3.out" });
+    tl.to(slotEl, { y: -28, opacity: 0, duration: ROTATE_OUT, ease: "power2.in" }, `+=${ROTATE_DWELL}`);
   });
   return tl;
 }

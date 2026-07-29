@@ -1,6 +1,6 @@
 // tests/unit/action-duration-obj.test.ts
 import { expect, test } from "vitest";
-import { actionDuration, isSeekable } from "@/engine/authoring/seek";
+import { actionDuration, isSeekable } from "@/engine/authoring/beat-clock";
 import type { Action } from "@/engine/deck/types";
 
 test("obj verbs have default durations in seconds", () => {
