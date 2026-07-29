@@ -341,7 +341,10 @@ function mountSlide() {
 }
 
 const textAt = (host: HTMLElement) =>
-  [...host.querySelectorAll("p.cin__line")].map((p) => p.textContent);
+  // (Corrected during implementation: comparing textContent alone made the seek-symmetry
+  // test inert, since a rebuilt line and a scrubbed-in-place line can share text but differ
+  // in style. Now compares per-line style too.)
+  [...host.querySelectorAll("p.cin__line")].map((p) => [p.textContent, p.getAttribute("style")]);
 
 test("renderAt is deterministic: the same t twice yields the same DOM", () => {
   const { host, renderAt } = mountSlide();
@@ -427,7 +430,12 @@ function renderAt(t: number) {
     let entry = built.current.get(f.index);
     if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
     if (!entry.tl) continue;                              // rendered at rest
-    entry.tl.time(f.phase === "settled" ? entry.tl.duration() : t - f.start);
+    // (Corrected during implementation: `entry.tl.duration()` contradicts this plan's own
+    // Global Constraint that `beatTimeline()` is the canonical clock — a built GSAP timeline
+    // must never be read for a duration. The fix is `.progress(1)`, which settles the tween
+    // without asking it for one.)
+    if (f.phase === "settled") entry.tl.progress(1);
+    else entry.tl.time(t - f.start);
   }
   lastT.current = t;
 }

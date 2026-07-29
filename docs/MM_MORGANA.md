@@ -57,26 +57,88 @@ Notable in-repo docs:
   specs and implementation plans.
 - **Tier 2 §7 is decomposed** into §7a (time-pure note particles — spec
   `docs/superpowers/specs/2026-07-27-time-pure-particles-7a-design.md`), §7b (the seekable
-  transport surface) and §7c (canvas swap + parity gate + `seek.ts` deletion). §7a is the
-  first landed. **Gotcha — `CinematicSlide`'s GSAP master is a callback scheduler with time
-  spacers, not a seekable representation**: effects are scheduled via `master.add(fn)` (a
-  `delayedCall`), so the timelines the effect builders return are orphaned and run on
-  wall-clock, which is why durations are re-declared as `master.to({}, {duration})` spacers
-  and why `seek.ts` carries a second copy of `introDuration`. `master.seek(t)` therefore
-  does *not* work today — §7b is a restructure, not a control surface.
+  transport surface — spec/plan `docs/superpowers/plans/2026-07-28-transport-surface-7b.md`)
+  and §7c (canvas swap + parity gate + `seek.ts` deletion). §7a and §7b are both landed.
+  **Gotcha, now RESOLVED (§7b, 2026-07-28) — `CinematicSlide`'s GSAP master used to be a
+  callback scheduler with time spacers, not a seekable representation**: effects were
+  scheduled via `master.add(fn)` (a `delayedCall`), so the timelines the effect builders
+  returned were orphaned and ran on wall-clock, which is why durations were re-declared as
+  `master.to({}, {duration})` spacers and why `seek.ts` (see below) carried its own second
+  copy of `introDuration`. `master.seek(t)` did not work. §7b replaced this wholesale inside
+  `CinematicSlide`: see "`CinematicSlide` is seekable" below.
+- **The canonical beat time axis lives in `engine/authoring/beat-clock.ts`.** It is a pure
+  module — no DOM, no GSAP, no React — extracted from `engine/authoring/seek.ts` in §7b, which
+  now imports `beatTimeline` from it instead of carrying its own copy. `beat-clock.ts` owns
+  `beatTimeline`/`beatDuration`/`actionDuration`/`introDuration`/`foldAt`/`rebuildBoundary`:
+  everything that answers "when does X happen in this beat" or "what is reached by time t"
+  reads from here, and nowhere else derives a duration by reading a built GSAP timeline
+  (Global Constraint D2 of the §7b plan). Both pure reducers —
+  `engine/components/effects/note-state.ts` and `lib/editor/object-state.ts` — import from it
+  to fold notes and objects to the same `t` CinematicSlide renders. Note that `seek.ts` itself
+  is a separate, simpler renderer (`renderBeatAt`) still used for non-interactive preview paint
+  (`DeckCanvas`, `BeatThumbnail`, the `/spike` page) — §7b did not delete or seekify it; only
+  `CinematicSlide`'s own live-playback path became seekable. Unifying or deleting `seek.ts` is
+  §7c's `seek.ts`-deletion item, not done here.
 - **Note particles are pure functions of time** (`engine/components/effects/note-state.ts`).
   `NoteField` holds no time state: both `DeckCanvas` and `BeatStage` mount it and supply a
   clock. `CinematicRuntime` no longer carries `cue`/`emitter`/`noteCircle`/`stopNotes`/
   `stopCircles` — the `cue` *action kind* survives in `types.ts` for deck-format
   compatibility but is inert. Do not re-add per-sprite GSAP tweens: a second note animation
   implementation is exactly the drift liability §7 exists to remove.
-  **Purity is a one-way import rule, and nothing enforces it.** `note-state.ts` must not
-  import from `notes.ts` — that module calls `document.createElement` — so the dependency
-  runs `notes.ts` → `note-state.ts` and never back. §7a shipped with exactly that edge
-  (`randomGlyph` lived in `notes.ts`); it was hoisted into `note-state.ts` on 2026-07-28.
-  Note what that near-miss cost: **nothing**. Both sides deferred the import to call time,
-  so the cycle resolved, `tsc` was clean and all 461 unit tests passed. A regression here is
-  invisible to CI — the only gate is reading the import block.
+  **Purity is a one-way import rule, and — as of §7b — it is enforced.**
+  `note-state.ts` and `lib/editor/object-state.ts` must not import anything that touches the
+  DOM (`beat-clock.ts` included, since both depend on it): the dependency runs *toward* these
+  pure cores and never back. `tests/unit/pure-import-graph.test.ts` walks each module's
+  runtime import graph (type-only imports are erased, so they don't count) and fails if any
+  reachable file contains a DOM token (`document.`, `.innerHTML`, `createElement(`). §7a
+  shipped one near-miss before this existed — `randomGlyph` briefly lived in `notes.ts` (which
+  calls `document.createElement`) and was hoisted into `note-state.ts` on 2026-07-28 — and it
+  cost nothing to catch by hand only because both sides deferred the import to call time. That
+  test is what makes the next near-miss cost something instead of nothing.
+- **`CinematicSlide` is seekable.** It exposes `SlideTransport { seek, play, pause, duration }`
+  via an imperative `transport` ref. Internally, every action kind renders from a single
+  `renderAt(t)` that folds the beat's timeline (`foldAt`, from `beat-clock.ts`) to its state at
+  `t` — building each action's real effect timeline once, paused, and driving it with
+  `.time()`/`.progress(1)`, never running it on wall-clock. The old per-segment GSAP
+  timelines, `scheduleAction`, and `masterRef` are gone; one time axis with gate boundaries
+  replaced them. `duration()` is always `beatDuration(beat.timeline)` — the pure reading,
+  never a GSAP timeline's own `.duration()`. Autoplay drives `t` from a `gsap.ticker` callback
+  that pauses at each `click_gate` and hands `resume` to `runtime.onGate`, exactly as the old
+  segment machinery did. **`seek(t)` pauses the autoplay ticker internally** — a caller does
+  not pause() first. The alternative (require callers to pause before seeking) was tried and
+  rejected as a footgun: it is too easy to forget, and the failure mode is a ticker silently
+  racing a scrub. In static/print mode (reduced motion, a backgrounded tab, or PDF), the whole
+  beat renders as `renderAt(duration())` — the fully-settled fold — rather than a hand-written
+  end-state replay loop; see the deferred-issue gotcha below for the one sharp edge this
+  merges in.
+- **`BeatStage` drives text, notes, and objects from one clock.** `CinematicSlide`'s `onTime`
+  fires with the exact beat-local `t` it just painted (from the ticker, from `seek()`, or from
+  the static-mode settle), and `BeatStage` paints `ObjectStage` and `NoteField` from that same
+  callback rather than polling or running a second ticker. The long-standing KNOWN LIMITATION
+  here — objects and notes riding an independent wall-clock timeline that desynced from text at
+  gates — is gone along with the code that caused it; there is exactly one clock now.
+- **Three deliberate behaviour changes from §7b, not bugs:** counters (`counterValueAt`) and
+  media (`mediaStateAt`) are now computed from time rather than animated on wall-clock, and
+  `rotateList` derives its currently-visible item from elapsed time (`rotateItemAt`,
+  `engine/components/effects/cinematic-anim.ts`) instead of running an infinite GSAP loop. All
+  three are consequences of the same shift: state is a pure function of `t`, not a live tween.
+- **Gotcha — GSAP's power ease names run one ahead of their exponent.** `power1` is quadratic,
+  `power2` is cubic, `power3` is quartic (`power3.inOut` is symmetric). Porting a GSAP ease to
+  a closed-form function and getting this off-by-one wrong makes a scrubbed frame silently
+  disagree with playback — precisely the drift §7 exists to remove — and it happened twice
+  during §7b. The in-repo proof is `note-state.ts`'s `powerOut1`, GSAP's `power1.out`,
+  implemented as `1 - (1 - p) * (1 - p)` (quadratic, not linear or cubic).
+- **Deferred issue, recorded so §7c inherits it rather than rediscovering it.** In static/print
+  mode, `CinematicSlide` calls `runtime.art(runtime.resolveEnd(), "cut")` explicitly and then
+  `renderAt(duration())`'s own art-diffing re-issues this beat's mid-timeline `art` actions —
+  a genuine double-issue. It is idempotent **by construction today only**: `applyArt` in
+  `engine/deck/flatten.ts` unconditionally discards its input and resets to `[...to]` whenever
+  a transition carries neither `keep` nor `out`, and no action anywhere in the codebase uses
+  those fields yet. The moment one does, `keep`/`out` will filter against the wrong
+  already-resolved stack in this branch and can produce duplicate layers or a wrong final
+  composition. This was flagged and deliberately left unfixed during §7b (not in scope); fix
+  it (e.g. suppress `renderAt`'s art dispatch for this one static call) before or alongside the
+  first `keep`/`out`-bearing mid-timeline `art` action.
 
 When syncing this deep-dive after a Morgana change, remember the split:
 architecture/role/contract facts belong **here**; feature design detail belongs
