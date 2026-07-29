@@ -138,6 +138,29 @@ test("static mode renders the settled end state", () => {
   expect(lineTextAt(container.querySelector(".cin")!)).toEqual(["first", "second"]);
 });
 
+// The old hand-written static loop had `if (print && a.screenOnly) continue` — a check with no
+// equivalent anywhere else in the file. Folding static mode onto renderAt (this task) silently
+// dropped it unless renderAt's own text handling grew the same check, since renderAt's text
+// branch is shared by every caller (static AND live/animated). Covers both `print` values so a
+// regression that always suppresses (or never suppresses) screenOnly text is caught either way.
+const screenOnlyTl: Action[] = [
+  { kind: "text", value: "always", in: "fade" },
+  { kind: "text", value: "screen-only", in: "fade", screenOnly: true },
+];
+
+test("print suppresses screenOnly text; non-print renders it", () => {
+  const printed = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "so1", timeline: screenOnlyTl } }} animate={false} print runtime={noopRuntime} />,
+  );
+  expect(lineTextAt(printed.container.querySelector(".cin")!)).toEqual(["always"]);
+  printed.unmount();
+
+  const onScreen = render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "so1", timeline: screenOnlyTl } }} animate={false} runtime={noopRuntime} />,
+  );
+  expect(lineTextAt(onScreen.container.querySelector(".cin")!)).toEqual(["always", "screen-only"]);
+});
+
 test("SEEK SYMMETRY across a clear: seeking back re-shows the cleared line", () => {
   const transport = createRef<SlideTransport>();
   const { container } = render(

@@ -197,13 +197,18 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // page for beat 5 with beats 0-4 never mounted in this component tree — so it cannot rely
       // on any prior beat having primed ArtStage's live stack. `renderAt(duration())` below
       // still re-reaches this beat's own mid-timeline `art`/`nightlight` actions and re-issues
-      // them through the normal applyArt/setNightlight diffing path; for every `art` action in
-      // this codebase today (none use `keep`/`out`) that is a harmless no-op re-confirmation —
-      // applyArt with no `keep`/`out` always resets to exactly `[...to]` regardless of the
-      // stack it's folded onto, so it converges back to the same layers `resolveEnd()` already
-      // painted. A future `keep`/`out` transition on a beat that ALSO carries other mid-timeline
-      // art would not get this guarantee (see task 11 report) — flagged, not fixed, per the
-      // brief's literal replacement.
+      // them through the normal applyArt/setNightlight diffing path — a genuine double-issue,
+      // REDUNDANT AND HARMLESS ONLY BECAUSE no mid-timeline `art` action in this codebase today
+      // uses `keep`/`out`: applyArt with no `keep`/`out` unconditionally discards its input and
+      // resets to exactly `[...to]`, so re-folding it onto the already-resolved stack still
+      // converges to the same layers `resolveEnd()` already painted. THE INSTANT a beat's
+      // mid-timeline `art` action carries `keep` or `out`, this guarantee breaks: `keep`/`out`
+      // filter against whatever stack they're handed, and this redundant call hands them the
+      // ALREADY-FULLY-RESOLVED end stack rather than the true pre-transition stack `resolveEnd`'s
+      // own fold used — risking duplicate layer entries or a wrong final composition. Revisit
+      // this branch (e.g. suppress renderAt's art/nightlight dispatch for this one static call)
+      // if/when a `keep`/`out` mid-timeline `art` action is authored anywhere (see task 11
+      // report — flagged and deferred, not fixed, per the brief's literal replacement).
       runtime.art(runtime.resolveEnd(), "cut");
       // The settled state IS the fold at the end of the axis: every action kind (text, clear,
       // fade_out, counters, media, art, nightlight, rotateList, reveal_again, the one-shot
@@ -729,6 +734,15 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         continue;
       }
       if (f.action.kind !== "text") continue;
+      // PDF/print suppresses screen-only lines (design: narration meant for the on-screen
+      // reveal, not the printed page) — the action still occupies its own time on the axis
+      // (it's still a reached fold entry, still counts toward wipeBoundary/lastDestructive
+      // above), only whether it gets BUILT is skipped. Mirrors the old hand-written static
+      // loop's `if (print && a.screenOnly) continue`, which this renderAt-based fold replaced;
+      // that check lived ONLY in the static loop, so unifying static mode onto renderAt (task
+      // 11) had silently dropped it for every caller — restored here, in the one shared fold,
+      // so it now also applies to a live/animated `print` render (which never honoured it).
+      if (print && f.action.screenOnly) continue;
       let entry = built.current.get(f.index);
       if (!entry) { entry = buildText(f.action, host); built.current.set(f.index, entry); }
       if (!entry.tl) continue; // rendered at rest
