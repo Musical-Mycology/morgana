@@ -6,7 +6,19 @@
 // It is re-exported as NEXT_PUBLIC_BASE_PATH so client code (lib/base-path.ts)
 // reads the same value without the operator setting two variables. `basePath`
 // is omitted entirely when unset: Next treats basePath: "" as invalid.
-const basePath = (process.env.MORGANA_BASE_PATH ?? "").replace(/\/+$/, "");
+//
+// normalizeBasePath is duplicated from lib/base-path.ts: this file runs
+// before the TypeScript/bundler pipeline exists, so it cannot import that
+// module — the two copies must be kept identical by hand. See
+// tests/unit/base-path.test.ts's "next.config.mjs agrees with lib/base-path"
+// cases, which assert both resolve every input the same way.
+function normalizeBasePath(input) {
+  const collapsed = input.trim().replace(/\/+/g, "/");
+  const leading = collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
+  return leading === "/" ? "" : leading.replace(/\/$/, "");
+}
+
+const basePath = normalizeBasePath(process.env.MORGANA_BASE_PATH ?? "");
 
 const nextConfig = {
   output: "standalone",

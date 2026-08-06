@@ -8,11 +8,28 @@
  *
  * The value is inlined at build time (see next.config.mjs): Next bakes
  * `basePath` during `next build`, so it cannot be changed at container runtime.
+ *
+ * The normalisation below is duplicated in next.config.mjs's `normalizeBasePath`.
+ * next.config.mjs runs before the TypeScript/bundler pipeline exists, so it
+ * cannot import this module — the two copies must be kept identical by hand.
+ * See tests/unit/base-path.test.ts's "next.config.mjs agrees with lib/base-path"
+ * cases, which assert both resolve every input the same way.
  */
 const raw = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-/** Normalised base path: either "" or "/segment" — leading slash, no trailing slash. */
-export const BASE_PATH = raw === "/" ? "" : raw.replace(/\/+$/, "");
+/**
+ * Normalise to "" or "/segment[/segment…]": trim whitespace, collapse any run
+ * of slashes to one, guarantee a single leading slash, then drop a trailing
+ * one. A bare "/" (or all-slash input) collapses to "/" and then to "".
+ */
+function normalizeBasePath(input: string): string {
+  const collapsed = input.trim().replace(/\/+/g, "/");
+  const leading = collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
+  return leading === "/" ? "" : leading.replace(/\/$/, "");
+}
+
+/** Normalised base path: either "" or "/segment[/segment…]". */
+export const BASE_PATH = normalizeBasePath(raw);
 
 /** Prefix an app-absolute path with the configured base path. */
 export function withBasePath(path: string): string {
