@@ -352,7 +352,30 @@ COPY . .
 RUN npm run build
 ```
 
-Leave the `deps` and `runner` stages untouched.
+Leave the `deps` stage untouched. Then add one line to the **runner** stage, immediately after `ENV PORT=3000`:
+
+```dockerfile
+# Next's standalone server.js does `process.env.HOSTNAME || '0.0.0.0'`, and
+# Docker injects HOSTNAME=<container-id> into every container — so without this
+# the server binds ONLY to the container's eth0 address. Published ports still
+# work (they DNAT to that address, which is why the smoke test cannot see this),
+# but `localhost` inside the container is dead: `docker exec … curl localhost:3000`
+# and any HEALTHCHECK against loopback get connection-refused. This is what
+# Next's own official Docker example sets, for the same reason.
+ENV HOSTNAME=0.0.0.0
+```
+
+- [ ] **Step 1b: Prove the bind address is fixed**
+
+Run:
+```bash
+docker build -t morgana:bindcheck .
+docker run -d --rm -p 3009:3000 --name morgana-bindcheck morgana:bindcheck
+sleep 3
+docker exec morgana-bindcheck wget -qO- http://localhost:3000/api/decks | head -c 80
+docker rm -f morgana-bindcheck
+```
+Expected: deck JSON. Before this change the `wget` fails with connection refused.
 
 - [ ] **Step 2: Teach the smoke script about sub-paths**
 
