@@ -1,7 +1,8 @@
 import type { DeckDoc, DeckMeta } from "@/engine/deck-doc";
+import { withBasePath } from "@/lib/base-path";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { method: "GET", ...init });
+  const res = await fetch(withBasePath(url), { method: "GET", ...init });
   if (!res.ok) {
     // The API answers failures with { error }. Losing it here is what left the editor
     // showing a bare "Save failed" with no way to tell what the server objected to.

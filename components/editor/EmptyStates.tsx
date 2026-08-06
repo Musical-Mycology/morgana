@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEditor } from "@/lib/editor/store";
 import type { CanvasPlaceholder } from "@/lib/editor/empty-state";
 
@@ -21,7 +22,7 @@ export function CanvasPlaceholderCard({ kind, deckId, onRetry }: {
           <p>Couldn&apos;t load deck{deckId ? ` "${deckId}"` : ""}.</p>
           <span style={{ display: "flex", gap: 8 }}>
             <button className="ed__pill ed__pill--ghost" data-testid="load-retry" onClick={onRetry}>Retry</button>
-            <a className="ed__pill ed__pill--ghost" href="/">Back to library</a>
+            <Link className="ed__pill ed__pill--ghost" href="/">Back to library</Link>
           </span>
         </>
       )}
