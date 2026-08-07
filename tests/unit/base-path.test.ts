@@ -37,6 +37,15 @@ const TABLE: Array<[input: string, expected: string]> = [
   ["/deep/path/", "/deep/path"],
   ["/deep//path", "/deep/path"],
   ["  /morgana  ", "/morgana"],
+  // Backslash inputs: WHATWG URL treats `\` as `/` for special schemes, so an
+  // uncollapsed backslash lets BASE_PATH escape the origin — e.g.
+  // new URL("/\\evil.com/api/decks", "https://host/") resolves to
+  // https://evil.com/api/decks. These must collapse exactly like "/" runs.
+  ["/\\evil.com", "/evil.com"],
+  ["\\morgana", "/morgana"],
+  ["\\\\morgana", "/morgana"],
+  ["/deep\\path", "/deep/path"],
+  ["\\", ""],
 ];
 
 describe.each(TABLE)("normalises %j", (input, expected) => {

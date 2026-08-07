@@ -19,13 +19,19 @@ const raw = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 /**
  * Normalise to "" or "/segment[/segment…]": trim whitespace, collapse any run
- * of slashes to one, guarantee a single leading slash, then drop a trailing
- * one. A bare "/" (or all-slash input) collapses to "/" and then to "".
+ * of slashes OR backslashes to one forward slash, guarantee a single leading
+ * slash, then drop a trailing one. A bare "/" (or all-slash input) collapses
+ * to "/" and then to "". Backslashes are collapsed too: WHATWG URL treats `\`
+ * as `/` for special schemes, so `new URL(BASE_PATH + path, origin)` would
+ * otherwise resolve a value like "/\evil.com" to a *different origin*
+ * (https://evil.com/…) instead of a same-origin path — the same bug class as
+ * the "//foo" protocol-relative case below, and the same one-character fix
+ * shape: widen the collapsing regex to a [\\/] character class.
  */
 function normalizeBasePath(input: string): string {
-  const collapsed = input.trim().replace(/\/+/g, "/");
+  const collapsed = input.trim().replace(/[\\/]+/g, "/");
   const leading = collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
-  return leading === "/" ? "" : leading.replace(/\/$/, "");
+  return leading.replace(/\/$/, "");
 }
 
 /** Normalised base path: either "" or "/segment[/segment…]". */

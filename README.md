@@ -113,6 +113,13 @@ Open <http://localhost:3000/editor>. The demo deck is auto-seeded into the mount
 volume on first run, so the editor works out of the box. Your decks live as JSON under
 `./data/decks/` (gitignored — real decks are never committed).
 
+The image sets `ENV HOSTNAME=0.0.0.0` so Next's standalone server binds on all interfaces
+(without it, it binds only to the container's `eth0` address, and `localhost` inside the
+container — e.g. a `HEALTHCHECK` or `docker exec … curl localhost:3000` — gets connection
+refused). This overrides Docker's own default `HOSTNAME=<container-id>` env var, so if you run
+log shippers or APM agents that read `$HOSTNAME` to label the container, they'll see `0.0.0.0`
+instead of the container ID.
+
 ### Local development
 
 ```bash

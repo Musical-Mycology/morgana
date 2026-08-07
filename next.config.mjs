@@ -12,10 +12,14 @@
 // module — the two copies must be kept identical by hand. See
 // tests/unit/base-path.test.ts's "next.config.mjs agrees with lib/base-path"
 // cases, which assert both resolve every input the same way.
+//
+// Backslashes are collapsed alongside slashes: WHATWG URL treats `\` as `/`
+// for special schemes, so an unescaped "/\evil.com" would otherwise resolve
+// off-origin wherever a caller does `new URL(BASE_PATH + path, origin)`.
 function normalizeBasePath(input) {
-  const collapsed = input.trim().replace(/\/+/g, "/");
+  const collapsed = input.trim().replace(/[\\/]+/g, "/");
   const leading = collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
-  return leading === "/" ? "" : leading.replace(/\/$/, "");
+  return leading.replace(/\/$/, "");
 }
 
 const basePath = normalizeBasePath(process.env.MORGANA_BASE_PATH ?? "");

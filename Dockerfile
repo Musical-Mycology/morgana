@@ -6,13 +6,15 @@ RUN npm ci
 
 FROM node:22-alpine AS builder
 WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
 # Optional sub-path (e.g. "/morgana") for serving behind a reverse proxy.
 # Next bakes basePath during `next build`, so this MUST be a build-time input —
 # setting it on the runner has no effect. Empty default = serve at the root.
+# Kept immediately before the build step (not above the COPYs) so toggling it
+# only busts the build layer's cache, not the deps/source layers above.
 ARG MORGANA_BASE_PATH=""
 ENV MORGANA_BASE_PATH=$MORGANA_BASE_PATH
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
 RUN npm run build
 
 FROM node:22-alpine AS runner

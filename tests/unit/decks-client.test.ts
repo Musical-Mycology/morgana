@@ -2,7 +2,11 @@ import { afterEach, expect, test, vi } from "vitest";
 import { listDecks, loadDeck, saveDeck } from "@/lib/api/decks-client";
 import type { DeckDoc } from "@/engine/deck-doc";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 function stubFetch(status: number, body: unknown) {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })));
 }
@@ -25,4 +29,15 @@ test("a failed request with no usable body falls back to the status line", async
   vi.stubGlobal("fetch", vi.fn(async () => new Response("not json", { status: 500 })));
   const doc: DeckDoc = { version: 1, meta: { id: "demo", title: "Demo" }, scenes: [] };
   await expect(saveDeck(doc)).rejects.toThrow("500");
+});
+test("the status-line fallback reports the URL actually requested, not the un-prefixed one", async () => {
+  // Under a sub-path, the request goes to /morgana/api/decks/demo — the error
+  // must say so, not the un-prefixed /api/decks/demo, or debugging a
+  // reverse-proxy deployment is misled about where the request went.
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/morgana");
+  vi.resetModules();
+  const { saveDeck: saveDeckWithBasePath } = await import("@/lib/api/decks-client");
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("not json", { status: 500 })));
+  const doc: DeckDoc = { version: 1, meta: { id: "demo", title: "Demo" }, scenes: [] };
+  await expect(saveDeckWithBasePath(doc)).rejects.toThrow("/morgana/api/decks/demo");
 });

@@ -6,10 +6,18 @@ const ROOT = resolve(__dirname, "../..");
 const DIRS = ["app", "components", "lib", "engine"];
 
 // fetch("/…"), fetch('/…'), fetch(`/…`) — an app-absolute URL. Next does NOT
-// rewrite these for basePath, so they must go through withBasePath().
-const RAW_FETCH = /fetch\(\s*[`"']\//;
+// rewrite these for basePath, so they must go through withBasePath(). \s* after
+// fetch tolerates a stray space (`fetch (`) that plain fetch\( would miss.
+const RAW_FETCH = /fetch\s*\(\s*[`"']\//;
 // `${window.location.origin}/…` — the same problem for hand-built URLs.
 const RAW_ORIGIN = /location\.origin\}\//;
+// `return \`/…\`` or a ternary branch `? "/…"` / `: "/…"` — a function that hands
+// back a hand-built app-absolute URL literal instead of routing it through
+// withBasePath(). This is the exact shape of the story-assets.ts bug: a plain
+// fetch()/location.origin scan (above) doesn't see it because the literal never
+// appears next to either token — it surfaces only where a caller turns the
+// return value into a DOM URL (img.src, mask-image, …).
+const RAW_URL_LITERAL = /(?:return|[?:])\s*[`"']\/(?!\/)/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -39,7 +47,11 @@ function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
-test("no app code builds an app-absolute URL without withBasePath()", () => {
+// Precisely what this test checks: raw fetch("/…") calls and hand-built
+// `${location.origin}/…` strings. It does NOT catch every way to build an
+// app-absolute URL without withBasePath() — see RAW_URL_LITERAL below for the
+// complementary "returns a hand-built literal" shape it misses.
+test("no app code calls fetch() or builds a location.origin URL with a raw app-absolute literal", () => {
   const offenders: string[] = [];
   for (const file of allFiles()) {
     const src = readFileSync(file, "utf8");
@@ -48,6 +60,55 @@ test("no app code builds an app-absolute URL without withBasePath()", () => {
     }
   }
   expect(offenders).toEqual([]);
+});
+
+/**
+ * Files that legitimately return/branch on a hand-built app-absolute string
+ * literal without going through withBasePath() themselves. Adding an entry
+ * here is an exception, not the default — the default is to route the call
+ * site through withBasePath(). Every entry needs a real reason; a stale entry
+ * (file no longer matches RAW_URL_LITERAL) fails the test below on its own.
+ */
+const ALLOWED_RAW_URL_LITERAL: Record<string, string> = {
+  "engine/deck/story-assets.ts":
+    "Value-imported by engine/components/effects/note-state.ts (NOTE_GLYPHS), " +
+    "which must keep a DOM-free runtime import graph free of lib/base-path.ts " +
+    "(tests/unit/pure-import-graph.test.ts). Fixed downstream instead, at the " +
+    "one seam DOM code actually reads through: engine/asset-resolver.ts wraps " +
+    "storyAssetUrl(key) in withBasePath().",
+  "lib/store/deck-store.ts":
+    "\"/data\" is a server-side filesystem default (resolve()d, never sent to a " +
+    "browser) — not a URL, so basePath is meaningless here.",
+  "lib/store/mcp-auth.ts":
+    "Same \"/data\" filesystem default as lib/store/deck-store.ts.",
+};
+
+test("every hand-built app-absolute URL literal is routed through withBasePath() or is explicitly allowlisted", () => {
+  const offenders: string[] = [];
+  for (const file of allFiles()) {
+    const rel = relPath(file);
+    if (rel === "lib/base-path.ts") continue; // the helper itself: normalises leading slashes by design
+    const src = stripComments(readFileSync(file, "utf8"));
+    if (!RAW_URL_LITERAL.test(src)) continue;
+    if (rel in ALLOWED_RAW_URL_LITERAL) continue;
+    offenders.push(rel);
+  }
+  expect(offenders).toEqual([]);
+});
+
+test("every ALLOWED_RAW_URL_LITERAL entry still matches RAW_URL_LITERAL", () => {
+  const stale: string[] = [];
+  for (const rel of Object.keys(ALLOWED_RAW_URL_LITERAL)) {
+    let src: string;
+    try {
+      src = stripComments(readFileSync(resolve(ROOT, rel), "utf8"));
+    } catch {
+      stale.push(rel); // file no longer exists
+      continue;
+    }
+    if (!RAW_URL_LITERAL.test(src)) stale.push(rel);
+  }
+  expect(stale).toEqual([]);
 });
 
 /**
@@ -64,7 +125,8 @@ const ALLOWED_RAW_FETCH: Record<string, string> = {
 };
 
 const BASE_PATH_IMPORT = /from\s+["']@\/lib\/base-path["']/;
-const FETCH_CALL = /\bfetch\(/;
+// \s* tolerates a stray space (`fetch (`) that \bfetch\( would miss.
+const FETCH_CALL = /\bfetch\s*\(/;
 
 test("every fetch( call site imports withBasePath() or is explicitly allowlisted", () => {
   // Catches indirection the literal-pattern test above can't see, e.g. a
