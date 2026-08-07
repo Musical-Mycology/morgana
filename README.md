@@ -135,6 +135,29 @@ cp -r .next/static .next/standalone/.next/
 MORGANA_DATA_DIR="$PWD/data" node .next/standalone/server.js
 ```
 
+### Serving under a sub-path
+
+To serve Morgana at `https://example.com/morgana/` instead of the domain root,
+build with `MORGANA_BASE_PATH`:
+
+```bash
+docker build --build-arg MORGANA_BASE_PATH=/morgana -t morgana:subpath .
+docker run -p 3000:3000 -v "$PWD/data:/data" morgana:subpath
+# → http://localhost:3000/morgana/editor
+```
+
+Next.js bakes the base path into the build, so this is a **build-time** input —
+it cannot be changed by setting an environment variable on the running
+container. Point your reverse proxy at the container without stripping the
+prefix: the app expects to receive `/morgana/...` paths as-is.
+
+Verify a sub-path image end-to-end with `npm run smoke:docker:subpath`.
+
+If you add code that fetches an app URL, route it through `withBasePath()`
+([`lib/base-path.ts`](lib/base-path.ts)) — `tests/unit/base-path-callsites.test.ts`
+fails the build otherwise. Next handles `<Link>`, `<Image>`, and `/_next/*` for
+you; it does not handle raw `fetch()`.
+
 ---
 
 ## Storage & configuration
@@ -164,6 +187,7 @@ The deck API is filesystem-backed ([`lib/store/deck-store.ts`](lib/store/deck-st
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `MORGANA_DATA_DIR` | `/data` (production), `./data` (dev) | Directory holding `decks/<id>.deck.json`. Resolved to an absolute path; use a writable path in production. |
+| `MORGANA_BASE_PATH` | _(unset)_ | **Build-time only.** Serve Morgana under a sub-path, e.g. `/morgana`. Next.js bakes this into the build, so it must be passed as a Docker `--build-arg` (or set before `npm run build`) — setting it at container runtime has no effect. |
 | `PORT` | `3000` | Server port. |
 
 In Docker the data dir is the mounted volume (`/data`). On first run the demo deck is seeded
