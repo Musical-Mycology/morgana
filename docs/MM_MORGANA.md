@@ -19,6 +19,38 @@ Packaged as a single Node container (`Dockerfile` + `docker-compose.yml`);
 decks are portable JSON on a mounted volume (`MORGANA_DATA_DIR`, default
 `/data`).
 
+**Sub-path deployment (`MORGANA_BASE_PATH`).** Morgana can serve from a path of
+a larger site (`https://example.com/morgana/`) rather than a domain root. Three
+things about it are load-bearing:
+
+- **It is a BUILD arg, never a runtime env var.** Next bakes `basePath` during
+  `next build`, so the value must be passed as `--build-arg`; setting it on a
+  running container does nothing. `next.config.mjs` re-exports it as
+  `NEXT_PUBLIC_BASE_PATH` so client code reads one source of truth.
+- **Every hand-built URL must go through `withBasePath()`**
+  ([`lib/base-path.ts`](../lib/base-path.ts)). Next rewrites `<Link>`,
+  `<Image>`, and `/_next/*` for you; it does **not** touch raw `fetch()`,
+  strings built with `window.location.origin`, or asset URLs the engine
+  composes itself. `tests/unit/base-path-callsites.test.ts` guards the patterns
+  it can see — read its comments for what it deliberately does not cover.
+  Engine art and glyph URLs are wrapped at
+  [`engine/asset-resolver.ts`](../engine/asset-resolver.ts), *not* in
+  `engine/deck/story-assets.ts`: the pure note-state core value-imports that
+  module, and a deck-format core should not depend on build-time env config.
+  `asset-resolver.ts` is currently the only runtime importer of
+  `storyAssetUrl` — a new DOM consumer that imports it directly would bypass
+  the prefix and silently 404 under a sub-path.
+- **`ENV HOSTNAME=0.0.0.0` in the runner stage is required, and has a
+  side-effect.** Next's standalone `server.js` reads `process.env.HOSTNAME`,
+  which Docker sets to the container id, so without it the server binds only to
+  the container's eth0 address — published ports still work (they DNAT to it),
+  which is exactly why the smoke test cannot catch it, but loopback inside the
+  container is dead. The side-effect: log shippers that label containers from
+  `$HOSTNAME` now see `0.0.0.0`. **Probing from inside the container must use
+  `127.0.0.1`, not `localhost`** — the image is Alpine and musl resolves
+  `localhost` to `::1`, where nothing listens, so `localhost` fails on a
+  perfectly healthy container.
+
 ## Where
 
 Not yet hosted anywhere (`status: pending`, `infra_monthly_usd: 0`). The

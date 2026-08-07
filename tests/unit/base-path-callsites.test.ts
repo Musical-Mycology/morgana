@@ -71,11 +71,14 @@ test("no app code calls fetch() or builds a location.origin URL with a raw app-a
  */
 const ALLOWED_RAW_URL_LITERAL: Record<string, string> = {
   "engine/deck/story-assets.ts":
-    "Value-imported by engine/components/effects/note-state.ts (NOTE_GLYPHS), " +
-    "which must keep a DOM-free runtime import graph free of lib/base-path.ts " +
-    "(tests/unit/pure-import-graph.test.ts). Fixed downstream instead, at the " +
-    "one seam DOM code actually reads through: engine/asset-resolver.ts wraps " +
-    "storyAssetUrl(key) in withBasePath().",
+    "Value-imported by engine/components/effects/note-state.ts (NOTE_GLYPHS); " +
+    "a deck-format core should not acquire a dependency on build-time env " +
+    "config. NOTE: pure-import-graph.test.ts would NOT catch that mistake — it " +
+    "greps for DOM tokens and lib/base-path.ts has none. Fixed downstream " +
+    "instead, at the one seam DOM code reads through: engine/asset-resolver.ts " +
+    "wraps storyAssetUrl(key) in withBasePath(). That exempts this file's " +
+    "literals but NOT its consumers — a new DOM component importing " +
+    "storyAssetUrl directly would bypass the prefix silently.",
   "lib/store/deck-store.ts":
     "\"/data\" is a server-side filesystem default (resolve()d, never sent to a " +
     "browser) — not a URL, so basePath is meaningless here.",
@@ -83,7 +86,7 @@ const ALLOWED_RAW_URL_LITERAL: Record<string, string> = {
     "Same \"/data\" filesystem default as lib/store/deck-store.ts.",
 };
 
-test("every hand-built app-absolute URL literal is routed through withBasePath() or is explicitly allowlisted", () => {
+test("every returned or branched app-absolute URL literal is routed through withBasePath() or is explicitly allowlisted", () => {
   const offenders: string[] = [];
   for (const file of allFiles()) {
     const rel = relPath(file);
