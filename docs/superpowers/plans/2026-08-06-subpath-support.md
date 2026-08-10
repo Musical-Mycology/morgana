@@ -105,8 +105,23 @@ Create `lib/base-path.ts`:
  */
 const raw = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-/** Normalised base path: either "" or "/segment" — leading slash, no trailing slash. */
-export const BASE_PATH = raw === "/" ? "" : raw.replace(/\/+$/, "");
+/**
+ * Normalise to "" or "/segment" — exactly one leading slash, no trailing slash,
+ * no interior doubled slashes.
+ *
+ * Collapsing every run of slashes FIRST is what makes "//foo" safe: left alone
+ * it yields BASE_PATH="//foo", and withBasePath("/api/decks") then returns
+ * "//foo/api/decks" — which browsers and fetch parse as a protocol-relative URL
+ * to the HOST foo, silently leaving the origin. Collapsing also removes the need
+ * for a bare-"/" special case.
+ */
+function normalizeBasePath(input: string): string {
+  const collapsed = input.trim().replace(/\/+/g, "/");
+  const leading = collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
+  return leading.replace(/\/$/, "");
+}
+
+export const BASE_PATH = normalizeBasePath(raw);
 
 /** Prefix an app-absolute path with the configured base path. */
 export function withBasePath(path: string): string {
@@ -153,7 +168,12 @@ Expected: build succeeds. The output summary lists routes as `/`, `/editor`, `/a
 - [ ] **Step 7: Verify the sub-path build applies the prefix**
 
 Run: `MORGANA_BASE_PATH=/morgana npm run build`
-Expected: build succeeds. Next prints `- basePath: /morgana` in its config summary near the top of the output.
+Expected: build succeeds. **Do not look for a `- basePath:` line in the console output** — Next 15.5 no longer prints a config summary. Verify against the build artefact instead, which is what the standalone server actually consumes:
+
+```bash
+node -e 'console.log(require("./.next/routes-manifest.json").basePath)'
+```
+Expected: `/morgana` here, and `` (empty) after the default build in Step 6.
 
 - [ ] **Step 8: Run the full unit suite**
 
@@ -203,7 +223,19 @@ const DIRS = ["app", "components", "lib", "engine"];
 
 // fetch("/…"), fetch('/…'), fetch(`/…`) — an app-absolute URL. Next does NOT
 // rewrite these for basePath, so they must go through withBasePath().
+//
+// NOTE: this literal-string check is NOT sufficient on its own. It cannot see
+// `fetch(someVariable)`, which is exactly what a `req(url, init)` helper does —
+// `lib/api/decks-client.ts` had this defect and the check did not flag it.
+// Pair it with the import-or-allowlist check below, which catches indirection.
 const RAW_FETCH = /fetch\(\s*[`"']\//;
+// Every file containing `fetch(` must import from "@/lib/base-path" or appear
+// in ALLOWED_RAW_FETCH (path → reason). A second test must fail on a STALE
+// allowlist entry — one whose file no longer contains `fetch(` — or the list
+// rots into a permanent exemption nobody revisits.
+const FETCH_CALL = /\bfetch\(/;
+const BASE_PATH_IMPORT = /from\s+["']@\/lib\/base-path["']/;
+const ALLOWED_RAW_FETCH: Record<string, string> = {};
 // `${window.location.origin}/…` — the same problem for hand-built URLs.
 const RAW_ORIGIN = /location\.origin\}\//;
 
@@ -372,10 +404,24 @@ Run:
 docker build -t morgana:bindcheck .
 docker run -d --rm -p 3009:3000 --name morgana-bindcheck morgana:bindcheck
 sleep 3
-docker exec morgana-bindcheck wget -qO- http://localhost:3000/api/decks | head -c 80
+docker exec morgana-bindcheck wget -qO- http://127.0.0.1:3000/api/decks | head -c 80
 docker rm -f morgana-bindcheck
 ```
 Expected: deck JSON. Before this change the `wget` fails with connection refused.
+
+**Probe `127.0.0.1`, not `localhost`.** The image is Alpine-based and musl
+resolves `localhost` to `::1` first, while Next's standalone server listens on
+IPv4 only — so `localhost` gets connection-refused even *after* this fix, for a
+reason that has nothing to do with the bind address. If you want independent
+confirmation of what the server bound to, read the kernel's view directly:
+
+```bash
+docker exec morgana-bindcheck cat /proc/net/tcp | awk 'NR>1 {print $2}'
+docker exec morgana-bindcheck cat /proc/net/tcp6
+```
+Expected: an IPv4 entry for `00000000:0BB8` (`0.0.0.0:3000`) and an empty
+`tcp6` table. Before the fix, the IPv4 entry is the container's own eth0
+address instead of `0.0.0.0`.
 
 - [ ] **Step 2: Teach the smoke script about sub-paths**
 

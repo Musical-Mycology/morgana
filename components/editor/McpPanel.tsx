@@ -1,14 +1,15 @@
 "use client";
 import { useEffect, useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 
 async function fetchToken(): Promise<string> {
-  const res = await fetch("/api/mcp-token");
+  const res = await fetch(withBasePath("/api/mcp-token"));
   if (!res.ok) throw new Error(`Failed to fetch token: ${res.status}`);
   return (await res.json()).token as string;
 }
 
 async function regenerateToken(): Promise<string> {
-  const res = await fetch("/api/mcp-token", { method: "POST" });
+  const res = await fetch(withBasePath("/api/mcp-token"), { method: "POST" });
   if (!res.ok) throw new Error(`Failed to regenerate token: ${res.status}`);
   return (await res.json()).token as string;
 }
@@ -25,7 +26,9 @@ export function McpPanel() {
       .catch(() => setError("Couldn't load token"));
   }, []);
 
-  const url = typeof window !== "undefined" ? `${window.location.origin}/api/mcp` : "/api/mcp";
+  const url = typeof window !== "undefined"
+    ? `${window.location.origin}${withBasePath("/api/mcp")}`
+    : withBasePath("/api/mcp");
 
   const onRegenerate = async () => {
     try {

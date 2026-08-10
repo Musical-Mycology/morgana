@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { withBasePath } from "@/lib/base-path";
 
 export interface ExternalChangeState {
   changed: boolean;
@@ -17,7 +18,7 @@ export function useExternalChangePoll(deckId: string | null, intervalMs = 4000):
   const fetchMtime = useCallback(async (): Promise<number | null> => {
     if (!deckId) return null;
     try {
-      const res = await fetch(`/api/decks/${deckId}/meta`);
+      const res = await fetch(withBasePath(`/api/decks/${deckId}/meta`));
       if (!res.ok) return null;
       return (await res.json()).mtimeMs as number;
     } catch {
