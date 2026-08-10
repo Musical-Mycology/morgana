@@ -53,10 +53,13 @@ things about it are load-bearing:
 
 ## Where
 
-Not yet hosted anywhere (`status: pending`, `infra_monthly_usd: 0`). The
-deployment target is deliberately open — the product thesis is
-"single self-hostable container on your own machine," so a hosted MM instance
-remains possible but is never required.
+MM runs one private internal instance (Mycelium, container, gated) for
+authoring MM deck content; it uses the repo's own `MORGANA_BASE_PATH`
+sub-path support and no Morgana-side MM coupling. Deployment detail lives in
+MM-internal docs, not here. The deployment target is otherwise deliberately
+open — the product thesis is
+"single self-hostable container on your own machine," so self-hosting is the
+baseline and no hosted instance is ever required to use it.
 
 ## Design docs live in-repo (public-repo convention)
 
