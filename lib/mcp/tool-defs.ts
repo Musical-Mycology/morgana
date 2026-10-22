@@ -116,7 +116,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "update_meta",
-    description: "Set a single field on the deck's metadata, addressed by a dot-path (e.g. \"title\", \"chrome.wordmark\"). To make a timed (video) deck, set \"timing.targetSec\" to the intended total length in seconds (e.g. 120); set \"timing\" to null to make it untimed again.",
+    description: "Set a single field on the deck's metadata, addressed by a dot-path (e.g. \"title\", \"chrome.wordmark\"). To make a timed (video) deck, set \"timing.targetSec\" to the intended total length in seconds (e.g. 120); set \"timing\" to null to make it untimed again. Setting \"soundtrack\" directly skips the media-list check (a typo leaves the deck pointing at a missing file) — use set_soundtrack instead.",
     inputSchema: schema({
       ...DECK_ID,
       path: { type: "string" },
@@ -143,7 +143,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "set_soundtrack",
-    description: "Set the deck's soundtrack to a media id from list_media, or pass media_id: null to remove it. The soundtrack is one pre-mixed track that plays from deck time 0:00 in the timed Player and in exported video; its length should match the deck's total (read_deck_timing). Files must be uploaded in the editor first — binary uploads are not possible over MCP. Removing the soundtrack keeps the file in the media store.",
+    description: "Set the deck's soundtrack to a media id from list_media, or pass media_id: null to remove it. The soundtrack is one pre-mixed track that plays from deck time 0:00 in the timed Player (and in the MP4 export once that lands); its length should match the deck's total (read_deck_timing). Files must be uploaded in the editor first — binary uploads are not possible over MCP. Removing the soundtrack keeps the file in the media store.",
     inputSchema: schema({
       ...DECK_ID,
       media_id: { type: ["string", "null"], description: "A media id from list_media, or null to remove the soundtrack." },

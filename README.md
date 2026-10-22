@@ -215,8 +215,10 @@ The deck API is filesystem-backed ([`lib/store/deck-store.ts`](lib/store/deck-st
 | `PUT /api/decks/[id]` | Save a deck (validated; autosave uses this). |
 | `DELETE /api/decks/[id]` | Delete a deck. |
 | `GET /api/decks/[id]/meta` | Deck file's on-disk `mtimeMs` (used to detect external changes). |
+| `GET /api/decks/[id]/media` | List the deck's uploaded media: `{ media: [{ id, name, mime, bytes, uploadedAt }] }`. |
 | `POST /api/decks/[id]/media` | Upload a soundtrack (multipart field `file`); returns `{ id, name, mime, bytes }`. |
 | `GET /api/decks/[id]/media/[mediaId]` | Serve an uploaded audio file. |
+| `DELETE /api/decks/[id]/media/[mediaId]` | Delete an uploaded file (204; 404 for a malformed id or deck). Does not clear `meta.soundtrack`. |
 
 | Env var | Default | Purpose |
 | --- | --- | --- |

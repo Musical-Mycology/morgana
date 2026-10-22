@@ -1,6 +1,6 @@
 # Soundtrack — Design Spec (Timed Video, sub-project 2 of 6)
 
-**Status:** designed, not yet implemented
+**Status:** implemented (sub-project 2)
 **Date:** 2026-10-23
 **Builds on:** [Deck clock + timed Player (sub-project 1)](2026-10-22-deck-clock-timed-player-design.md) — PR #36
 **Driving use case:** the Alt-Ctrl Festival 2027 storyboard — a 2:00 video cut to music
@@ -155,8 +155,10 @@ export function computePeaks(buffer: AudioBuffer, buckets: number): Float32Array
 - **Clock source:** while playing, each frame takes `T = soundtrack.now()` when it is non-null;
   otherwise the existing timer advances `T` (before load, past the track's end, or with no
   soundtrack). One writer (`apply`) is unchanged.
-- **Transport mapping:** play → `soundtrack.play(T)`; pause → `soundtrack.pause()`; any seek
-  while playing (arrows, Home, scrubber) → `soundtrack.play(newT)`; seeks while paused are silent.
+- **Transport mapping:** play → `soundtrack.play(T)`; pause → `soundtrack.pause()`. Arrows, Home
+  and Play-at-the-end (restart from 0) seek while playing and restart the audio at the new `T`
+  (`soundtrack.play(newT)`). The scrubber and a marker click pause first (the audio stops with
+  them), then jump; playback resumes from the new `T` on Play. Seeks while paused are silent.
 - **Mute:** `M` key + HUD button (preview only; never affects export).
 - **Failure:** decode/fetch error → HUD notice "Soundtrack unavailable — playing silent"; playback
   continues on the timer.

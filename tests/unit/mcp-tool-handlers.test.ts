@@ -216,3 +216,11 @@ test("list_media, set_soundtrack and set_markers", async () => {
   await callTool("set_markers", { deck_id: "demo", markers: [] });
   expect((await loadDeck("demo")).meta.markers).toBeUndefined();
 });
+
+test("set_markers persists only { id, label, t } and trims labels (whitespace-only is rejected)", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  await callTool("set_markers", { deck_id: "demo", markers: [{ id: "m1", label: "  drop  ", t: 40.2, color: "red", extra: { x: 1 } }] });
+  expect((await loadDeck("demo")).meta.markers).toEqual([{ id: "m1", label: "drop", t: 40.2 }]);
+  await expect(callTool("set_markers", { deck_id: "demo", markers: [{ id: "m2", label: "   ", t: 1 }] })).rejects.toThrow(/label/);
+  expect((await loadDeck("demo")).meta.markers).toEqual([{ id: "m1", label: "drop", t: 40.2 }]);
+});

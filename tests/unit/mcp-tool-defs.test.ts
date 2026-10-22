@@ -72,3 +72,10 @@ test("includes the soundtrack tools with descriptions that state the contract", 
   expect(byName.set_soundtrack.description).toMatch(/0:00/);
   expect(byName.set_markers.description).toMatch(/replaces/i);
 });
+
+test("set_soundtrack does not promise exported video yet; update_meta points soundtrack edits at set_soundtrack", () => {
+  const byName = Object.fromEntries(TOOL_DEFS.map((t) => [t.name, t]));
+  expect(byName.set_soundtrack.description).toContain("in the timed Player (and in the MP4 export once that lands)");
+  expect(byName.set_soundtrack.description).not.toMatch(/in exported video/);
+  expect(byName.update_meta.description).toMatch(/soundtrack.*skips the media-list check.*use set_soundtrack/i);
+});

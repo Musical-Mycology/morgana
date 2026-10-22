@@ -1,6 +1,8 @@
 /** The deck soundtrack, played through Web Audio. Browser-only — never import from a pure module.
  *  While a track plays, the audio hardware clock IS the deck clock (spec §1): `now()` returns
- *  `startT + (ctx.currentTime − ctxStartedAt)`. Seeking = stop the source, start a new one. */
+ *  `startT + (audible − ctxStartedAt)`, where `audible` is the context time currently reaching the
+ *  speakers (latency-compensated, smoothed between audio callbacks — see `audibleTime`).
+ *  Seeking = stop the source, start a new one. */
 import { withBasePath } from "@/lib/base-path";
 
 export interface Soundtrack {
@@ -42,6 +44,27 @@ export function computePeaks(buffer: AudioBuffer, buckets: number): Float32Array
   return out;
 }
 
+/** Max smoothing between audio callbacks. Deliberately far below the Player's 500 ms stall window:
+ *  a suspended/dead context must still read as "not advancing" so the timer takes over. */
+const MAX_EXTRAPOLATE_MS = 100;
+
+/** The context time audible at the output right now. Prefers getOutputTimestamp() (already
+ *  latency-compensated), extrapolated by wall time since it was stamped — capped, and only while
+ *  the context is running — so the reading doesn't stair-step per audio callback. Fallback:
+ *  currentTime minus the reported output (or base) latency, unsmoothed. */
+function audibleTime(ctx: AudioContext): number {
+  const ts = ctx.getOutputTimestamp?.();
+  if (ts && Number.isFinite(ts.contextTime) && Number.isFinite(ts.performanceTime)) {
+    let base = ts.contextTime!;
+    if (ctx.state === "running") {
+      const ms = Math.min(Math.max(0, performance.now() - ts.performanceTime!), MAX_EXTRAPOLATE_MS);
+      base += ms / 1000;
+    }
+    return base;
+  }
+  return ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0);
+}
+
 export function createSoundtrack(buffer: AudioBuffer, ctx: AudioContext): Soundtrack {
   const gain = ctx.createGain();
   gain.connect(ctx.destination);
@@ -49,6 +72,8 @@ export function createSoundtrack(buffer: AudioBuffer, ctx: AudioContext): Soundt
   let source: AudioBufferSourceNode | null = null;
   let startT = 0;
   let ctxStartedAt = 0;
+  /** Highest value now() has returned since the last play()/pause(): the clock never steps back. */
+  let lastReturned = 0;
 
   const stop = () => {
     if (!source) return;
@@ -64,21 +89,26 @@ export function createSoundtrack(buffer: AudioBuffer, ctx: AudioContext): Soundt
     play(fromT) {
       stop();
       if (fromT >= buffer.duration) return;
-      void ctx.resume?.();
+      ctx.resume?.().catch(() => {}); // autoplay-blocked: the Player's stall guard falls back to its timer
       const s = ctx.createBufferSource();
       s.buffer = buffer;
       s.connect(gain);
       startT = Math.max(0, fromT);
       ctxStartedAt = ctx.currentTime;
+      lastReturned = startT;
       s.start(0, startT);
       s.onended = () => { if (source === s) source = null; };
       source = s;
     },
-    pause() { stop(); },
+    pause() { stop(); lastReturned = 0; },
     now() {
       if (!source) return null;
-      const t = startT + (ctx.currentTime - ctxStartedAt);
-      return t >= buffer.duration ? null : t;
+      // lastReturned starts at startT, so this also holds at the play offset until the first
+      // samples are audible (output latency), and never steps back between callbacks.
+      const t = Math.max(lastReturned, startT + (audibleTime(ctx) - ctxStartedAt));
+      if (t >= buffer.duration) return null;
+      lastReturned = t;
+      return t;
     },
     setMuted(muted) { gain.gain.value = muted ? 0 : 1; },
     dispose() { stop(); gain.disconnect(); },

@@ -77,8 +77,10 @@ export async function readMedia(deckId: string, mediaId: string): Promise<{ info
 
 export async function deleteMedia(deckId: string, mediaId: string): Promise<void> {
   const path = mediaPath(deckId, mediaId);
-  await unlink(path).catch(() => {});
+  // Sidecar first: if we stop halfway, an orphan blob is harmless (a re-upload rewrites it), whereas
+  // an orphan sidecar would make saveMedia think the file exists and skip writing the bytes.
   await unlink(`${path}.json`).catch(() => {});
+  await unlink(path).catch(() => {});
 }
 
 export async function deleteDeckMedia(deckId: string): Promise<void> {

@@ -177,7 +177,12 @@ export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc 
     }
     case "set_markers": {
       if (!Array.isArray(a.markers)) throw new ToolCallError('"markers" must be an array');
-      const markers = a.markers as DeckMarker[];
+      // Keep exactly { id, label, t } so stray keys never persist; trim so "   " is rejected as empty.
+      const markers = (a.markers as unknown[]).map((m) => {
+        if (!m || typeof m !== "object") return m;
+        const { id, label, t } = m as Record<string, unknown>;
+        return { id, label: typeof label === "string" ? label.trim() : label, t };
+      }) as DeckMarker[];
       return mutate(deckId, (doc) => {
         const meta = { ...doc.meta };
         if (markers.length === 0) delete meta.markers; else meta.markers = markers;

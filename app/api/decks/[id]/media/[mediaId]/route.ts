@@ -7,13 +7,15 @@ type Ctx = { params: Promise<{ id: string; mediaId: string }> };
 
 // info.name is the client-supplied filename: it must never reach a response header
 // (no Content-Disposition). Content-Type comes from the sidecar mime, which the store
-// derived from the extension.
+// derived from the extension. nosniff + a sandbox CSP keep a mislabelled upload from ever being
+// sniffed/rendered as an active document on this origin.
 export async function GET(_req: Request, { params }: Ctx) {
   const { id, mediaId } = await params;
   try {
     const { info, bytes } = await readMedia(id, mediaId);
     return new Response(bytes, {
-      headers: { "Content-Type": info.mime, "Cache-Control": "private, max-age=31536000, immutable", "Content-Length": String(bytes.byteLength) },
+      headers: { "Content-Type": info.mime, "Cache-Control": "private, max-age=31536000, immutable", "Content-Length": String(bytes.byteLength),
+        "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox" },
     });
   } catch (e) {
     return Response.json({ error: e instanceof MediaError ? e.message : "not found" }, { status: 404 });

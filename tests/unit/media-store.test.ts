@@ -1,10 +1,28 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveMedia, listMedia, readMedia, deleteMedia, deleteDeckMedia, MediaError, MEDIA_ID_RE } from "@/lib/store/media-store";
 import { createDeck, deleteDeck } from "@/lib/store/deck-store";
+
+// Fault injection for an interrupted deleteMedia: when `unlinkBudget` is a number, only that many
+// more unlink calls succeed; later ones throw (as if the process died / the fs refused mid-delete).
+const fault = vi.hoisted(() => ({ unlinkBudget: null as number | null }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...real,
+    unlink: (async (p: Parameters<typeof real.unlink>[0]) => {
+      if (fault.unlinkBudget !== null) {
+        if (fault.unlinkBudget <= 0) throw Object.assign(new Error("EIO: injected"), { code: "EIO" });
+        fault.unlinkBudget--;
+      }
+      return real.unlink(p);
+    }) as typeof real.unlink,
+  };
+});
+afterEach(() => { fault.unlinkBudget = null; });
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "morgana-")); process.env.MORGANA_DATA_DIR = dir; });
@@ -90,6 +108,23 @@ test("delete removes the file and its sidecar; listing an empty deck is []", asy
   expect(await listMedia("d1")).toEqual([]);
   expect(await listMedia("nothing-here")).toEqual([]);
   await expect(readMedia("d1", info.id)).rejects.toMatchObject({ status: 404 });
+});
+
+test("after deleteMedia, re-uploading the same bytes is readable — even if the delete was interrupted", async () => {
+  const info = await saveMedia("d1", { name: "a.mp3", bytes: bytes("song") });
+  await deleteMedia("d1", info.id);
+  const again = await saveMedia("d1", { name: "a.mp3", bytes: bytes("song") });
+  expect(again.id).toBe(info.id);
+  expect(new TextDecoder().decode((await readMedia("d1", info.id)).bytes)).toBe("song");
+
+  // Only the first unlink succeeds. Sidecar-first leaves an orphan blob (harmless, healed by the
+  // re-upload); bytes-first would leave an orphan sidecar that makes the re-upload skip the bytes.
+  fault.unlinkBudget = 1;
+  await deleteMedia("d1", info.id);
+  fault.unlinkBudget = null;
+  expect(await listMedia("d1")).toEqual([]);
+  await saveMedia("d1", { name: "a.mp3", bytes: bytes("song") });
+  expect(new TextDecoder().decode((await readMedia("d1", info.id)).bytes)).toBe("song");
 });
 
 test("deleting a deck deletes its media folder", async () => {

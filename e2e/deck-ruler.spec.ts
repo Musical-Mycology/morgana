@@ -12,6 +12,11 @@ test("clicking the deck ruler selects the beat at that time and shows it", async
   await request.put(`/api/decks/${id}`, { data: doc });
 
   await page.goto(`/editor?deck=${id}`);
+  // Clock, bar, "+ Marker" and "▶ Play from here" share one row (a wrapped Play link would push
+  // the beat timeline down).
+  const marker = (await page.getByTestId("add-marker").boundingBox())!;
+  const playHere = (await page.getByTestId("play-from-here").boundingBox())!;
+  expect(Math.abs(marker.y - playHere.y)).toBeLessThan(4);
   const bar = page.getByTestId("deck-ruler");
   const box = (await bar.boundingBox())!;
   await page.mouse.click(box.x + box.width * (6 / 12), box.y + box.height / 2); // T = 6 → middle, localT 2

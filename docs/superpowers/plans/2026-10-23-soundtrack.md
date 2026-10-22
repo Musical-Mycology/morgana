@@ -28,7 +28,7 @@
 
 1. **A crafted media id in the URL** (`..%2F..%2Fdecks%2Fx.deck.json`, `../x`, an absolute path) → 404 and no file outside `media/<deckId>/` is read (Task 3 test).
 2. **The soundtrack's file is missing** (deleted, or a deck copied without its media folder) → the Player shows "Soundtrack unavailable — playing silent" and keeps playing on its timer; the editor lints `soundtrack-missing`; nothing throws (Tasks 5, 8 tests).
-3. **Seeking while playing** (arrows, Home, scrubber, marker click) restarts the audio at the new `T`, so sound and picture stay together (Task 8 test).
+3. **Seeking while playing** (arrows, Home, Play-at-the-end restart) restarts the audio at the new `T`, so sound and picture stay together; the scrubber and a marker click pause, then jump (playback resumes from the new `T` on Play) (Task 8 test).
 4. **Track shorter than the deck**: past the track's end the clock keeps running on the timer to the deck's end (Task 8 test).
 5. **Uploading the same file twice / Replace with the same file** keeps one stored copy and one id (Task 2 test).
 

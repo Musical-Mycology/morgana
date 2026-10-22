@@ -30,6 +30,8 @@ test("upload → list → fetch bytes → delete", async () => {
   expect(file.headers.get("Content-Type")).toBe("audio/mpeg");
   expect(file.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
   expect(file.headers.get("Content-Disposition")).toBeNull();
+  expect(file.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  expect(file.headers.get("Content-Security-Policy")).toBe("sandbox");
   expect(await file.text()).toBe("abc");
   expect((await fileDELETE(new Request("http://t", { method: "DELETE" }), fileCtx("d1", info.id))).status).toBe(204);
   expect((await fileGET(new Request("http://t"), fileCtx("d1", info.id))).status).toBe(404);
