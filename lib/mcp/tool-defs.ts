@@ -133,7 +133,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "read_deck_timing",
-    description: "Read-only. Returns the deck's computed time layout: targetSec (null if untimed), total seconds, and per scene its id, start, length, contentLength, pinned flag, overrunSec (content cut off past a pinned boundary), and each beat's flat index, id, scene-local start and duration. Use this instead of summing action durations yourself.",
+    description: "Read-only. Returns the deck's computed time layout: targetSec (null if untimed), total seconds, and per scene its id, start, length, contentLength, pinned flag, overrunSec (content cut off past a pinned boundary), and each beat's flat index, id, scene-local start and duration. A pinned scene's length can exceed its contentLength: content that finishes before the pinned length holds its last frame until the boundary (no overrun, nothing cut). Use this instead of summing action durations yourself.",
     inputSchema: schema({ ...DECK_ID }, ["deck_id"]),
   },
 ];

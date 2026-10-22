@@ -26,11 +26,15 @@ export default function Page() {
   const [result, setResult] = useState("running");
   useEffect(() => {
     const id = requestAnimationFrame(() => {
+      // No transport = nothing to measure; fail loudly (the e2e waits for "mean=") rather than
+      // timing 601 no-op calls and passing vacuously.
+      const tr = transport.current;
+      if (!tr) { setResult("error: no transport"); return; }
       const dur = beatDuration(timeline);
       let total = 0, max = 0;
       for (let i = 0; i <= FRAMES; i++) {
         const t0 = performance.now();
-        transport.current?.seek((i / FRAMES) * dur);
+        tr.seek((i / FRAMES) * dur);
         const dt = performance.now() - t0;
         total += dt; max = Math.max(max, dt);
       }

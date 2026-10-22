@@ -99,6 +99,22 @@ bridge, now reachable from the UI. (Emits `scenes` only; import/round-trip is on
 **Autosave.** Edits persist automatically, ~700ms after you stop typing, via the deck API to
 JSON on disk. The toolbar shows the save status.
 
+### Timed decks & the Player
+
+For a deck meant to run as a video, open **Deck settings** and tick **Timed deck (video)**, then
+set its **Target length** (`m:ss`). Each scene in the filmstrip gains a **Length** field (seconds;
+blank = follow the scene's content): a pinned scene always occupies exactly that long, so later
+scenes never shift — content that finishes early holds its last frame until the boundary, and
+content that runs long is cut there (flagged as an overrun).
+
+A **deck ruler** above the timeline shows the whole deck against the target; click or drag it to
+jump to the beat at that time. **▶ Play deck** (toolbar) and **▶ Play from here** (ruler) save any
+pending edits and open the timed Player in a new tab.
+
+The Player lives at `/play?deck=<id>[&t=<seconds>]` — one continuous clock across the whole deck,
+counting up against the target. Keys: **Space** play/pause · **←/→** ±1s (**Shift** ±5s) ·
+**Home** back to 0:00 · **F** fullscreen · **H** hide/show the HUD.
+
 ---
 
 ## Run it

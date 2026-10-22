@@ -59,3 +59,8 @@ test("includes the timing tools", () => {
   const upd = TOOL_DEFS.find((t) => t.name === "update_meta")!;
   expect(upd.description).toContain("timing.targetSec");
 });
+
+test("read_deck_timing explains that content shorter than a pinned length holds", () => {
+  const tool = TOOL_DEFS.find((t) => t.name === "read_deck_timing")!;
+  expect(tool.description).toMatch(/holds? (its|the) last frame until the boundary/);
+});
