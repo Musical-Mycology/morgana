@@ -202,6 +202,10 @@ Notable in-repo docs:
   editor canvas — still the simpler `seek.ts` renderer; continuous whole-deck playback in the
   editor remains §7c's job. "Play deck" / "Play from here" call `useAutosave().flush()` before
   opening `/play`, because `/play` loads the *persisted* deck and autosave is debounced.
+  **Gotcha:** the tab must be opened synchronously in the click (`window.open("", "_blank")`)
+  and only navigated after the flush — Safari drops the user gesture across an `await`, so a
+  `window.open` after the save is popup-blocked and Play silently does nothing
+  (`components/editor/PlayLink.tsx`).
 - **Three deliberate behaviour changes from §7b, not bugs:** counters (`counterValueAt`) and
   media (`mediaStateAt`) are now computed from time rather than animated on wall-clock, and
   `rotateList` derives its currently-visible item from elapsed time (`rotateItemAt`,
