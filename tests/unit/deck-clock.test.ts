@@ -78,6 +78,11 @@ test("a held final scene is 'hold' at its end, including exact content end", () 
   expect(locate(L, 4.999)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 2, phase: "hold" });
 });
 
+test("overrun: a beat starting exactly at the cut boundary is not reached at T === total", () => {
+  const L = deckLayout(doc([{ id: "s", durationSec: 1, beats: [w("a", 1000), w("b", 1000)] }]));
+  expect(locate(L, 1)).toEqual({ sceneIdx: 0, beatIdx: 0, flatIdx: 0, localT: 1, phase: "play" });
+});
+
 test("an exact intra-scene beat boundary starts the next beat in play", () => {
   expect(locate(deckLayout(D), 1)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 0, phase: "play" });
 });
