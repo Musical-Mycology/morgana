@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, test } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeck } from "@/lib/store/deck-store";
@@ -48,11 +48,53 @@ test("400 unsupported type, 400 missing file, 404 unknown deck, 413 too large", 
   expect((await upload("d1", "a.mp3", "too big")).status).toBe(413);
 });
 
-test.each(["..%2F..%2Fdecks%2Fd1.deck.json", "../../decks/d1.deck.json", "%2Fetc%2Fpasswd"])(
-  "a crafted media id %s is a 404 and reads nothing", async (mediaId) => {
-    mkdirSync(join(dir, "media", "d1"), { recursive: true });
-    writeFileSync(join(dir, "secret.txt"), "secret");
-    const res = await fileGET(new Request("http://t"), fileCtx("d1", decodeURIComponent(mediaId)));
-    expect(res.status).toBe(404);
-    expect(await res.text()).not.toContain("secret");
+test("an oversized chunked body (no content-length) is a 413, cut off while reading", async () => {
+  process.env.MORGANA_MEDIA_MAX_MB = "0.0001";
+  let pulled = 0;
+  const chunk = new Uint8Array(64 * 1024);
+  const body = new ReadableStream<Uint8Array>({
+    pull(c) { if (pulled >= 16) return c.close(); pulled++; c.enqueue(chunk); },
   });
+  const req = new Request("http://t/api/decks/d1/media", {
+    method: "POST", body, duplex: "half", headers: { "content-type": "multipart/form-data; boundary=x" },
+  } as RequestInit & { duplex: "half" });
+  expect(req.headers.get("content-length")).toBeNull();
+  expect((await uploadPOST(req, deckCtx("d1"))).status).toBe(413);
+  expect(pulled).toBeLessThan(16); // stopped reading early, did not buffer the whole stream
+});
+
+test("a lying/huge content-length is a 413 without parsing the body", async () => {
+  process.env.MORGANA_MEDIA_MAX_MB = "1";
+  const req = new Request("http://t/api/decks/d1/media", {
+    method: "POST", body: "not multipart", headers: { "content-length": "999999999", "content-type": "text/plain" },
+  });
+  expect((await uploadPOST(req, deckCtx("d1"))).status).toBe(413);
+});
+
+test("a normal upload under the cap is still a 201", async () => {
+  process.env.MORGANA_MEDIA_MAX_MB = "1";
+  expect((await upload("d1", "ok.mp3", "abc")).status).toBe(201);
+});
+
+describe("a crafted media id never reaches a file outside media/<deck>/", () => {
+  // A real file + valid sidecar one level above media/d1: only the store's guards stand between
+  // `../secret` and a 200, so these fail if the guards are removed.
+  beforeEach(() => {
+    mkdirSync(join(dir, "media", "d1"), { recursive: true });
+    writeFileSync(join(dir, "media", "secret"), "secret-bytes");
+    writeFileSync(join(dir, "media", "secret.json"), JSON.stringify({ id: "secret", name: "s.mp3", mime: "audio/mpeg", bytes: 12, uploadedAt: "2026-01-01T00:00:00.000Z" }));
+  });
+
+  test.each(["../secret", "..%2Fsecret", "/etc/passwd"])("GET %s is a 404 and reads nothing", async (mediaId) => {
+    const res = await fileGET(new Request("http://t"), fileCtx("d1", mediaId));
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain("secret-bytes");
+  });
+
+  test("DELETE ../secret is a 404 and removes nothing", async () => {
+    const res = await fileDELETE(new Request("http://t", { method: "DELETE" }), fileCtx("d1", "../secret"));
+    expect(res.status).toBe(404);
+    expect(existsSync(join(dir, "media", "secret"))).toBe(true);
+    expect(existsSync(join(dir, "media", "secret.json"))).toBe(true);
+  });
+});

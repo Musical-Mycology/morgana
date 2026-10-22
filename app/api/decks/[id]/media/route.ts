@@ -19,12 +19,35 @@ export async function GET(_req: Request, { params }: Ctx) {
 export async function POST(req: Request, { params }: Ctx) {
   const { id } = await params;
   try { await loadDeck(id); } catch { return Response.json({ error: "not found" }, { status: 404 }); }
+  // Multipart overhead slack on top of the file cap.
+  const limit = mediaMaxBytes() + 64 * 1024;
+  const tooLarge = () => Response.json({ error: "file too large" }, { status: 413 });
+  // Fast path: an honest Content-Length over the cap is refused without reading anything.
   const declared = Number(req.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > mediaMaxBytes() + 64 * 1024) {
-    return Response.json({ error: "file too large" }, { status: 413 });
+  if (Number.isFinite(declared) && declared > limit) return tooLarge();
+  // Content-Length can be absent (chunked) or a lie, so enforce the cap WHILE reading: never
+  // buffer more than `limit` bytes before parsing.
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  if (req.body) {
+    const reader = req.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > limit) { await reader.cancel().catch(() => {}); return tooLarge(); }
+        chunks.push(value);
+      }
+    } catch { return Response.json({ error: "expected multipart form data" }, { status: 400 }); }
   }
+  const buffered = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { buffered.set(c, off); off += c.byteLength; }
   let file: FormDataEntryValue | null;
-  try { file = (await req.formData()).get("file"); } catch { return Response.json({ error: "expected multipart form data" }, { status: 400 }); }
+  try {
+    file = (await new Response(buffered, { headers: { "content-type": req.headers.get("content-type") ?? "" } }).formData()).get("file");
+  } catch { return Response.json({ error: "expected multipart form data" }, { status: 400 }); }
   if (!(file instanceof File)) return Response.json({ error: "missing \"file\" field" }, { status: 400 });
   try {
     const info = await saveMedia(id, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });

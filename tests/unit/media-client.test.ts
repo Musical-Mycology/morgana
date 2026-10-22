@@ -1,14 +1,23 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { listMedia, mediaPath, mediaUrl, uploadMedia } from "@/lib/api/media-client";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); });
 
 test("mediaPath is the app-absolute path with no base path", () => {
   expect(mediaPath("d1", "0123456789abcdef.mp3")).toBe("/api/decks/d1/media/0123456789abcdef.mp3");
 });
 
-test("mediaUrl", () => {
-  expect(mediaUrl("d1", "0123456789abcdef.mp3")).toBe("/api/decks/d1/media/0123456789abcdef.mp3");
+test("mediaUrl applies the base path; mediaPath never does", async () => {
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/m");
+  vi.resetModules();
+  try {
+    const c = await import("@/lib/api/media-client");
+    expect(c.mediaUrl("d1", "0123456789abcdef.mp3")).toBe("/m/api/decks/d1/media/0123456789abcdef.mp3");
+    expect(c.mediaPath("d1", "0123456789abcdef.mp3")).toBe("/api/decks/d1/media/0123456789abcdef.mp3");
+  } finally {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  }
 });
 
 test("uploadMedia posts multipart and surfaces the server's error message", async () => {

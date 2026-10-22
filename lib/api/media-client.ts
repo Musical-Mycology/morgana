@@ -1,11 +1,11 @@
 import { withBasePath } from "@/lib/base-path";
 import type { MediaInfo } from "@/lib/store/media-store";
 
-// App-absolute path WITHOUT the base path. Written as an expression-bodied arrow so the
-// literal isn't a `return "/…"` (base-path-callsites.test.ts); this is deliberately
-// unprefixed because loadSoundtrack() applies withBasePath() itself.
-export const mediaPath = (deckId: string, mediaId: string): string =>
-  `/api/decks/${deckId}/media/${mediaId}`;
+// App-absolute path WITHOUT the base path: loadSoundtrack() applies withBasePath() itself.
+// DOM consumers must use mediaUrl().
+export function mediaPath(deckId: string, mediaId: string): string {
+  return `/api/decks/${deckId}/media/${mediaId}`;
+}
 
 /** Base-path-prefixed URL, for anything that hands the URL straight to the DOM. */
 export function mediaUrl(deckId: string, mediaId: string): string {

@@ -65,7 +65,7 @@ export async function listMedia(deckId: string): Promise<MediaInfo[]> {
   return out.sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt) || a.id.localeCompare(b.id));
 }
 
-export async function readMedia(deckId: string, mediaId: string): Promise<{ info: MediaInfo; bytes: Uint8Array }> {
+export async function readMedia(deckId: string, mediaId: string): Promise<{ info: MediaInfo; bytes: Uint8Array<ArrayBuffer> }> {
   const path = mediaPath(deckId, mediaId);
   try {
     const info = JSON.parse(await readFile(`${path}.json`, "utf8")) as MediaInfo;

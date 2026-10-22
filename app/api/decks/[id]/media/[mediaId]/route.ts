@@ -12,8 +12,7 @@ export async function GET(_req: Request, { params }: Ctx) {
   const { id, mediaId } = await params;
   try {
     const { info, bytes } = await readMedia(id, mediaId);
-    // readMedia returns Uint8Array<ArrayBufferLike>; TS only accepts <ArrayBuffer> as BodyInit (a Node Buffer read is always ArrayBuffer-backed).
-    return new Response(bytes as Uint8Array<ArrayBuffer>, {
+    return new Response(bytes, {
       headers: { "Content-Type": info.mime, "Cache-Control": "private, max-age=31536000, immutable", "Content-Length": String(bytes.byteLength) },
     });
   } catch (e) {
