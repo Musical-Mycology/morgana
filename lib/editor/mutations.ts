@@ -138,10 +138,12 @@ export function appendBeatToScene(doc: DeckDoc, sceneIdx: number): DeckDoc {
   return mapScene(doc, sceneIdx, (s) => ({ ...s, beats: [...s.beats, beat] }));
 }
 
-/** Pin (`seconds`) or un-pin (`null`) a scene's length for timed playback. Out of range → no-op
- *  (same reference). Validation of the value is validateDeckDoc's job. */
+/** Pin (`seconds`) or un-pin (`null`) a scene's length for timed playback. Out of range or
+ *  unchanged → no-op (same reference). Validation of the value is validateDeckDoc's job. */
 export function setSceneDuration(doc: DeckDoc, sceneIdx: number, seconds: number | null): DeckDoc {
   if (sceneIdx < 0 || sceneIdx >= doc.scenes.length) return doc;
+  const cur = doc.scenes[sceneIdx];
+  if (seconds === null ? !("durationSec" in cur) : seconds === cur.durationSec) return doc; // nothing changes
   return mapScene(doc, sceneIdx, (s) => {
     if (seconds === null) { const { durationSec: _drop, ...rest } = s; return rest; }
     return { ...s, durationSec: seconds };

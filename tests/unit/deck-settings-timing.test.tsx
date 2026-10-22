@@ -37,3 +37,30 @@ test("turning Timed deck off leaves a valid, saveable deck", () => {
   expect(validateDeckDoc(JSON.parse(JSON.stringify(doc))).ok).toBe(true);
   expect(screen.queryByTestId("target-length")).toBeNull();
 });
+
+const hist = () => { const st = useEditor.getState(); return [st.past.length, st.revision]; };
+
+test("blur without edits, or re-committing the same value, records no history", () => {
+  render(<DeckSettings />);
+  fireEvent.click(screen.getByTestId("timed-toggle"));
+  const before = hist();
+  const input = screen.getByTestId("target-length") as HTMLInputElement;
+  fireEvent.focus(input);
+  fireEvent.blur(input);
+  expect(hist()).toEqual(before);
+  fireEvent.change(input, { target: { value: "91" } }); // same value, different spelling
+  fireEvent.blur(input);
+  expect(hist()).toEqual(before);
+  expect(input.value).toBe("1:31"); // normalized
+});
+
+test("Enter then blur commits exactly once", () => {
+  render(<DeckSettings />);
+  fireEvent.click(screen.getByTestId("timed-toggle"));
+  const [past0] = hist();
+  const input = screen.getByTestId("target-length");
+  fireEvent.change(input, { target: { value: "2:00" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.blur(input);
+  expect(hist()[0]).toBe(past0 + 1);
+});

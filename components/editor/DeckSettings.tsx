@@ -22,7 +22,7 @@ function TimingFields({ doc, updateMeta }: { doc: DeckDoc; updateMeta: (path: st
   useEffect(() => { setDraft(target !== undefined ? formatClock(target, { tenths: false }) : ""); }, [target]);
   const commit = () => {
     const v = parseClock(draft);
-    if (v === null) { setDraft(target !== undefined ? formatClock(target, { tenths: false }) : ""); return; }
+    if (v === null || v === target) { setDraft(target !== undefined ? formatClock(target, { tenths: false }) : ""); return; }
     updateMeta("timing", { targetSec: v });
   };
   return (

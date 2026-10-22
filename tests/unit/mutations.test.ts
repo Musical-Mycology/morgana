@@ -58,3 +58,10 @@ test("setSceneDuration pins, unpins, and no-ops out of range", () => {
   expect("durationSec" in unpinned.scenes[0]).toBe(false);
   expect(setSceneDuration(d, 5, 3)).toBe(d);
 });
+
+test("setSceneDuration returns the same doc when nothing changes", () => {
+  const d: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s", beats: [] }] };
+  expect(setSceneDuration(d, 0, null)).toBe(d); // already unpinned
+  const pinned = setSceneDuration(d, 0, 15);
+  expect(setSceneDuration(pinned, 0, 15)).toBe(pinned); // same value
+});

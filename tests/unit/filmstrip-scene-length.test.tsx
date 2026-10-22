@@ -38,3 +38,30 @@ test("untimed decks hide Length unless a scene is already pinned", () => {
   render(<Filmstrip />);
   expect(screen.getAllByTestId("scene-length")).toHaveLength(1); // only the pinned s1
 });
+
+const hist = () => { const st = useEditor.getState(); return [st.past.length, st.revision]; };
+
+test("blur without edits, or re-committing the same value, records no history", () => {
+  useEditor.getState().load(deck(true));
+  render(<Filmstrip />);
+  const [pinned, auto] = screen.getAllByTestId("scene-length") as HTMLInputElement[];
+  const before = hist();
+  fireEvent.focus(auto); fireEvent.blur(auto); // empty draft on an unpinned scene
+  fireEvent.focus(pinned); fireEvent.blur(pinned); // unchanged pinned value
+  expect(hist()).toEqual(before);
+  fireEvent.change(pinned, { target: { value: "2.0" } }); // same number, different spelling
+  fireEvent.blur(pinned);
+  expect(hist()).toEqual(before);
+  expect(pinned.value).toBe("2");
+});
+
+test("Enter then blur commits exactly once", () => {
+  useEditor.getState().load(deck(true));
+  render(<Filmstrip />);
+  const second = (screen.getAllByTestId("scene-length") as HTMLInputElement[])[1];
+  const [past0] = hist();
+  fireEvent.change(second, { target: { value: "4.5" } });
+  fireEvent.keyDown(second, { key: "Enter" });
+  fireEvent.blur(second);
+  expect(hist()[0]).toBe(past0 + 1);
+});

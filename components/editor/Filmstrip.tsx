@@ -7,10 +7,11 @@ import { deckLayout, sceneOverrun } from "@/engine/authoring/deck-clock";
 function SceneLength({ sceneIdx, value, contentLength, over, onCommit }: { sceneIdx: number; value: number | undefined; contentLength: number; over: boolean; onCommit: (v: number | null) => void }) {
   const [draft, setDraft] = useState(value !== undefined ? String(value) : "");
   useEffect(() => { setDraft(value !== undefined ? String(value) : ""); }, [value]);
+  const canonical = value !== undefined ? String(value) : "";
   const commit = () => {
-    if (draft.trim() === "") { onCommit(null); return; }
+    if (draft.trim() === "") { if (value !== undefined) onCommit(null); else setDraft(canonical); return; }
     const v = Number(draft);
-    if (Number.isFinite(v) && v > 0) onCommit(v); else setDraft(value !== undefined ? String(value) : "");
+    if (Number.isFinite(v) && v > 0 && v !== value) onCommit(v); else setDraft(canonical);
   };
   return (
     <div className="ed__scene-length">
