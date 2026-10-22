@@ -51,6 +51,9 @@ test("upload a soundtrack, see its waveform, and play it in the Player", async (
   await expect(page.getByTestId("play-clock")).toHaveAttribute("data-clock", "audio", { timeout: 5000 });
   await expect.poll(async () => (await page.getByTestId("play-clock").textContent()) ?? "", { timeout: 5000 })
     .toMatch(/^0:0[1-3]\.\d/);
+  // The clock is past 0:01 (beyond the 0.5 s stall-grace window): the audio must STILL be driving —
+  // a stall-guard takeover would read "timer".
+  await expect(page.getByTestId("play-clock")).toHaveAttribute("data-clock", "audio");
 
   await request.delete(`/api/decks/${id}`);
   expect((await request.get(`/api/decks/${id}/media/${media.id}`)).status()).toBe(404); // media went with the deck

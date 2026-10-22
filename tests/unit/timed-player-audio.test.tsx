@@ -142,3 +142,21 @@ test("data-clock is timer when there is no soundtrack playing", async () => {
   act(() => { vi.advanceTimersByTime(200); });
   expect(clockSrc()).toBe("timer");
 });
+
+test("data-clock is timer while the audio reading is frozen (suspended context), audio once it advances", async () => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "performance"] });
+  const track = fakeTrack();
+  render(<TimedPlayer doc={doc} initialT={2} loadTrack={() => Promise.resolve(track as unknown as Soundtrack)} />);
+  await act(async () => {});
+  act(() => { fireEvent.keyDown(window, { key: " " }); }); // now() is frozen at 2.0
+  for (let i = 0; i < 4; i++) {
+    act(() => { vi.advanceTimersToNextFrame(); });
+    expect(clockSrc()).toBe("timer"); // from the very first frame, inside the 0.5 s grace window
+  }
+  track.set(2.1);
+  act(() => { vi.advanceTimersToNextFrame(); });
+  expect(clockSrc()).toBe("audio");
+  track.set(2.2);
+  act(() => { vi.advanceTimersToNextFrame(); });
+  expect(clockSrc()).toBe("audio");
+});

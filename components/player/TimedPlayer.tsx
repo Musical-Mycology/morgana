@@ -52,7 +52,10 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
   const track = sound.status === "ready" ? sound.track : null;
   const trackRef = useRef<Soundtrack | null>(null);
   const [muted, setMuted] = useState(false);
-  /** Which clock produced the last painted T (exposed as data-clock; the e2e proves audio drives it). */
+  /** Exposed as data-clock. "audio" only on a frame where the soundtrack's clock demonstrably
+   *  ADVANCED (its reading is non-null, strictly greater than the previous frame's, and not stalled).
+   *  A frozen reading (suspended context, the very first frame after a (re)start, or the 0.5 s grace
+   *  window) reports "timer" even if T is still being held on the audio value. */
   const [clockSrc, setClockSrc] = useState<"audio" | "timer">("timer");
   /** The rAF loop's view of the audio clock: its last reading, when (rAF time) it last changed,
    *  and whether it is stalled (timer driving T). `lastT: null` = no reading since a (re)start. */
@@ -106,7 +109,7 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
   useEffect(() => {
     if (!playing) { setClockSrc("timer"); return; }
     let last = performance.now();
-    let fromAudio = false; // did this frame's T come from the soundtrack's clock?
+    let fromAudio = false; // did the soundtrack's clock advance and drive this frame's T?
     audioClock.current = { lastT: null, movedAt: 0, stalled: false };
     let id = requestAnimationFrame(function step(now) {
       // The first frame's timestamp can predate the performance.now() read above; never let
@@ -126,9 +129,11 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
       const tr = trackRef.current;
       const a = tr?.now() ?? null;
       const ac = audioClock.current;
+      let advancedNow = false; // this frame's reading is strictly past the previous frame's
       if (a === null) { ac.lastT = null; return null; }
       if (ac.lastT === null) { ac.lastT = a; ac.movedAt = now; } // first reading since a (re)start
       else if (a !== ac.lastT) {
+        advancedNow = a > ac.lastT;
         ac.lastT = a;
         ac.movedAt = now;
         if (ac.stalled) {
@@ -140,7 +145,7 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
         }
       } else if (now - ac.movedAt >= AUDIO_STALL_MS) ac.stalled = true;
       if (ac.stalled) return null;
-      fromAudio = true;
+      fromAudio = advancedNow;
       return a;
     }
   }, [playing, apply, layout.total]);
