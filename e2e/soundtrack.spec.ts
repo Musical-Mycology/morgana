@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 const id = "e2e-soundtrack";
+const missing = "e2e-soundtrack-missing";
+
+// Throwaway decks (and their media) go even when an assertion fails mid-test.
+test.afterEach(async ({ request }) => {
+  await request.delete(`/api/decks/${id}`);
+  await request.delete(`/api/decks/${missing}`);
+});
 
 /** A mono 16-bit PCM WAV: `secs` of a 440 Hz sine at 8 kHz. */
 function sineWav(secs: number): Buffer {
@@ -14,7 +21,7 @@ function sineWav(secs: number): Buffer {
 }
 
 test("upload a soundtrack, see its waveform, and play it in the Player", async ({ page, request }) => {
-  await request.delete(`/api/decks/${id}`).catch(() => {});
+  await request.delete(`/api/decks/${id}`);
   await request.post("/api/decks", { data: { id, title: "Soundtrack" } });
   const up = await request.post(`/api/decks/${id}/media`, { multipart: { file: { name: "tone.wav", mimeType: "audio/wav", buffer: sineWav(3) } } });
   expect(up.status()).toBe(201);
@@ -33,12 +40,15 @@ test("upload a soundtrack, see its waveform, and play it in the Player", async (
   await expect(page.getByTestId("deck-ruler").getByTestId("timebar-waveform")).toBeVisible();
   await expect(page.getByTestId("deck-ruler").getByTestId("timebar-marker")).toHaveAttribute("title", "drop");
 
-  // Player: waveform, track decoded (no loading/error notice), and Play advances the clock off the audio.
+  // Player: waveform, track decoded (no loading/error notice), and Play is driven by the AUDIO clock
+  // (data-clock="audio" — the stall-guard timer would report "timer"), which then advances.
   await page.goto(`/play?deck=${id}`);
   await expect(page.getByTestId("play-scrub").getByTestId("timebar-waveform")).toBeVisible();
   await expect(page.getByTestId("play-mute")).toBeVisible(); // soundtrack status is no longer "none"
   await expect(page.getByTestId("play-audio-status")).toHaveCount(0); // ready: neither loading nor error
   await page.keyboard.press(" ");
+  // The audio context starts ~170 ms after the gesture; until then the picture holds, so poll.
+  await expect(page.getByTestId("play-clock")).toHaveAttribute("data-clock", "audio", { timeout: 5000 });
   await expect.poll(async () => (await page.getByTestId("play-clock").textContent()) ?? "", { timeout: 5000 })
     .toMatch(/^0:0[1-3]\.\d/);
 
@@ -47,8 +57,7 @@ test("upload a soundtrack, see its waveform, and play it in the Player", async (
 });
 
 test("a missing soundtrack file plays silently with a notice", async ({ page, request }) => {
-  const missing = "e2e-soundtrack-missing";
-  await request.delete(`/api/decks/${missing}`).catch(() => {});
+  await request.delete(`/api/decks/${missing}`);
   await request.post("/api/decks", { data: { id: missing, title: "Missing" } });
   await request.put(`/api/decks/${missing}`, { data: { version: 1, meta: { id: missing, title: "Missing", soundtrack: { media: "ffffffffffffffff.mp3" } },
     scenes: [{ id: "s", durationSec: 2, beats: [{ id: "b", timeline: [{ kind: "wait", ms: 500 }] }] }] } });
@@ -56,5 +65,5 @@ test("a missing soundtrack file plays silently with a notice", async ({ page, re
   await expect(page.getByTestId("play-audio-status")).toHaveText("Soundtrack unavailable — playing silent");
   await page.keyboard.press(" ");
   await expect.poll(async () => (await page.getByTestId("play-clock").textContent()) ?? "").not.toBe("0:00.0 / 0:02");
-  await request.delete(`/api/decks/${missing}`);
+  await expect(page.getByTestId("play-clock")).toHaveAttribute("data-clock", "timer"); // no audio: the timer drives
 });

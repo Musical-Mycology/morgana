@@ -52,6 +52,8 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
   const track = sound.status === "ready" ? sound.track : null;
   const trackRef = useRef<Soundtrack | null>(null);
   const [muted, setMuted] = useState(false);
+  /** Which clock produced the last painted T (exposed as data-clock; the e2e proves audio drives it). */
+  const [clockSrc, setClockSrc] = useState<"audio" | "timer">("timer");
   /** The rAF loop's view of the audio clock: its last reading, when (rAF time) it last changed,
    *  and whether it is stalled (timer driving T). `lastT: null` = no reading since a (re)start. */
   const audioClock = useRef<{ lastT: number | null; movedAt: number; stalled: boolean }>({ lastT: null, movedAt: 0, stalled: false });
@@ -102,14 +104,17 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
   // The one clock: a single rAF loop while playing. While the soundtrack plays, ITS clock is
   // the deck clock; otherwise (no track, decode failed, past its end, stalled) the timer is.
   useEffect(() => {
-    if (!playing) return;
+    if (!playing) { setClockSrc("timer"); return; }
     let last = performance.now();
+    let fromAudio = false; // did this frame's T come from the soundtrack's clock?
     audioClock.current = { lastT: null, movedAt: 0, stalled: false };
     let id = requestAnimationFrame(function step(now) {
       // The first frame's timestamp can predate the performance.now() read above; never let
       // that step the clock (and the stage) backwards on Play.
       const timerT = T.current + Math.max(0, now - last) / 1000;
+      fromAudio = false;
       apply(audioDrivenT(now, timerT) ?? timerT);
+      setClockSrc(fromAudio ? "audio" : "timer");
       last = now;
       if (T.current >= layout.total) { setPlaying(false); return; }
       id = requestAnimationFrame(step);
@@ -134,7 +139,9 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
           return timerT;
         }
       } else if (now - ac.movedAt >= AUDIO_STALL_MS) ac.stalled = true;
-      return ac.stalled ? null : a;
+      if (ac.stalled) return null;
+      fromAudio = true;
+      return a;
     }
   }, [playing, apply, layout.total]);
 
@@ -200,7 +207,7 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
           {/* preventDefault on mousedown: a click must not leave the button focused, so Space keeps
               reaching the window handler rather than re-activating the button. */}
           <button className="play__btn" onClick={togglePlay} onMouseDown={(e) => e.preventDefault()} aria-label={playing ? "Pause" : "Play"}>{playing ? "❚❚" : "▶"}</button>
-          <span className="play__clock" data-testid="play-clock" data-over={over ? "true" : undefined}>
+          <span className="play__clock" data-testid="play-clock" data-clock={clockSrc} data-over={over ? "true" : undefined}>
             {formatClock(displayT)} / {formatClock(target ?? layout.total, { tenths: false })}
           </span>
           <span className="play__scene" data-testid="play-scene">{sceneId}</span>

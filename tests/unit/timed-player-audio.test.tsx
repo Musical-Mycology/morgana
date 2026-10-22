@@ -112,3 +112,33 @@ test("loading notice, mute toggle (M and button), waveform + markers on the scru
   expect(screen.getByTestId("timebar-waveform")).toBeTruthy();
   expect(screen.getByTestId("timebar-marker").getAttribute("title")).toBe("drop");
 });
+
+const clockSrc = () => screen.getByTestId("play-clock").getAttribute("data-clock");
+
+test("data-clock reports which clock painted T: audio while it advances, timer when stalled or paused", async () => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "performance"] });
+  const track = fakeTrack();
+  render(<TimedPlayer doc={doc} loadTrack={() => Promise.resolve(track as unknown as Soundtrack)} />);
+  await act(async () => {});
+  expect(clockSrc()).toBe("timer"); // idle
+  act(() => { fireEvent.keyDown(window, { key: " " }); });
+  track.set(1);
+  act(() => { vi.advanceTimersToNextFrame(); });
+  track.set(1.1);
+  act(() => { vi.advanceTimersToNextFrame(); });
+  expect(clockSrc()).toBe("audio");
+  // The audio clock freezes: after >0.5 s the timer takes over.
+  act(() => { vi.advanceTimersByTime(900); });
+  expect(clockSrc()).toBe("timer");
+  act(() => { fireEvent.keyDown(window, { key: " " }); });
+  expect(clockSrc()).toBe("timer"); // paused
+});
+
+test("data-clock is timer when there is no soundtrack playing", async () => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "performance"] });
+  render(<TimedPlayer doc={doc} loadTrack={() => Promise.reject(new Error("bad"))} />);
+  await act(async () => {});
+  act(() => { fireEvent.keyDown(window, { key: " " }); });
+  act(() => { vi.advanceTimersByTime(200); });
+  expect(clockSrc()).toBe("timer");
+});
