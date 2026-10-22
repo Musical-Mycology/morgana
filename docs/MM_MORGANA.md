@@ -96,7 +96,8 @@ Notable in-repo docs:
   and §7c (canvas swap + parity gate + `seek.ts` deletion). §7a and §7b are both landed.
 - **Timed video is a six-part roadmap** driven by a Morgana-rendered festival submission video
   (spec `docs/superpowers/specs/2026-10-22-deck-clock-timed-player-design.md` §0.2): (1) deck
-  clock + timed Player — **landed**; (2) soundtrack; (3) frame-stepped MP4 render; (4) video
+  clock + timed Player — **landed**; (2) soundtrack + deck media store — **landed** (spec
+  `docs/superpowers/specs/2026-10-23-soundtrack-design.md`); (3) frame-stepped MP4 render; (4) video
   clips; (5) camera moves; (6) credits + text particles. Each later sub-project gets its own
   spec → plan.
   **Gotcha, now RESOLVED (§7b, 2026-07-28) — `CinematicSlide`'s GSAP master used to be a
@@ -206,6 +207,54 @@ Notable in-repo docs:
   and only navigated after the flush — Safari drops the user gesture across an `await`, so a
   `window.open` after the save is popup-blocked and Play silently does nothing
   (`components/editor/PlayLink.tsx`).
+- **While the soundtrack plays, the audio IS the deck clock** (sub-project 2). A deck carries
+  one pre-mixed track (`meta.soundtrack.media`); `lib/audio/soundtrack.ts` decodes it once
+  (Web Audio) and its `now()` gives deck time from the audio hardware clock. The Player's rAF
+  step feeds that into `apply()` — still the **only** writer of `T`, so the one-clock rule
+  holds; past the track's end, before it loads, or with no soundtrack, the rAF timer drives.
+  Load-bearing details:
+  - `now()` is **latency-compensated and smoothed**: it reads `getOutputTimestamp().contextTime`
+    (the time actually audible), extrapolates with `performance.now()` capped at **100 ms** and
+    only while the context is `running`, holds at the play offset until sound is audible, and is
+    monotonic per `play()`. Fallback without `getOutputTimestamp`: `currentTime −
+    outputLatency`. Raw `currentTime` would let the picture lead the sound by the output latency
+    (150–250 ms on Bluetooth) — an offset authors would bake into the export.
+  - **Stall guard** (`TimedPlayer.tsx`, `AUDIO_STALL_MS = 500`): a non-null reading that doesn't
+    advance for 0.5 s (e.g. autoplay blocked, context never resumed) hands `T` to the timer;
+    when the audio moves again it is re-synced with one `play(T)`. The 100 ms extrapolation cap
+    is deliberately below this window so a dead context still reads as "not advancing".
+    **Known gap:** start-up (~170 ms measured in headless Chromium) + Bluetooth output latency
+    can approach 500 ms and trip the guard → one audible re-sync skip; revisit the constant
+    (e.g. 500 ms + `outputLatency`) if it shows up in practice.
+  - `play-clock` exposes `data-clock="audio" | "timer"` — "audio" **only** on frames where the
+    audio reading strictly advanced (frozen/first frames read "timer"). The e2e asserts it, which
+    is the only end-to-end proof that sound drives picture.
+  - Transport: arrows / Home / end-restart seek while playing and restart the track at the new
+    `T`; the scrubber and marker clicks pause, then jump. `M` / HUD button mutes (preview only).
+  - Decodes are cached per URL for the page (`lib/audio/use-soundtrack.ts`), shared by the
+    Player, the ruler and Deck settings; `releaseSoundtracksExcept(deckId, keep)` frees a
+    replaced/removed track (decoded PCM is ~90 MB for a few minutes of stereo).
+  - The ruler and Player scrubber draw the waveform (`TimeBar` `peaks`, memoised on identity) and
+    deck-time **cue markers** (`meta.markers`, "+ Marker" on the ruler, edited in Deck settings).
+  - e2e needs Playwright `launchOptions.args: ["--autoplay-policy=no-user-gesture-required"]`
+    (top-level `use` in `playwright.config.ts`); `e2e/audio-clock.spec.ts` is the gate that the
+    Web Audio clock advances in the test browser at all.
+- **The deck media store** (`lib/store/media-store.ts`, routes `app/api/decks/[id]/media/…`)
+  is generic — audio today, images/video later. Files live at
+  `MORGANA_DATA_DIR/media/<deckId>/<mediaId>` + a `<mediaId>.json` sidecar; ids are content
+  hashes (`/^[0-9a-f]{16}\.[a-z0-9]{1,5}$/`, same bytes → same id). Every path passes the id
+  regex AND a `resolve`/`startsWith(dir + sep)` containment check; `deleteDeckMedia`'s recursive
+  `rm` has its own containment guard; `deleteDeck` cascades to media. Content-Type comes from
+  an extension allowlist, never the client; GET adds `nosniff` + `CSP: sandbox` (ahead of SVG
+  images). The upload cap (`MORGANA_MEDIA_MAX_MB`, default 200) is enforced **while the body
+  streams in** — a Content-Length check alone is bypassable by chunked/lying bodies (found by a
+  security review). Routes are unauthenticated like the deck routes (self-hosted model; a hosted
+  instance is gated at the proxy). Delete removes the sidecar before the bytes (an orphan
+  sidecar would make a re-upload skip rewriting the bytes).
+  **Base-path gotcha:** `mediaPath()` is deliberately unprefixed because `loadSoundtrack`
+  applies `withBasePath` itself; DOM consumers must use `mediaUrl()`. It carries an explicit,
+  reasoned entry in `base-path-callsites.test.ts`'s allowlist — don't reshape code to dodge that
+  guard.
 - **Three deliberate behaviour changes from §7b, not bugs:** counters (`counterValueAt`) and
   media (`mediaStateAt`) are now computed from time rather than animated on wall-clock, and
   `rotateList` derives its currently-visible item from elapsed time (`rotateItemAt`,
@@ -311,6 +360,14 @@ total, per-scene start/length/content/overrun, per-beat start/duration) so a rem
 never sums action durations itself; `update_meta` with path `timing` and value `null` makes a
 deck untimed (the only path where `null` deletes). `callTool`'s return type is now
 `DeckDoc | DeckTiming | …`, not `DeckDoc` alone.
+
+**Soundtrack tools (2026-10-23):** `list_media(deck_id)` lists the deck's uploaded files;
+`set_soundtrack(deck_id, media_id | null)` picks one (rejects ids not in the deck's media) or
+clears it; `set_markers(deck_id, markers[])` replaces the cue-marker list (entries are reduced
+to `{id, label.trim(), t}` before validation, so extra keys never persist). Binary upload is
+**not** possible over MCP — the descriptions tell the model to have the user upload in the
+editor. Setting `soundtrack` via `update_meta` skips the media-list check (lint still flags a
+missing file), which the `update_meta` description now says.
 
 ## CI / ops
 
