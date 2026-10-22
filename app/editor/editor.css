@@ -1,4 +1,4 @@
-.ed { position: fixed; inset: 0; display: grid; grid-template-columns: 200px 1fr 280px; grid-template-rows: 48px 1fr 180px;
+.ed { position: fixed; inset: 0; display: grid; grid-template-columns: 200px 1fr 280px; grid-template-rows: 48px 1fr 216px;
   grid-template-areas: "bar bar bar" "film canvas inspector" "film timeline timeline"; background: var(--ed-bg-0); color: var(--ed-fg); font-family: var(--ed-body); }
 .ed__bar { grid-area: bar; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: var(--ed-bg-2); border-bottom: 1px solid var(--ed-line); }
 .ed__brand { font-family: var(--ed-disp); font-size: 21px; color: var(--ed-accent); line-height: 1; }
@@ -64,3 +64,7 @@ button.ed__lint-row:hover { background: rgba(253,243,228,0.06); }
 
 .ed__empty-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; color: var(--ed-fg-muted); font-size: 13px; text-align: center; }
 .ed__empty-hint { position: absolute; inset: auto 0 12px; text-align: center; color: var(--ed-fg-muted); font-size: 12px; pointer-events: none; }
+
+.ed__ruler { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-bottom: 8px; }
+.ed__ruler-clock { font-family: var(--ed-mono); font-size: 12px; color: var(--ed-fg-muted); }
+.ed__ruler-hint { font-size: 11px; color: var(--ed-fg-muted); margin-bottom: 6px; }

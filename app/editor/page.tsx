@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./editor.css";
 import { useEditor } from "@/lib/editor/store";
@@ -143,6 +144,7 @@ export default function Editor() {
             </span>
           )}
         </button>
+        {doc && <Link className="ed__pill ed__pill--ghost" data-testid="play-deck" href={`/play?deck=${doc.meta.id}`} target="_blank">▶ Play deck</Link>}
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {saveError && (
             <span data-testid="save-error" title={saveError} style={{ color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

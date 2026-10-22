@@ -4,6 +4,7 @@ import { useEditor } from "@/lib/editor/store";
 import type { CanvasHandle } from "./DeckCanvas";
 import { actionDuration } from "@/engine/authoring/beat-clock";
 import { REGISTRY } from "@/lib/editor/registry";
+import { DeckRuler } from "./DeckRuler";
 
 const ADD_KIND_OPTIONS = Object.values(REGISTRY).map((d) => ({ value: d.kind, label: d.label }));
 
@@ -19,6 +20,7 @@ export function Timeline({ canvasRef, time }: { canvasRef: RefObject<CanvasHandl
   const timeline = beats[selected]?.beat.timeline ?? [];
   return (
     <div className="ed__timeline" data-testid="timeline">
+      <DeckRuler canvasRef={canvasRef} beatT={time.t} />
       <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
         <button className="ed__pill ed__pill--ghost" onClick={() => canvasRef.current?.play()}>&#9654; Play</button>
         <button className="ed__pill ed__pill--ghost" onClick={() => canvasRef.current?.pause()}>&#9646;&#9646; Pause</button>
