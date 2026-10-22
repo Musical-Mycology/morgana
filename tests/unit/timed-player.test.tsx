@@ -104,3 +104,74 @@ test("the play button restarts from 0 when the deck has finished", () => {
   expect(screen.getByTestId("play-clock").textContent).toBe("0:00.0 / 0:12");
   expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
 });
+
+// --- Final review fixes -------------------------------------------------------------------
+
+/** The asset keys ArtStage currently has on screen (`data-asset` on each `.artstage__layer`). */
+const artLayers = () =>
+  Array.from(screen.getByTestId("play-stage").querySelectorAll<HTMLElement>(".artstage__layer")).map((el) => el.dataset.asset);
+
+// Beats 2s each: a [0,2) own art 1.01 · b [2,4) inherits · c [4,6) own art 3.01 · d [6,8) inherits.
+const artDoc: DeckDoc = { version: 1, meta: { id: "art", title: "Art" }, scenes: [{ id: "s", beats: [
+  { id: "a", art: { to: "1.01", mode: "cut" }, timeline: [{ kind: "wait", ms: 2000 }] },
+  { id: "b", timeline: [{ kind: "wait", ms: 2000 }] },
+  { id: "c", art: { to: "3.01", mode: "cut" }, timeline: [{ kind: "wait", ms: 2000 }] },
+  { id: "d", timeline: [{ kind: "wait", ms: 2000 }] },
+] }] };
+
+test("a deep link into an inheriting beat shows the inherited art", () => {
+  render(<TimedPlayer doc={artDoc} initialT={3} />); // beat b inherits 1.01 from a
+  expect(artLayers()).toEqual(["1.01"]);
+});
+
+test("jumping forward into, and backward to, inheriting beats shows each one's inherited art", () => {
+  render(<TimedPlayer doc={artDoc} initialT={1} />);
+  expect(artLayers()).toEqual(["1.01"]);
+  act(() => { fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true }); }); // 6 → d, inherits 3.01 (c never visited)
+  expect(artLayers()).toEqual(["3.01"]);
+  act(() => { fireEvent.keyDown(window, { key: "ArrowRight" }); }); // 7 → still d
+  act(() => { fireEvent.keyDown(window, { key: "ArrowLeft", shiftKey: true }); }); // 2 → b, inherits 1.01
+  expect(artLayers()).toEqual(["1.01"]);
+});
+
+test("Alt+Arrow and Ctrl/Cmd+F are left to the browser", () => {
+  const fs = vi.fn(async () => {});
+  (document.documentElement as unknown as { requestFullscreen: () => Promise<void> }).requestFullscreen = fs;
+  render(<TimedPlayer doc={doc} initialT={5} />);
+  act(() => { fireEvent.keyDown(window, { key: "ArrowRight", altKey: true }); });
+  expect(screen.getByTestId("play-clock").textContent).toBe("0:05.0 / 0:12");
+  act(() => { fireEvent.keyDown(window, { key: "ArrowRight", metaKey: true }); });
+  act(() => { fireEvent.keyDown(window, { key: "Home", ctrlKey: true }); });
+  expect(screen.getByTestId("play-clock").textContent).toBe("0:05.0 / 0:12");
+  act(() => { fireEvent.keyDown(window, { key: "f", ctrlKey: true }); });
+  act(() => { fireEvent.keyDown(window, { key: "f", metaKey: true }); });
+  expect(fs).not.toHaveBeenCalled();
+  act(() => { fireEvent.keyDown(window, { key: "f" }); });
+  expect(fs).toHaveBeenCalledTimes(1);
+});
+
+test("Space with the play button focused toggles exactly once", () => {
+  render(<TimedPlayer doc={doc} initialT={5} />);
+  const btn = screen.getByRole("button", { name: "Play" });
+  btn.focus();
+  // The browser's own Space activation on a focused button = keydown, keyup, then click.
+  act(() => { fireEvent.keyDown(btn, { key: " " }); });
+  act(() => { fireEvent.keyUp(btn, { key: " " }); });
+  act(() => { fireEvent.click(btn); });
+  expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
+  // A mouse click must not leave the button focused (so a later Space can't reach it at all).
+  expect(fireEvent.mouseDown(btn)).toBe(false); // default prevented
+});
+
+test("the first playing frame never steps the clock backwards", () => {
+  let frame: FrameRequestCallback | null = null;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => { frame = cb; return 1; });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+  vi.spyOn(performance, "now").mockReturnValue(1000);
+  render(<TimedPlayer doc={doc} initialT={5} />);
+  act(() => { fireEvent.keyDown(window, { key: " " }); }); // play
+  expect(frame).not.toBeNull();
+  act(() => { frame!(900); }); // rAF timestamp from before the effect's performance.now()
+  expect(screen.getByTestId("play-clock").textContent).toBe("0:05.0 / 0:12");
+  vi.restoreAllMocks();
+});

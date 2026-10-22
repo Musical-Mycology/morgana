@@ -71,7 +71,9 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
     if (!playing) return;
     let last = performance.now();
     let id = requestAnimationFrame(function step(now) {
-      apply(T.current + (now - last) / 1000);
+      // The first frame's timestamp can predate the performance.now() read above; never let
+      // that step the clock (and the stage) backwards on Play.
+      apply(T.current + Math.max(0, now - last) / 1000);
       last = now;
       if (T.current >= layout.total) { setPlaying(false); return; }
       id = requestAnimationFrame(step);
@@ -86,13 +88,19 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
-  useEffect(() => {
+  // A layout effect, not a passive one: the listener must exist by the time the first frame
+  // paints, or a key pressed as soon as the clock shows up is silently dropped.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Modified keys belong to the browser/OS (Alt+←/→ history, Ctrl/Cmd+F find, …).
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
       const step = e.shiftKey ? 5 : 1;
       switch (e.key) {
-        case " ": e.preventDefault(); togglePlay(); break;
+        // A focused button activates itself on Space (its click handler toggles) — toggling here
+        // too would cancel it out.
+        case " ": if (el?.tagName === "BUTTON") break; e.preventDefault(); togglePlay(); break;
         case "ArrowRight": e.preventDefault(); apply(T.current + step); break;
         case "ArrowLeft": e.preventDefault(); apply(T.current - step); break;
         case "Home": e.preventDefault(); apply(0); break;
@@ -131,7 +139,9 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
       </div>
       {hudPinned && (
         <div className={`play__hud${hudVisible ? "" : " play__hud--hidden"}`} data-testid="play-hud">
-          <button className="play__btn" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>{playing ? "❚❚" : "▶"}</button>
+          {/* preventDefault on mousedown: a click must not leave the button focused, so Space keeps
+              reaching the window handler rather than re-activating the button. */}
+          <button className="play__btn" onClick={togglePlay} onMouseDown={(e) => e.preventDefault()} aria-label={playing ? "Pause" : "Play"}>{playing ? "❚❚" : "▶"}</button>
           <span className="play__clock" data-testid="play-clock" data-over={over ? "true" : undefined}>
             {formatClock(displayT)} / {formatClock(target ?? layout.total, { tenths: false })}
           </span>
