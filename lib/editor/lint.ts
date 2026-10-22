@@ -81,10 +81,9 @@ function timingWarnings(doc: DeckDoc): LintIssue[] {
   const layout = deckLayout(doc);
   for (const s of layout.scenes) {
     const over = sceneOverrun(s);
-    // Same 0.05s tolerance as deck-length-mismatch: float sums of beat durations can drift a hair past a pin.
-    if (over >= 0.05) {
+    if (over > 0) {
       out.push({ rule: "scene-overrun", severity: "warning", at: { sceneIdx: s.sceneIdx },
-        message: `scene "${doc.scenes[s.sceneIdx].id}" runs ${over.toFixed(1)}s over its ${s.length}s` });
+        message: `scene "${doc.scenes[s.sceneIdx].id}" runs ${over.toFixed(over < 0.1 ? 2 : 1)}s over its ${s.length}s` });
     }
   }
   const target = doc.meta.timing?.targetSec;

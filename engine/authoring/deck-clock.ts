@@ -34,9 +34,15 @@ export function deckLayout(doc: DeckDoc): DeckLayout {
   return { scenes, total: cursor };
 }
 
-/** Seconds of content past the pinned boundary (cut off in playback); 0 when unpinned or within. */
+const OVERRUN_EPS = 1e-6; // seconds — absorbs float fuzz from summing ms/1000 durations
+
+/** Seconds of content past the pinned boundary (cut off in playback); 0 when unpinned or within.
+ *  Every consumer (lint, timeline marker, filmstrip flag, MCP) reads overrun through here, so the
+ *  float tolerance lives in one place. */
 export function sceneOverrun(span: SceneSpan): number {
-  return span.pinned ? Math.max(0, span.contentLength - span.length) : 0;
+  if (!span.pinned) return 0;
+  const raw = span.contentLength - span.length;
+  return raw <= OVERRUN_EPS ? 0 : raw;
 }
 
 /** Where deck time `T` lands. `null` iff there is nothing to play (total === 0).

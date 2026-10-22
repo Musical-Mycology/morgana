@@ -113,3 +113,15 @@ test("deckTimeOf is the inverse of locate inside content", () => {
   expect(deckTimeOf(L, 99, 0)).toBe(0); // unknown flat index
   expect(deckTimeOf(L, 4, 9)).toBe(11); // clamped to the scene's (cut) end
 });
+
+test("sceneOverrun absorbs float fuzz: content that exactly fills a pin is not an overrun", () => {
+  // 100ms/1000 + 200ms/1000 is 0.30000000000000004 in floats; the scene exactly fills its 0.3s pin.
+  const L = deckLayout(doc([{ id: "s", durationSec: 0.3, beats: [w("a", 100), w("b", 200)] }]));
+  expect(L.scenes[0].contentLength).not.toBe(0.3);
+  expect(sceneOverrun(L.scenes[0])).toBe(0);
+});
+
+test("sceneOverrun reports a real 30ms overrun", () => {
+  const L = deckLayout(doc([{ id: "s", durationSec: 1, beats: [w("a", 1030)] }]));
+  expect(sceneOverrun(L.scenes[0])).toBeCloseTo(0.03, 6);
+});

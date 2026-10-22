@@ -57,3 +57,9 @@ test("float drift in beat sums does not raise a 0.0s overrun", () => {
   const d = deck({ scenes: [{ id: "s", durationSec: 0.3, beats: [{ id: "a", timeline: [{ kind: "wait", ms: 100 }, { kind: "wait", ms: 200 }] }] }] });
   expect(byRule(d, "scene-overrun")).toEqual([]);
 });
+
+test("a 30ms overrun is reported to the hundredth of a second", () => {
+  const d = deck({ scenes: [{ id: "s", durationSec: 1, beats: [{ id: "a", timeline: [{ kind: "wait", ms: 1030 }] }] }] });
+  const [i] = byRule(d, "scene-overrun");
+  expect(i.message).toBe('scene "s" runs 0.03s over its 1s');
+});
