@@ -1,6 +1,10 @@
 import { validateDeckDoc, type DeckDoc } from "@/engine/deck-doc";
 import { validateDeck } from "@/engine/deck/validate";
 import { flattenStory } from "@/engine/deck/flatten";
+import { deckLayout, sceneOverrun } from "@/engine/authoring/deck-clock";
+import { formatClock } from "@/lib/timing/clock-format";
+import { parseInlineLinks } from "@/engine/deck/inline-links";
+import type { Action } from "@/engine/deck/types";
 
 export type LintSeverity = "error" | "warning";
 export interface LintLocation { sceneIdx: number; beatIdx?: number; actionIdx?: number }
@@ -64,6 +68,40 @@ function byLocation(a: LintIssue, b: LintIssue): number {
   return 0;
 }
 
+const INTERACTIVE_KINDS = new Set<Action["kind"]>(["click_gate", "reveal_arrows", "pulse_arrow", "reveal_again"]);
+
+function isInteractive(a: Action): boolean {
+  if (INTERACTIVE_KINDS.has(a.kind)) return true;
+  return a.kind === "text" && parseInlineLinks(a.value).some((seg) => seg.kind === "link" && seg.link === "jump");
+}
+
+/** Timing warnings (timed-video decks). Runs only on a structurally valid deck. */
+function timingWarnings(doc: DeckDoc): LintIssue[] {
+  const out: LintIssue[] = [];
+  const layout = deckLayout(doc);
+  for (const s of layout.scenes) {
+    const over = sceneOverrun(s);
+    if (over > 0) {
+      out.push({ rule: "scene-overrun", severity: "warning", at: { sceneIdx: s.sceneIdx },
+        message: `scene "${doc.scenes[s.sceneIdx].id}" runs ${over.toFixed(over < 0.1 ? 2 : 1)}s over its ${s.length}s` });
+    }
+  }
+  const target = doc.meta.timing?.targetSec;
+  if (target === undefined) return out;
+  const diff = layout.total - target;
+  if (Math.abs(diff) >= 0.05) {
+    out.push({ rule: "deck-length-mismatch", severity: "warning",
+      message: `deck is ${formatClock(layout.total, { tenths: false })} of ${formatClock(target, { tenths: false })} — ${Math.abs(diff).toFixed(1)}s ${diff < 0 ? "short" : "over"}` });
+  }
+  doc.scenes.forEach((s, sceneIdx) => s.beats.forEach((b, beatIdx) => b.timeline.forEach((a, actionIdx) => {
+    if (isInteractive(a)) {
+      out.push({ rule: "timed-interactive", severity: "warning", at: { sceneIdx, beatIdx, actionIdx },
+        message: `${a.kind} is interactive and is ignored in timed playback` });
+    }
+  })));
+  return out;
+}
+
 /** Every problem in a deck, errors first. An "error" is exactly what makes the server reject
  *  a PUT, so it means "this deck will not save"; a "warning" is advisory only. */
 export function lintDeck(doc: DeckDoc): LintIssue[] {
@@ -84,6 +122,7 @@ export function lintDeck(doc: DeckDoc): LintIssue[] {
   // validateDeck and flattenStory both assume a structurally valid document, so they only
   // run on a clean one. The try/catch means a validator crash can never blank the panel.
   if (errors.length === 0) {
+    warnings.push(...timingWarnings(doc));
     try {
       for (const message of validateDeck(flattenStory(doc.scenes))) {
         const at = locateSlide(doc, message);

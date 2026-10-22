@@ -2,13 +2,23 @@ import { loadDeck, saveDeck, listDecks } from "@/lib/store/deck-store";
 import { validateDeckDoc, type DeckDoc } from "@/engine/deck-doc";
 import {
   insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy,
-  appendScene, deleteSceneAt, deleteSceneAtIndex, moveSceneBy, appendBeatToScene,
+  appendScene, deleteSceneAt, deleteSceneAtIndex, moveSceneBy, appendBeatToScene, setSceneDuration,
   insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind,
 } from "@/lib/editor/mutations";
 import { beatLocation } from "@/lib/editor/flatten-beats";
 import { setPath } from "@/lib/editor/paths";
+import { deckLayout, sceneOverrun } from "@/engine/authoring/deck-clock";
 
 export class ToolCallError extends Error {}
+
+export interface DeckTiming {
+  targetSec: number | null;
+  total: number;
+  scenes: {
+    index: number; id: string; start: number; length: number; contentLength: number; pinned: boolean; overrunSec: number;
+    beats: { flatIndex: number; id: string; start: number; duration: number }[];
+  }[];
+}
 
 function args(rawArgs: unknown): Record<string, unknown> {
   return (rawArgs ?? {}) as Record<string, unknown>;
@@ -59,7 +69,7 @@ async function mutate(deckId: string, f: (doc: DeckDoc) => DeckDoc): Promise<Dec
   return next;
 }
 
-export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc | { decks: Awaited<ReturnType<typeof listDecks>> }> {
+export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc | { decks: Awaited<ReturnType<typeof listDecks>> } | DeckTiming> {
   const a = args(rawArgs);
 
   if (name === "list_decks") return { decks: await listDecks() };
@@ -130,7 +140,25 @@ export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc 
     case "update_meta": {
       const path = requireString(a, "path");
       assertSafePath(path);
-      return mutate(deckId, (doc) => ({ ...doc, meta: setPath(doc.meta, path, a.value) }));
+      return mutate(deckId, (doc) => ({ ...doc, meta: setPath(doc.meta, path, a.value === null && path === "timing" ? undefined : a.value) }));
+    }
+    case "set_scene_duration": {
+      const v = a.seconds;
+      if (v !== null && typeof v !== "number") throw new ToolCallError('"seconds" must be a number or null');
+      return mutate(deckId, (doc) => setSceneDuration(doc, requireNumber(a, "scene_index"), v));
+    }
+    case "read_deck_timing": {
+      const doc = await loadDeck(deckId);
+      const layout = deckLayout(doc);
+      return {
+        targetSec: doc.meta.timing?.targetSec ?? null,
+        total: layout.total,
+        scenes: layout.scenes.map((s) => ({
+          index: s.sceneIdx, id: doc.scenes[s.sceneIdx].id, start: s.start, length: s.length,
+          contentLength: s.contentLength, pinned: s.pinned, overrunSec: sceneOverrun(s),
+          beats: s.beats.map((b) => ({ flatIndex: b.flatIdx, id: doc.scenes[s.sceneIdx].beats[b.beatIdx].id, start: b.start, duration: b.duration })),
+        })),
+      };
     }
     default:
       throw new ToolCallError(`unknown tool: ${name}`);

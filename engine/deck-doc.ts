@@ -16,6 +16,8 @@ export interface DeckMeta {
   treatment?: SlideTreatment;
   noindex?: boolean;
   chrome?: DeckChrome;
+  /** Present = a timed deck (video). `targetSec` is the intended total length, e.g. 120. */
+  timing?: { targetSec: number };
 }
 
 export interface DeckDoc {
@@ -25,6 +27,8 @@ export interface DeckDoc {
 }
 
 const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+const isPositiveFinite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
 
 export const MAX_OBJECT_DEPTH = 8;
 const OBJECT_KINDS = new Set(["text", "image", "shape", "group"]);
@@ -102,11 +106,16 @@ export function validateDeckDoc(obj: unknown): { ok: boolean; errors: string[] }
   else {
     if (typeof d.meta.id !== "string" || !ID_RE.test(d.meta.id)) e.push("meta.id must match /^[a-z0-9][a-z0-9-]*$/");
     if (typeof d.meta.title !== "string" || !d.meta.title) e.push("meta.title required");
+    const timing = (d.meta as { timing?: unknown }).timing;
+    if (timing !== undefined && (timing === null || typeof timing !== "object" || !isPositiveFinite((timing as { targetSec?: unknown }).targetSec))) {
+      e.push("meta.timing.targetSec must be a finite number > 0");
+    }
   }
   if (!Array.isArray(d.scenes)) e.push("scenes must be an array");
   else d.scenes.forEach((s: Scene, i) => {
     if (!s || typeof s.id !== "string") e.push(`scenes[${i}].id required`);
     if (!Array.isArray(s?.beats)) e.push(`scenes[${i}].beats must be an array`);
+    if (s?.durationSec !== undefined && !isPositiveFinite(s.durationSec)) e.push(`scenes[${i}].durationSec must be a finite number > 0`);
     validateSceneObjects(s?.objects, `scenes[${i}]`, new Set<string>(), 1, e);
     validateSceneActionTargets(s, i, e);
   });

@@ -10,6 +10,7 @@ import { LayersPanel } from "@/components/editor/LayersPanel";
 import { Timeline } from "@/components/editor/Timeline";
 import { Inspector } from "@/components/editor/Inspector";
 import { DeckSettings } from "@/components/editor/DeckSettings";
+import { FlushSaveContext, PlayLink } from "@/components/editor/PlayLink";
 import { ExportPanel } from "@/components/editor/ExportPanel";
 import { McpPanel } from "@/components/editor/McpPanel";
 import { LintPanel } from "@/components/editor/LintPanel";
@@ -65,7 +66,7 @@ export default function Editor() {
     setSaveError(s === "error" ? (error ?? "unknown error") : null);
     if (s === "saved") externalChange.resync();
   }, [externalChange]);
-  const { markSaved } = useAutosave(doc, revision, onStatus);
+  const { markSaved, flush } = useAutosave(doc, revision, onStatus);
 
   const retrySave = useCallback(() => {
     if (!doc) return;
@@ -119,6 +120,7 @@ export default function Editor() {
     loadDeck(deckId).then(load).then(() => externalChange.resync());
   }, [deckId, load, externalChange]);
   return (
+    <FlushSaveContext.Provider value={flush}>
     <div className="ed">
       {externalChange.changed && (
         <div className="ed__pill ed__pill--ghost" data-testid="external-change-banner" style={{ position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 10 }}>
@@ -143,6 +145,7 @@ export default function Editor() {
             </span>
           )}
         </button>
+        {doc && <PlayLink testId="play-deck" href={`/play?deck=${doc.meta.id}`}>▶ Play deck</PlayLink>}
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {saveError && (
             <span data-testid="save-error" title={saveError} style={{ color: "var(--ed-fg-muted)", fontFamily: "var(--ed-mono)", fontSize: 12, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -167,5 +170,6 @@ export default function Editor() {
       <Timeline canvasRef={canvasRef} time={time} />
       {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <Inspector />}
     </div>
+    </FlushSaveContext.Provider>
   );
 }

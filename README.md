@@ -99,6 +99,22 @@ bridge, now reachable from the UI. (Emits `scenes` only; import/round-trip is on
 **Autosave.** Edits persist automatically, ~700ms after you stop typing, via the deck API to
 JSON on disk. The toolbar shows the save status.
 
+### Timed decks & the Player
+
+For a deck meant to run as a video, open **Deck settings** and tick **Timed deck (video)**, then
+set its **Target length** (`m:ss`). Each scene in the filmstrip gains a **Length** field (seconds;
+blank = follow the scene's content): a pinned scene always occupies exactly that long, so later
+scenes never shift — content that finishes early holds its last frame until the boundary, and
+content that runs long is cut there (flagged as an overrun).
+
+A **deck ruler** above the timeline shows the whole deck against the target; click or drag it to
+jump to the beat at that time. **▶ Play deck** (toolbar) and **▶ Play from here** (ruler) save any
+pending edits and open the timed Player in a new tab.
+
+The Player lives at `/play?deck=<id>[&t=<seconds>]` — one continuous clock across the whole deck,
+counting up against the target. Keys: **Space** play/pause · **←/→** ±1s (**Shift** ±5s) ·
+**Home** back to 0:00 · **F** fullscreen · **H** hide/show the HUD.
+
 ---
 
 ## Run it
@@ -229,6 +245,8 @@ Tool surface: `list_decks`, `read_deck`, beat operations (`insert_beat_after`, `
 `move_scene_by`, `append_beat_to_scene`), and action operations (`insert_action_after`,
 `duplicate_action_at`, `delete_action_at`, `move_action_by`, `convert_action_kind`, `update_action`,
 `update_meta`) — see [`lib/mcp/tool-defs.ts`](lib/mcp/tool-defs.ts) for the exact schemas.
+Timed (video) decks: `set_scene_duration` pins a scene's length, `read_deck_timing` reports the
+computed layout and overruns, and `update_meta` with path `timing.targetSec` sets the target length.
 
 `move_beat_by` moves a beat one position in filmstrip order. Within a scene it swaps with
 the neighbouring beat; at a scene edge it moves the beat into the adjacent scene. It is only

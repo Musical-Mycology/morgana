@@ -61,6 +61,10 @@ export interface CinematicRuntime {
   resolveEntry(): StoryAsset[];
   /** End-state layers for this beat (after all its art ops) — for PDF/static. */
   resolveEnd(): StoryAsset[];
+  /** Optional: this beat's flattened ENTRY nightlight, for a host-driven (seek-slaved) stage to
+   *  restore on a backward seek within the beat. `undefined` = nothing to restore. Runtimes that
+   *  never seek backward (live /story, PDF) simply omit it. */
+  resolveEntryNight?(): number | undefined;
   /** Jump to a 0-based slide index (inline jump links). */
   jumpTo(index: number): void;
 }
@@ -95,9 +99,12 @@ interface Props {
    *  objects) reads THIS `t` — never a second ticker — so every stage stays paused/playing/
    *  seeked in lockstep, including across click_gate pauses. */
   onTime?: (t: number) => void;
+  /** false = never start the autoplay ticker on mount; the host drives time via
+   *  `transport.seek` (the timed Player). Entry art is still issued. Default true. */
+  autoplay?: boolean;
 }
 
-export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime }: Props) {
+export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
   // The single gsap.ticker listener currently driving playback, or null when paused. play()
@@ -186,7 +193,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // Static end-state — used for PDF, reduced motion, AND a hidden/backgrounded tab
     // (rAF is paused there, so animated tweens — including SplitText letter effects —
     // would be stuck invisible). Show end art + all text at rest, then wait.
-    const staticMode = !animate || document.visibilityState !== "visible";
+    // The hidden-tab case applies ONLY to autoplay: a host-driven stage (the timed Player)
+    // paints every frame from transport.seek, so it must keep seek-driven rendering even when
+    // it mounts in a background tab — otherwise it would mount at the end state and later
+    // seeks would never restore the entry state (design spec §10 "static mode at mount").
+    const staticMode = !animate || (autoplay && document.visibilityState !== "visible");
     if (staticMode) {
       // Establish the FULL, self-contained end-state art stack directly (design spec §7b §7,
       // ambiguity res. #3): resolveEnd() folds this beat's entry op AND every one of its
@@ -229,14 +240,22 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
 
     // Entry art: resolveEntry() already folds this beat's entry transition, so show
     // it as an absolute cross-fade using the entry op's mode.
-    if (slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs);
+    // Autoplay visits beats strictly in order, so a beat with no `art` op of its own can rely on
+    // ArtStage's live stack already holding the art it inherits. A host-driven stage cannot: a
+    // scrub/deep link/backward jump lands on a beat whose predecessors never played here, so it
+    // ALWAYS issues the resolved entry stack (an inheriting beat cuts to it). Straight-through
+    // play into an inheriting beat stays seamless because ArtStage.show() is a no-op when the
+    // target stack already equals the live one (an in-flight crossfade is left running).
+    if (!autoplay) runtime.art(runtime.resolveEntry(), slots.beat.art?.mode ?? "cut", slots.beat.art?.durationMs);
+    else if (slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs);
 
     // Autoplay from t=0 — observable behaviour is unchanged from the old per-segment
     // machinery (design spec §7b §4.4): a ticker now drives the single time axis instead of
     // N GSAP timelines, pausing at each click_gate and handing `resume` to runtime.onGate,
     // exactly as the segment machinery did. Most callers (today) never touch `transport` at
     // all; the ref just gives a scrubber somewhere to grab onto later.
-    play();
+    if (autoplay) play();
+    else renderAt(0); // host-driven: paint t=0 and wait for transport.seek
 
     // built effect timelines are created here / in deferred callbacks; kill them on unmount
     // (deps re-run also kills them at the top of the effect above). The ticker itself is
@@ -252,7 +271,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       clearMedia();
     };
     // sceneId is in the deps because beat ids are only unique within a scene.
-  }, { scope, dependencies: [slots.sceneId, slots.beat.id, animate] });
+  }, { scope, dependencies: [slots.sceneId, slots.beat.id, animate, autoplay] });
 
   /** Render `value` into `host`, converting [label](target) markup into clickable links.
    *  Plain text (no markup) renders as a single text node — identical to the old behavior. */
@@ -570,6 +589,17 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       appliedArt.current = null;
       appliedNight.current = null;
       firedOnce.current.clear();
+      // Host-driven: the art/nightlight the forward fold issued (mid-beat `art`, `nightlight`
+      // actions) are live state on SIBLING components, not DOM this component can tear down —
+      // nulling the diff refs above only lets them re-issue. Restore the beat's entry baseline
+      // first, so the refold below re-applies exactly the actions reached by `t` onto the true
+      // entry stack (and an action no longer reached is genuinely undone). Autoplay callers
+      // keep their existing behaviour.
+      if (!autoplay) {
+        runtime.art(runtime.resolveEntry(), "cut");
+        const entryNight = runtime.resolveEntryNight?.();
+        if (typeof entryNight === "number") runtime.setNightlight(entryNight);
+      }
     }
     // Counter state is a fold over the reached actions (design spec §7b §5): counter_show
     // seeds {from,to}; counter_to/counter_add advance it, tracking `from` as the PREVIOUS

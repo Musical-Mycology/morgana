@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, uniqueBeatId, uniqueSceneId } from "@/lib/editor/mutations";
+import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAt, uniqueBeatId, uniqueSceneId, setSceneDuration } from "@/lib/editor/mutations";
 import { flattenBeats } from "@/lib/editor/flatten-beats";
 import type { DeckDoc } from "@/engine/deck-doc";
 
@@ -48,4 +48,20 @@ test("appendScene / deleteSceneAt add and remove whole scenes", () => {
   expect(added.scenes[2].beats.length).toBe(1);
   const removed = deleteSceneAt(base(), 2);           // flat 2 is in s2
   expect(removed.scenes.map((s) => s.id)).toEqual(["s1"]);
+});
+
+test("setSceneDuration pins, unpins, and no-ops out of range", () => {
+  const d: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s", beats: [] }] };
+  const pinned = setSceneDuration(d, 0, 15);
+  expect(pinned.scenes[0].durationSec).toBe(15);
+  const unpinned = setSceneDuration(pinned, 0, null);
+  expect("durationSec" in unpinned.scenes[0]).toBe(false);
+  expect(setSceneDuration(d, 5, 3)).toBe(d);
+});
+
+test("setSceneDuration returns the same doc when nothing changes", () => {
+  const d: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s", beats: [] }] };
+  expect(setSceneDuration(d, 0, null)).toBe(d); // already unpinned
+  const pinned = setSceneDuration(d, 0, 15);
+  expect(setSceneDuration(pinned, 0, 15)).toBe(pinned); // same value
 });

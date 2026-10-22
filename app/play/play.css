@@ -1,0 +1,11 @@
+.play { position: fixed; inset: 0; background: #000; display: grid; place-items: center; overflow: hidden; }
+.play--empty { color: #ccc; font-family: system-ui, sans-serif; font-size: 16px; }
+.play__frame { position: relative; width: min(100vw, calc(100vh * 16 / 9)); aspect-ratio: 16 / 9; container-type: size; overflow: hidden; }
+.play__hud { position: fixed; left: 16px; right: 16px; bottom: 16px; display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto; gap: 8px 12px; align-items: center;
+  padding: 10px 12px; border-radius: 8px; background: rgba(0,0,0,0.6); color: #fff; font-family: system-ui, sans-serif; transition: opacity 300ms; z-index: 50; }
+.play__hud--hidden { opacity: 0; pointer-events: none; }
+.play__btn { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 4px; padding: 2px 10px; cursor: pointer; }
+.play__clock { font-family: ui-monospace, monospace; font-size: 15px; }
+.play__clock[data-over="true"] { color: #e8a33d; }
+.play__scene { font-size: 12px; opacity: 0.75; }
+.play__bar { grid-column: 1 / -1; }

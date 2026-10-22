@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDeck, loadDeck } from "@/lib/store/deck-store";
+import { createDeck, loadDeck, saveDeck } from "@/lib/store/deck-store";
 import { callTool, ToolCallError } from "@/lib/mcp/tool-handlers";
 import type { DeckDoc } from "@/engine/deck-doc";
 
@@ -164,4 +164,38 @@ test("delete_scene_at rejects both or neither index", async () => {
   await callTool("append_scene", { deck_id: "demo" });
   await expect(callTool("delete_scene_at", { deck_id: "demo" })).rejects.toThrow(ToolCallError);
   await expect(callTool("delete_scene_at", { deck_id: "demo", beat_index: 0, scene_index: 0 })).rejects.toThrow(ToolCallError);
+});
+
+async function timedFixture(): Promise<void> {
+  await createDeck({ id: "demo", title: "Demo" });
+  const doc = await loadDeck("demo");
+  await saveDeck({ ...doc, meta: { ...doc.meta, timing: { targetSec: 10 } },
+    scenes: [{ id: "s", durationSec: 0.5, beats: [{ id: "a", timeline: [{ kind: "wait", ms: 1000 }] }] }] });
+}
+
+test("set_scene_duration pins and clears a scene length", async () => {
+  await timedFixture();
+  await callTool("set_scene_duration", { deck_id: "demo", scene_index: 0, seconds: 15 });
+  expect((await loadDeck("demo")).scenes[0].durationSec).toBe(15);
+  await callTool("set_scene_duration", { deck_id: "demo", scene_index: 0, seconds: null });
+  expect((await loadDeck("demo")).scenes[0].durationSec).toBeUndefined();
+});
+
+test("set_scene_duration rejects a non-positive length", async () => {
+  await timedFixture();
+  await expect(callTool("set_scene_duration", { deck_id: "demo", scene_index: 0, seconds: 0 })).rejects.toThrow(/durationSec/);
+});
+
+test("read_deck_timing returns layout, target, and overruns", async () => {
+  await timedFixture();
+  const r = await callTool("read_deck_timing", { deck_id: "demo" }) as { targetSec: number | null; total: number; scenes: { id: string; overrunSec: number; beats: { id: string }[] }[] };
+  expect(r.targetSec).toBe(10);
+  expect(r.total).toBeCloseTo(0.5);
+  expect(r.scenes[0]).toMatchObject({ id: "s", overrunSec: 0.5, beats: [{ id: "a" }] });
+});
+
+test("update_meta with path timing and value null makes the deck untimed", async () => {
+  await timedFixture();
+  await callTool("update_meta", { deck_id: "demo", path: "timing", value: null });
+  expect((await loadDeck("demo")).meta.timing).toBeUndefined();
 });

@@ -52,3 +52,15 @@ test("move_beat_by's description reflects that it now crosses scene boundaries",
   expect(tool.description.toLowerCase()).toContain("scene");
   expect(tool.description.toLowerCase()).not.toContain("no-op at a scene boundary");
 });
+
+test("includes the timing tools", () => {
+  const names = TOOL_DEFS.map((t) => t.name);
+  expect(names).toEqual(expect.arrayContaining(["set_scene_duration", "read_deck_timing"]));
+  const upd = TOOL_DEFS.find((t) => t.name === "update_meta")!;
+  expect(upd.description).toContain("timing.targetSec");
+});
+
+test("read_deck_timing explains that content shorter than a pinned length holds", () => {
+  const tool = TOOL_DEFS.find((t) => t.name === "read_deck_timing")!;
+  expect(tool.description).toMatch(/holds? (its|the) last frame until the boundary/);
+});

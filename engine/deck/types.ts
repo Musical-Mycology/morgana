@@ -256,6 +256,9 @@ export interface Scene {
   /** First-class persistent objects, painted back-to-front in depth-first order.
    *  Optional & additive: object-less decks are unchanged. (Sub-project #1.) */
   objects?: SceneObject[];
+  /** Pinned scene length in seconds (timed decks). Omit = length follows content.
+   *  Content shorter than this holds its last frame; longer is cut at the boundary. */
+  durationSec?: number;
   beats: Beat[];
 }
 

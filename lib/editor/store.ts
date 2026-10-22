@@ -3,7 +3,7 @@ import type { DeckDoc } from "@/engine/deck-doc";
 import type { ObjectTransform, SceneObject } from "@/engine/deck/types";
 import { flattenBeats, beatLocation, flatIndexOfBeat, type FlatBeat } from "./flatten-beats";
 import { setPath } from "./paths";
-import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAtIndex, appendBeatToScene, moveSceneBy, uniqueBeatId, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
+import { insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy, appendScene, deleteSceneAtIndex, appendBeatToScene, moveSceneBy, setSceneDuration, uniqueBeatId, insertActionAfter, duplicateActionAt, deleteActionAt, moveActionBy, convertActionKind } from "./mutations";
 import { addObject as mAddObject, updateObject as mUpdateObject, updateObjectTransform as mUpdateObjectTransform, deleteObject as mDeleteObject, reorderObject as mReorderObject, groupObjects as mGroupObjects, ungroupObject as mUngroupObject, reparentObject as mReparentObject, translateObjectBy as mTranslateObjectBy } from "./object-mutations";
 import { uniqueObjectId, findObjectPath, getObjectAt, type ObjectPath } from "./object-tree";
 import { descriptorForObject } from "./object-registry";
@@ -41,6 +41,7 @@ interface EditorState {
   addScene: () => void;
   deleteScene: (sceneIdx: number) => void;
   moveScene: (sceneIdx: number, dir: -1 | 1) => void;
+  setSceneDuration: (sceneIdx: number, seconds: number | null) => void;
   addBeatToScene: (sceneIdx: number) => void;
   addAction: (flatIdx: number, actionIdx: number | null, kind: string) => void;
   addObjectAnimation: (flatIdx: number, objectId: string, kind: ObjectVerbKind) => void;
@@ -158,6 +159,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   }),
   addScene: () => set((s) => commit(s, (doc) => appendScene(doc))),
   deleteScene: (sceneIdx) => set((s) => reselect(s, commit(s, (doc) => deleteSceneAtIndex(doc, sceneIdx)), s.beats[s.selected]?.beat.id ?? null)),
+  setSceneDuration: (sceneIdx, seconds) => set((s) => commit(s, (doc) => setSceneDuration(doc, sceneIdx, seconds))),
   moveScene: (sceneIdx, dir) => set((s) => reselect(s, commit(s, (doc) => moveSceneBy(doc, sceneIdx, dir)), s.beats[s.selected]?.beat.id ?? null)),
   addBeatToScene: (sceneIdx) => set((s) => {
     if (!s.doc) return {};
