@@ -182,8 +182,8 @@ New optional props: `peaks?: Float32Array` and `markers?: { id; label; t }[]` pl
   - When set: file name, duration (from decode), "Replace" (same upload flow), "Remove" (sets
     `soundtrack` to `undefined`; the file stays on disk so Undo works).
 - **Markers:**
-  - "+ Marker" on the deck ruler adds `{ id: newId, label: "marker", t: <ruler T> }` and focuses
-    its label for inline editing.
+  - "+ Marker" on the deck ruler adds `{ id: newId, label: "marker N", t: <ruler T> }`; rename it in
+    Deck settings.
   - Deck settings lists markers sorted by `t`: label and time (`m:ss.s`) editable, delete button.
   - Marker edits are undoable store commits (no-op edits record no history — same rule as
     sub-project 1's timing inputs).

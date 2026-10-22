@@ -115,6 +115,13 @@ The Player lives at `/play?deck=<id>[&t=<seconds>]` — one continuous clock acr
 counting up against the target. Keys: **Space** play/pause · **←/→** ±1s (**Shift** ±5s) ·
 **Home** back to 0:00 · **F** fullscreen · **H** hide/show the HUD.
 
+**Soundtrack.** A timed deck can carry one pre-mixed audio track: **Deck settings → Soundtrack →
+Upload audio** (MP3/M4A/WAV recommended; max 200 MB by default, set `MORGANA_MEDIA_MAX_MB` to
+change). It plays from 0:00 in the Player and drives the Player's clock (**M** mutes). Its waveform
+appears on the ruler and the Player scrubber, and **+ Marker** on the ruler drops cue markers
+(rename or retime them in Deck settings) to help line scenes up with the music. Uploads are stored
+per deck under `MORGANA_DATA_DIR/media/<deckId>/` and are deleted with the deck.
+
 ---
 
 ## Run it
