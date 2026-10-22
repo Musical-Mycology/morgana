@@ -39,7 +39,12 @@ export function sceneOverrun(span: SceneSpan): number {
   return span.pinned ? Math.max(0, span.contentLength - span.length) : 0;
 }
 
-/** Where deck time `T` lands. `null` iff there is nothing to play (total === 0). */
+/** Where deck time `T` lands. `null` iff there is nothing to play (total === 0).
+ *  - "play": content is still in progress → the last positive-length beat started by `local`
+ *    (zero-length beats are skipped), `localT` into it. Overrun is cut at the boundary.
+ *  - "hold": content has finished (`local >= contentLength`, which covers an all-zero-length
+ *    scene) → the scene's LAST beat, zero-length or not, settled (`localT` = its duration).
+ *  - "empty": a zero-beat scene. */
 export function locate(layout: DeckLayout, T: number): Located | null {
   if (layout.total <= 0) return null;
   const t = Math.max(0, Math.min(layout.total, T));
@@ -52,18 +57,18 @@ export function locate(layout: DeckLayout, T: number): Located | null {
   const local = Math.min(t - s.start, s.length);
   if (s.beats.length === 0) return { sceneIdx: s.sceneIdx, beatIdx: null, flatIdx: null, localT: 0, phase: "empty" };
 
-  // Only beats that take time and start before the (possibly cut) boundary can be on screen.
-  const reachable = s.beats.filter((b) => b.duration > 0 && b.start < s.length);
-  if (reachable.length === 0) {
+  // Content finished (a zero-length trailing beat included): show the scene's last beat, settled.
+  if (local >= s.contentLength) {
     const last = s.beats[s.beats.length - 1];
-    return { sceneIdx: s.sceneIdx, beatIdx: last.beatIdx, flatIdx: last.flatIdx, localT: 0, phase: "hold" };
+    return { sceneIdx: s.sceneIdx, beatIdx: last.beatIdx, flatIdx: last.flatIdx, localT: last.duration, phase: "hold" };
   }
+
+  // Content still playing: the last positive-length beat that has started by `local`. Only beats
+  // that start before the (possibly cut) boundary can be on screen.
+  const reachable = s.beats.filter((b) => b.duration > 0 && b.start < s.length);
   let beat = reachable[0];
   for (const b of reachable) { if (b.start <= local) beat = b; else break; }
-  const into = local - beat.start;
-  const isLast = beat === reachable[reachable.length - 1];
-  const phase: LocatePhase = isLast && into >= beat.duration && local < s.length ? "hold" : "play";
-  return { sceneIdx: s.sceneIdx, beatIdx: beat.beatIdx, flatIdx: beat.flatIdx, localT: Math.min(into, beat.duration), phase };
+  return { sceneIdx: s.sceneIdx, beatIdx: beat.beatIdx, flatIdx: beat.flatIdx, localT: Math.min(local - beat.start, beat.duration), phase: "play" };
 }
 
 /** Deck time of (`flatIdx`, beat-local `localT`) — the inverse of `locate`, for the editor

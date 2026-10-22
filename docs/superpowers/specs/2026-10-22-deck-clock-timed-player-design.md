@@ -149,14 +149,19 @@ Semantics:
 - Scenes are half-open `[start, start + length)`. `T` is clamped to `[0, total]`; `T === total`
   resolves to the final scene's end state.
 - **play** — `T` falls inside a beat's content: that beat, `localT = T − scene.start − beat.start`.
-- **hold** — content ended before the pinned end: last beat, `localT = its duration` (settled).
+- **hold** — content has finished (`local >= contentLength`; covers content ending before the pinned
+  end and the exact end of an unpinned scene): the scene's last beat, zero-length or not, settled
+  (`localT = its duration`). A trailing art-only beat is therefore visible during the hold and at
+  the end state.
 - **empty** — a zero-beat scene with a pinned length (legal; see the deep-dive's empty-scene
   gotcha). The stage renders blank for that window.
 - **Overrun** — content longer than the pinned length is cut at the boundary: a beat in flight is
   clamped to `localT = scene.length − beat.start`; beats starting at or after the boundary are
   never reached. Later scenes do not move.
-- **Zero-length beats** occupy no time and are never the located beat; their art/nightlight
-  effects still apply because the next beat's entry state comes from `flattenStory`.
+- **Zero-length beats** occupy no time: while content plays they are skipped and are never the
+  located beat (their art/nightlight effects still apply because the next beat's entry state comes
+  from `flattenStory`). Once content has finished, the scene's last beat is shown settled even when
+  it is zero-length, so a trailing art-only beat is visible during the hold and at the end state.
 - **Zero-length scenes** (no beats, no `durationSec`) occupy no time and are skipped.
 
 ---

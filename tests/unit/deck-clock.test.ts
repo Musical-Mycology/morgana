@@ -55,15 +55,37 @@ test("T is clamped; T === total is the final end state", () => {
   expect(locate(L, 999)).toMatchObject({ sceneIdx: 3, beatIdx: 0, localT: 1 });
 });
 
-test("zero-length beats are never the located beat", () => {
+test("zero-length beats are skipped while content plays; the last beat is shown once content has finished", () => {
   const L = deckLayout(doc([{ id: "s", beats: [zero("z"), w("a", 1000), zero("y")] }]));
-  expect(locate(L, 0)).toMatchObject({ beatIdx: 1, localT: 0, phase: "play" });
-  expect(locate(L, 1)).toMatchObject({ beatIdx: 1, localT: 1 });
+  expect(locate(L, 0)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 0, phase: "play" });
+  expect(locate(L, 1)).toEqual({ sceneIdx: 0, beatIdx: 2, flatIdx: 2, localT: 0, phase: "hold" });
 });
 
 test("a pinned scene whose beats are all zero-length holds its last beat", () => {
   const L = deckLayout(doc([{ id: "s", durationSec: 3, beats: [zero("z"), zero("y")] }]));
   expect(locate(L, 1)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 0, phase: "hold" });
+});
+
+test("a trailing zero-length beat is the held frame once content has finished", () => {
+  const L = deckLayout(doc([{ id: "s", durationSec: 3, beats: [w("a", 1000), zero("z")] }]));
+  expect(locate(L, 2)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 0, phase: "hold" });
+});
+
+test("a held final scene is 'hold' at its end, including exact content end", () => {
+  const L = deckLayout(doc([{ id: "s", durationSec: 5, beats: [w("a", 1000), w("b", 2000)] }]));
+  expect(locate(L, 5)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 2, phase: "hold" });
+  expect(locate(L, 3)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 2, phase: "hold" });
+  expect(locate(L, 4.999)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 2, phase: "hold" });
+});
+
+test("an exact intra-scene beat boundary starts the next beat in play", () => {
+  expect(locate(deckLayout(D), 1)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 0, phase: "play" });
+});
+
+test("overrun: beats starting at or after the cut boundary are never reached", () => {
+  const L = deckLayout(doc([{ id: "s", durationSec: 1, beats: [w("a", 500), w("b", 2000), w("c", 1000)] }]));
+  expect(locate(L, 0.75)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 0.25, phase: "play" });
+  expect(locate(L, 1)).toEqual({ sceneIdx: 0, beatIdx: 1, flatIdx: 1, localT: 0.5, phase: "play" });
 });
 
 test("zero-length scenes are skipped", () => {
