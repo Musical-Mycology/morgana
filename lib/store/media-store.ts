@@ -82,5 +82,8 @@ export async function deleteMedia(deckId: string, mediaId: string): Promise<void
 }
 
 export async function deleteDeckMedia(deckId: string): Promise<void> {
-  await rm(deckMediaDir(deckId), { recursive: true, force: true });
+  const root = resolve(dataDir(), "media");
+  const dir = resolve(deckMediaDir(deckId));
+  if (!dir.startsWith(root + sep)) throw new MediaError(404, `unknown deck: ${deckId}`);
+  await rm(dir, { recursive: true, force: true });
 }

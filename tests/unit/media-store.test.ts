@@ -39,13 +39,46 @@ test("enforces the size cap from MORGANA_MEDIA_MAX_MB with 413", async () => {
   await expect(saveMedia("d1", { name: "a.mp3", bytes: bytes("too big") })).rejects.toMatchObject({ status: 413 });
 });
 
-test.each(["../x", "..%2Fx", "/etc/passwd", "0123456789abcdef.mp3/../../x", "UPPERCASE0000000.mp3"])(
+const VALID_ID = "0123456789abcdef.mp3";
+
+/** A readable secret that the crafted ids would reach if the guards were gone: media/d1/../secret = media/secret. */
+async function plantSecret(): Promise<void> {
+  await saveMedia("d1", { name: "a.mp3", bytes: bytes("real") }); // creates media/d1/ so only the plant is outside it
+  writeFileSync(join(dir, "media", "secret"), "SECRET");
+  writeFileSync(join(dir, "media", "secret.json"), JSON.stringify({ id: "secret", name: "s", mime: "text/plain", bytes: 6, uploadedAt: "2026-01-01T00:00:00.000Z" }));
+}
+
+test.each(["../secret", "..%2Fsecret", "/etc/passwd", "0123456789abcdef.mp3/../../secret", "UPPERCASE0000000.mp3"])(
   "rejects crafted media id %s with 404 and reads nothing", async (id) => {
-    mkdirSync(join(dir, "decks"), { recursive: true });
-    writeFileSync(join(dir, "decks", "x.deck.json"), "secret");
+    await plantSecret();
     await expect(readMedia("d1", id)).rejects.toBeInstanceOf(MediaError);
     await expect(readMedia("d1", id)).rejects.toMatchObject({ status: 404 });
   });
+
+test("deleteMedia rejects a traversal id and leaves the planted file in place", async () => {
+  await plantSecret();
+  await expect(deleteMedia("d1", "../secret")).rejects.toMatchObject({ status: 404 });
+  expect(existsSync(join(dir, "media", "secret"))).toBe(true);
+  expect(existsSync(join(dir, "media", "secret.json"))).toBe(true);
+});
+
+test.each(["", ".", "..", "../decks"])("deck id %j is rejected with 404 by every entry point", async (deckId) => {
+  await expect(listMedia(deckId)).rejects.toMatchObject({ status: 404 });
+  await expect(readMedia(deckId, VALID_ID)).rejects.toMatchObject({ status: 404 });
+  await expect(deleteMedia(deckId, VALID_ID)).rejects.toMatchObject({ status: 404 });
+  await expect(deleteDeckMedia(deckId)).rejects.toMatchObject({ status: 404 });
+});
+
+test("deleteDeckMedia with a bad deck id leaves media/ and another deck's folder intact", async () => {
+  await saveMedia("d1", { name: "a.mp3", bytes: bytes("one") });
+  await saveMedia("d2", { name: "b.mp3", bytes: bytes("two") });
+  for (const deckId of ["", ".", "..", "../decks"]) {
+    await expect(deleteDeckMedia(deckId)).rejects.toMatchObject({ status: 404 });
+  }
+  expect(existsSync(join(dir, "media"))).toBe(true);
+  expect(await listMedia("d1")).toHaveLength(1);
+  expect(await listMedia("d2")).toHaveLength(1);
+});
 
 test("rejects an invalid deck id", async () => {
   await expect(saveMedia("../evil", { name: "a.mp3", bytes: bytes("x") })).rejects.toMatchObject({ status: 404 });
