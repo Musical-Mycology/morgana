@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeck, loadDeck, saveDeck } from "@/lib/store/deck-store";
 import { callTool, ToolCallError } from "@/lib/mcp/tool-handlers";
+import { saveMedia } from "@/lib/store/media-store";
 import type { DeckDoc } from "@/engine/deck-doc";
 
 let dir: string;
@@ -198,4 +199,20 @@ test("update_meta with path timing and value null makes the deck untimed", async
   await timedFixture();
   await callTool("update_meta", { deck_id: "demo", path: "timing", value: null });
   expect((await loadDeck("demo")).meta.timing).toBeUndefined();
+});
+
+test("list_media, set_soundtrack and set_markers", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  const info = await saveMedia("demo", { name: "mix.mp3", bytes: new TextEncoder().encode("x") });
+  expect(await callTool("list_media", { deck_id: "demo" })).toEqual({ media: [info] });
+  await callTool("set_soundtrack", { deck_id: "demo", media_id: info.id });
+  expect((await loadDeck("demo")).meta.soundtrack).toEqual({ media: info.id });
+  await expect(callTool("set_soundtrack", { deck_id: "demo", media_id: "ffffffffffffffff.mp3" })).rejects.toThrow(/not in this deck's media/);
+  await callTool("set_soundtrack", { deck_id: "demo", media_id: null });
+  expect((await loadDeck("demo")).meta.soundtrack).toBeUndefined();
+  await callTool("set_markers", { deck_id: "demo", markers: [{ id: "m1", label: "drop", t: 40.2 }] });
+  expect((await loadDeck("demo")).meta.markers).toEqual([{ id: "m1", label: "drop", t: 40.2 }]);
+  await expect(callTool("set_markers", { deck_id: "demo", markers: [{ id: "m1", label: "", t: 1 }] })).rejects.toThrow(/label/);
+  await callTool("set_markers", { deck_id: "demo", markers: [] });
+  expect((await loadDeck("demo")).meta.markers).toBeUndefined();
 });

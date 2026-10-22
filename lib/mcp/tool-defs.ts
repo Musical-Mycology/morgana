@@ -136,4 +136,25 @@ export const TOOL_DEFS: ToolDef[] = [
     description: "Read-only. Returns the deck's computed time layout: targetSec (null if untimed), total seconds, and per scene its id, start, length, contentLength, pinned flag, overrunSec (content cut off past a pinned boundary), and each beat's flat index, id, scene-local start and duration. A pinned scene's length can exceed its contentLength: content that finishes before the pinned length holds its last frame until the boundary (no overrun, nothing cut). Use this instead of summing action durations yourself.",
     inputSchema: schema({ ...DECK_ID }, ["deck_id"]),
   },
+  {
+    name: "list_media",
+    description: "Read-only. Lists the files in this deck's media store (id, original name, mime type, size in bytes). Media is uploaded by the user in the editor (Deck settings → Soundtrack); it cannot be uploaded over MCP.",
+    inputSchema: schema({ ...DECK_ID }, ["deck_id"]),
+  },
+  {
+    name: "set_soundtrack",
+    description: "Set the deck's soundtrack to a media id from list_media, or pass media_id: null to remove it. The soundtrack is one pre-mixed track that plays from deck time 0:00 in the timed Player and in exported video; its length should match the deck's total (read_deck_timing). Files must be uploaded in the editor first — binary uploads are not possible over MCP. Removing the soundtrack keeps the file in the media store.",
+    inputSchema: schema({
+      ...DECK_ID,
+      media_id: { type: ["string", "null"], description: "A media id from list_media, or null to remove the soundtrack." },
+    }, ["deck_id", "media_id"]),
+  },
+  {
+    name: "set_markers",
+    description: "Replaces the deck's whole list of cue markers. A marker is a named deck-time point (e.g. { id: \"m1\", label: \"drop\", t: 40.2 }) shown as a tick on the editor ruler and the Player scrubber — use them to line scene lengths up with the music. ids must be unique and non-empty, labels 1–40 characters, t ≥ 0 seconds. Pass [] to clear all markers.",
+    inputSchema: schema({
+      ...DECK_ID,
+      markers: { type: "array", items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" }, t: { type: "number" } }, required: ["id", "label", "t"] } },
+    }, ["deck_id", "markers"]),
+  },
 ];
