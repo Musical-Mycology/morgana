@@ -95,9 +95,12 @@ interface Props {
    *  objects) reads THIS `t` — never a second ticker — so every stage stays paused/playing/
    *  seeked in lockstep, including across click_gate pauses. */
   onTime?: (t: number) => void;
+  /** false = never start the autoplay ticker on mount; the host drives time via
+   *  `transport.seek` (the timed Player). Entry art is still issued. Default true. */
+  autoplay?: boolean;
 }
 
-export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime }: Props) {
+export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
   // The single gsap.ticker listener currently driving playback, or null when paused. play()
@@ -236,7 +239,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // N GSAP timelines, pausing at each click_gate and handing `resume` to runtime.onGate,
     // exactly as the segment machinery did. Most callers (today) never touch `transport` at
     // all; the ref just gives a scrubber somewhere to grab onto later.
-    play();
+    if (autoplay) play();
+    else renderAt(0); // host-driven: paint t=0 and wait for transport.seek
 
     // built effect timelines are created here / in deferred callbacks; kill them on unmount
     // (deps re-run also kills them at the top of the effect above). The ticker itself is
@@ -252,7 +256,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       clearMedia();
     };
     // sceneId is in the deps because beat ids are only unique within a scene.
-  }, { scope, dependencies: [slots.sceneId, slots.beat.id, animate] });
+  }, { scope, dependencies: [slots.sceneId, slots.beat.id, animate, autoplay] });
 
   /** Render `value` into `host`, converting [label](target) markup into clickable links.
    *  Plain text (no markup) renders as a single text node — identical to the old behavior. */

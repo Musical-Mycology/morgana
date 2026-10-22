@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import type { Beat, Scene } from "@/engine/deck/types";
 import type { StoryAsset } from "@/engine/deck/story-assets";
 import type { DeckChrome } from "@/engine/deck-doc";
@@ -11,7 +11,7 @@ import { makeAuthoringRuntime } from "./runtime";
 
 export function BeatStage({
   sceneId, beat, animate = true, entryLayers = [], endLayers = [], chrome, contained = false,
-  scene, beatIndex = 0, transport,
+  scene, beatIndex = 0, transport, autoplay = true, entryNight,
 }: {
   sceneId: string; beat: Beat; animate?: boolean;
   entryLayers?: StoryAsset[]; endLayers?: StoryAsset[];
@@ -20,11 +20,24 @@ export function BeatStage({
   /** Imperative seek/play/pause/duration over CinematicSlide's single time axis — forwarded
    *  straight through (design spec §7b §4.1). Optional: most callers just let it autoplay. */
   transport?: Ref<SlideTransport>;
+  /** false = host-driven: no autoplay ticker; the host drives time via `transport.seek`
+   *  (the timed Player). Default true. */
+  autoplay?: boolean;
+  /** Flattened entry nightlight for `beat`, supplied by a host that swaps `beat` on a mounted
+   *  stage. Re-applied on every beat change (including backward seeks). */
+  entryNight?: number;
 }) {
   const art = useRef<ArtStageHandle>(null);
   const notes = useRef<NoteFieldHandle>(null);
   const objStage = useRef<ObjectStageHandle>(null);
-  const [night, setNight] = useState(beat.nightlight ?? 0);
+  const [night, setNight] = useState(entryNight ?? beat.nightlight ?? 0);
+  // CinematicSlide only issues nightlight for `nightlight` ACTIONS, never the beat's inherited
+  // entry value. A host that swaps `beat` on a mounted stage (the timed Player) passes the
+  // flattened entry nightlight here, and it must be re-applied on every beat change — including
+  // a backward seek into an earlier beat.
+  useLayoutEffect(() => {
+    if (entryNight != null) setNight(entryNight);
+  }, [entryNight, sceneId, beat.id]);
 
   const runtime = useMemo(
     () => makeAuthoringRuntime({
@@ -61,7 +74,7 @@ export function BeatStage({
           this ordering has no effect on paint/stacking — only on effect timing. */}
       {scene && <ObjectStage ref={objStage} scene={scene} active />}
       <div style={{ position: "absolute", inset: 0 }}>
-        <CinematicSlide slots={{ sceneId, beat }} animate={animate} runtime={runtime} chrome={chrome} transport={transport} onTime={paint} />
+        <CinematicSlide slots={{ sceneId, beat }} animate={animate} runtime={runtime} chrome={chrome} transport={transport} onTime={paint} autoplay={autoplay} />
       </div>
     </div>
   );
