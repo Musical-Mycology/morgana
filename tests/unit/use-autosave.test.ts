@@ -145,3 +145,44 @@ test("a stale response for an older revision does not report 'saved' after a new
   const savedCallsAfterOld = onStatus.mock.calls.filter((c) => c[0] === "saved").length;
   expect(savedCallsAfterOld).toBe(1);
 });
+
+test("flush() saves a debounced revision immediately, reports saved, and the debounce never re-fires", async () => {
+  const onStatus = vi.fn();
+  const { result } = renderHook(() => useAutosave(doc, 3, onStatus));
+  expect(saveDeck).not.toHaveBeenCalled(); // still inside the 700ms debounce
+  await result.current.flush();
+  expect(saveDeck).toHaveBeenCalledTimes(1);
+  expect(onStatus).toHaveBeenLastCalledWith("saved");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(saveDeck).toHaveBeenCalledTimes(1);
+});
+
+test("flush() with nothing pending makes no request", async () => {
+  const { result } = renderHook(() => useAutosave(doc, 3, vi.fn()));
+  await vi.advanceTimersByTimeAsync(1000); // autosave runs
+  expect(saveDeck).toHaveBeenCalledTimes(1);
+  await result.current.flush();
+  expect(saveDeck).toHaveBeenCalledTimes(1);
+});
+
+test("flush() while a save is in flight waits for it instead of saving twice", async () => {
+  let resolve!: () => void;
+  saveDeck.mockImplementationOnce(() => new Promise((res) => { resolve = () => res({ ok: true }); }));
+  const { result } = renderHook(() => useAutosave(doc, 3, vi.fn()));
+  await vi.advanceTimersByTimeAsync(700); // debounce fires; request outstanding
+  let done = false;
+  const p = result.current.flush().then(() => { done = true; });
+  await flushMicrotasks();
+  expect(done).toBe(false);
+  resolve();
+  await p;
+  expect(saveDeck).toHaveBeenCalledTimes(1);
+});
+
+test("flush() rejects when the save fails (the caller logs and carries on)", async () => {
+  saveDeck.mockRejectedValueOnce(new Error("boom"));
+  const onStatus = vi.fn();
+  const { result } = renderHook(() => useAutosave(doc, 3, onStatus));
+  await expect(result.current.flush()).rejects.toThrow("boom");
+  expect(onStatus).toHaveBeenLastCalledWith("error", "boom");
+});

@@ -64,3 +64,15 @@ test("Enter then blur commits exactly once", () => {
   fireEvent.blur(input);
   expect(hist()[0]).toBe(past0 + 1);
 });
+
+test("a fractional target (set via MCP/JSON) survives focus+blur untouched", () => {
+  useEditor.getState().load({ ...deck(), meta: { id: "d", title: "D", timing: { targetSec: 90.5 } } });
+  render(<DeckSettings />);
+  const before = hist();
+  const input = screen.getByTestId("target-length") as HTMLInputElement;
+  expect(input.value).toBe("1:30"); // displayed rounded
+  fireEvent.focus(input);
+  fireEvent.blur(input);
+  expect(useEditor.getState().doc!.meta.timing).toEqual({ targetSec: 90.5 });
+  expect(hist()).toEqual(before);
+});

@@ -1,12 +1,12 @@
 "use client";
 import type { RefObject } from "react";
-import Link from "next/link";
 import { useMemo } from "react";
 import { useEditor } from "@/lib/editor/store";
 import { deckLayout, deckTimeOf, locate } from "@/engine/authoring/deck-clock";
 import { formatClock } from "@/lib/timing/clock-format";
 import { TimeBar } from "@/components/timing/TimeBar";
 import type { CanvasHandle } from "./DeckCanvas";
+import { PlayLink } from "./PlayLink";
 
 /** Deck-time ruler above the per-beat timeline (timed decks). Scrubbing selects the beat under
  *  T and seeks the editor canvas to its local time. Whole-deck continuous playback is the
@@ -37,7 +37,7 @@ export function DeckRuler({ canvasRef, beatT }: { canvasRef: RefObject<CanvasHan
       <div className="ed__ruler-bar">
         <TimeBar layout={layout} sceneIds={doc.scenes.map((s) => s.id)} value={T} targetSec={target} onScrub={onScrub} testId="deck-ruler" />
       </div>
-      <Link className="ed__pill ed__pill--ghost" data-testid="play-from-here" href={`/play?deck=${doc.meta.id}&t=${T.toFixed(2)}`} target="_blank">▶ Play from here</Link>
+      <PlayLink testId="play-from-here" href={`/play?deck=${doc.meta.id}&t=${T.toFixed(2)}`}>▶ Play from here</PlayLink>
     </div>
   );
 }

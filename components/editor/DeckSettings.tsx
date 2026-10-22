@@ -18,11 +18,15 @@ const FIELDS: FieldSpec[] = [
 function TimingFields({ doc, updateMeta }: { doc: DeckDoc; updateMeta: (path: string, value: unknown) => void }) {
   const target = doc.meta.timing?.targetSec;
   const total = useMemo(() => deckLayout(doc).total, [doc]);
-  const [draft, setDraft] = useState(target !== undefined ? formatClock(target, { tenths: false }) : "");
-  useEffect(() => { setDraft(target !== undefined ? formatClock(target, { tenths: false }) : ""); }, [target]);
+  const canonical = target !== undefined ? formatClock(target, { tenths: false }) : "";
+  const [draft, setDraft] = useState(canonical);
+  useEffect(() => { setDraft(canonical); }, [target, canonical]);
   const commit = () => {
+    // The untouched canonical text is a no-op even when it doesn't round-trip: a fractional
+    // target (90.5 via MCP/JSON) displays "1:30", which would otherwise parse back to 90.
+    if (draft === canonical) return;
     const v = parseClock(draft);
-    if (v === null || v === target) { setDraft(target !== undefined ? formatClock(target, { tenths: false }) : ""); return; }
+    if (v === null || v === target) { setDraft(canonical); return; }
     updateMeta("timing", { targetSec: v });
   };
   return (
