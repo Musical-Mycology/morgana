@@ -37,6 +37,8 @@ function runtimeGraph(entry: string, seen = new Set<string>()): Set<string> {
 test.each([
   "engine/components/effects/note-state.ts",
   "lib/editor/object-state.ts",
+  "engine/authoring/deck-clock.ts",
+  "lib/timing/clock-format.ts",
 ])("%s has a DOM-free runtime import graph", (rel) => {
   const offenders = [...runtimeGraph(resolve(ROOT, rel))]
     .filter((f) => DOM_TOKENS.test(readFileSync(f, "utf8")))
