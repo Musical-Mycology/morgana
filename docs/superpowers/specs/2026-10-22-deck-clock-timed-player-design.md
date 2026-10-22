@@ -140,7 +140,7 @@ export interface Located {
 }
 
 export function deckLayout(doc: DeckDoc): DeckLayout;
-export function locate(layout: DeckLayout, T: number): Located;
+export function locate(layout: DeckLayout, T: number): Located | null; // null iff total === 0
 export function deckTimeOf(layout: DeckLayout, flatIdx: number, localT: number): number; // inverse, for the editor playhead
 ```
 
@@ -175,7 +175,7 @@ scrubbing looks the same as one reached by playing through.
 Required engine changes (small, additive):
 - `CinematicSlide` / `BeatStage`: `autoplay?: boolean` (default `true`). When `false`, the
   mount effect skips `play()`; entry art is still issued.
-- `BeatStage`: `initialNight?: number` (default `beat.nightlight ?? 0`).
+- `BeatStage`: `entryNight?: number` — the beat's inherited entry nightlight (from `flattenStory`). Applied on mount AND on every beat change, because `CinematicSlide` only issues nightlight for `nightlight` *actions*, never the beat-level inherited value.
 
 **Clock.** A single `requestAnimationFrame` loop advances `T` by real elapsed time while playing,
 then `locate(T)` → set beat props if changed → `transport.seek(localT)`. On `hold` it seeks the
@@ -192,7 +192,7 @@ toggles):
 
 **Keys.** Space play/pause · ←/→ ±1s · Shift+←/→ ±5s · Home → 0 · F fullscreen · H HUD.
 
-**Errors/empty.** Load failure reuses the editor's error empty-state; `total === 0` shows
+**Errors/empty.** Load failure shows a plain "Couldn't load deck" message (`data-testid="play-error"`); `total === 0` shows
 "Nothing to play — add beats or pin a scene length."
 
 ---
@@ -223,7 +223,7 @@ Added to `lib/editor/lint.ts`, locating to the scene (or action) as existing rul
 
 | Rule | Severity | Fires when |
 | --- | --- | --- |
-| `scene-overrun` | error | `contentLength > durationSec` — "Background runs 3.2s over its 24s" |
+| `scene-overrun` | warning | `contentLength > durationSec` — "Background runs 3.2s over its 24s". A warning, not an error: in `lintDeck` an error means "the server will reject this save", and an overrun is a timing problem, not an invalid deck |
 | `deck-length-mismatch` | warning | timed deck and `total ≠ targetSec` — "Deck is 1:56 of 2:00 — 4s short" |
 | `timed-interactive` | warning | timed deck contains `click_gate`, `reveal_arrows`, `pulse_arrow`, `reveal_again`, or a `jump:` inline link — "ignored in timed playback" |
 
