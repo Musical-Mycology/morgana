@@ -229,6 +229,8 @@ Tool surface: `list_decks`, `read_deck`, beat operations (`insert_beat_after`, `
 `move_scene_by`, `append_beat_to_scene`), and action operations (`insert_action_after`,
 `duplicate_action_at`, `delete_action_at`, `move_action_by`, `convert_action_kind`, `update_action`,
 `update_meta`) — see [`lib/mcp/tool-defs.ts`](lib/mcp/tool-defs.ts) for the exact schemas.
+Timed (video) decks: `set_scene_duration` pins a scene's length, `read_deck_timing` reports the
+computed layout and overruns, and `update_meta` with path `timing.targetSec` sets the target length.
 
 `move_beat_by` moves a beat one position in filmstrip order. Within a scene it swaps with
 the neighbouring beat; at a scene edge it moves the beat into the adjacent scene. It is only

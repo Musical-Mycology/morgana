@@ -116,11 +116,24 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "update_meta",
-    description: "Set a single field on the deck's metadata, addressed by a dot-path (e.g. \"title\", \"chrome.wordmark\").",
+    description: "Set a single field on the deck's metadata, addressed by a dot-path (e.g. \"title\", \"chrome.wordmark\"). To make a timed (video) deck, set \"timing.targetSec\" to the intended total length in seconds (e.g. 120); set \"timing\" to null to make it untimed again.",
     inputSchema: schema({
       ...DECK_ID,
       path: { type: "string" },
       value: { description: "New value for the field." },
     }, ["deck_id", "path", "value"]),
+  },
+  {
+    name: "set_scene_duration",
+    description: "Pin a scene's length in seconds for timed playback, or pass seconds: null to un-pin it (length then follows the scene's content). A pinned scene always occupies exactly that long, so later scenes never move: if its beats finish early the last frame holds until the boundary; if they run longer, playback cuts them at the boundary (read_deck_timing reports the overrun).",
+    inputSchema: schema({
+      ...DECK_ID, ...SCENE_INDEX,
+      seconds: { type: ["number", "null"], description: "Length in seconds (> 0), or null to un-pin." },
+    }, ["deck_id", "scene_index", "seconds"]),
+  },
+  {
+    name: "read_deck_timing",
+    description: "Read-only. Returns the deck's computed time layout: targetSec (null if untimed), total seconds, and per scene its id, start, length, contentLength, pinned flag, overrunSec (content cut off past a pinned boundary), and each beat's flat index, id, scene-local start and duration. Use this instead of summing action durations yourself.",
+    inputSchema: schema({ ...DECK_ID }, ["deck_id"]),
   },
 ];
