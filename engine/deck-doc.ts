@@ -10,6 +10,12 @@ export interface DeckChrome {
   wordmark?: string;
 }
 
+/** Same pattern as lib/store/media-store.ts MEDIA_ID_RE (kept local: the format must not import fs code). */
+export const MEDIA_ID_PATTERN = /^[0-9a-f]{16}\.[a-z0-9]{1,5}$/;
+
+/** A deck-time cue point shown on the ruler and Player scrubber. */
+export interface DeckMarker { id: string; label: string; t: number }
+
 export interface DeckMeta {
   id: string;
   title: string;
@@ -18,6 +24,10 @@ export interface DeckMeta {
   chrome?: DeckChrome;
   /** Present = a timed deck (video). `targetSec` is the intended total length, e.g. 120. */
   timing?: { targetSec: number };
+  /** The pre-mixed soundtrack: a media id in this deck's media store, played from deck T = 0. */
+  soundtrack?: { media: string };
+  /** Deck-time cue points (e.g. "drop" @ 40.2). */
+  markers?: DeckMarker[];
 }
 
 export interface DeckDoc {
@@ -109,6 +119,24 @@ export function validateDeckDoc(obj: unknown): { ok: boolean; errors: string[] }
     const timing = (d.meta as { timing?: unknown }).timing;
     if (timing !== undefined && (timing === null || typeof timing !== "object" || !isPositiveFinite((timing as { targetSec?: unknown }).targetSec))) {
       e.push("meta.timing.targetSec must be a finite number > 0");
+    }
+    const meta = d.meta as { soundtrack?: unknown; markers?: unknown };
+    if (meta.soundtrack !== undefined) {
+      const media = (meta.soundtrack as { media?: unknown } | null)?.media;
+      if (typeof media !== "string" || !MEDIA_ID_PATTERN.test(media)) e.push("meta.soundtrack.media must be a media id");
+    }
+    if (meta.markers !== undefined) {
+      if (!Array.isArray(meta.markers)) e.push("meta.markers must be an array");
+      else {
+        const seen = new Set<string>();
+        meta.markers.forEach((m: Record<string, unknown>, i) => {
+          if (typeof m?.id !== "string" || !m.id) e.push(`meta.markers[${i}].id must be a non-empty string`);
+          else if (seen.has(m.id)) e.push(`meta.markers[${i}].id "${m.id}" duplicated`);
+          else seen.add(m.id);
+          if (typeof m?.label !== "string" || m.label.length < 1 || m.label.length > 40) e.push(`meta.markers[${i}].label must be 1–40 characters`);
+          if (typeof m?.t !== "number" || !Number.isFinite(m.t) || m.t < 0) e.push(`meta.markers[${i}].t must be a finite number ≥ 0`);
+        });
+      }
     }
   }
   if (!Array.isArray(d.scenes)) e.push("scenes must be an array");
