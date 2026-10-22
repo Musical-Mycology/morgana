@@ -53,6 +53,7 @@ test("draws the waveform under the segments when peaks are given", () => {
   expect(svg.querySelectorAll("path")).toHaveLength(1);
   expect(svg.style.width).toBe(`${(6 / 12) * 100}%`); // covers [0, peaksDuration] on the bar's scale
   expect(svg.getAttribute("pointer-events")).toBe("none");
+  expect(svg.querySelector("path")!.getAttribute("fill")).toBe("rgba(255,255,255,0.9)");
 });
 
 test("no waveform without peaks", () => {
@@ -73,5 +74,43 @@ test("markers render as labelled ticks; clicking one jumps there instead of scru
   expect(onMarkerClick).toHaveBeenCalledWith(6);
   // the tick's pointerdown must not also start a scrub
   firePointer(tick, "pointerdown", 10);
+  expect(onScrub).not.toHaveBeenCalled();
+});
+
+test("waveform crops to the bar's scale when the track runs longer than the bar", () => {
+  const peaks = Float32Array.from([0, 0.5, 1, 0.5, 0, 0.5, 1, 0.5]);
+  render(<TimeBar layout={layout} sceneIds={["a", "b", "c"]} value={0} targetSec={12} onScrub={() => {}} testId="tb" peaks={peaks} peaksDuration={24} />);
+  const svg = screen.getByTestId("timebar-waveform");
+  expect(svg.style.width).toBe("100%"); // 24 s of audio on a 12 s bar: the bar shows the first 12 s
+  expect(svg.getAttribute("viewBox")).toBe(`0 0 ${peaks.length / 2} 2`); // first half of the peaks, not squashed
+});
+
+test("the waveform path is not recomputed when only the playhead moves", () => {
+  const raw = Float32Array.from([0, 0.5, 1, 0.5]);
+  let reads = 0;
+  const peaks = new Proxy(raw, {
+    get(t, p) {
+      if (typeof p === "string" && /^\d+$/.test(p)) reads++;
+      const v = Reflect.get(t, p, t);
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+  });
+  const { rerender } = render(<TimeBar layout={layout} sceneIds={["a", "b", "c"]} value={0} targetSec={12} onScrub={() => {}} testId="tb" peaks={peaks} peaksDuration={6} />);
+  const d = screen.getByTestId("timebar-waveform").querySelector("path")!.getAttribute("d");
+  reads = 0;
+  rerender(<TimeBar layout={layout} sceneIds={["a", "b", "c"]} value={3} targetSec={12} onScrub={() => {}} testId="tb" peaks={peaks} peaksDuration={6} />);
+  expect(reads).toBe(0); // no sample was read, so the path was not rebuilt
+  expect(screen.getByTestId("timebar-waveform").querySelector("path")!.getAttribute("d")).toBe(d);
+});
+
+test("a drag that starts on a marker does not scrub", () => {
+  const onScrub = vi.fn();
+  render(<TimeBar layout={layout} sceneIds={["a", "b", "c"]} value={0} targetSec={12} onScrub={onScrub} testId="tb"
+    markers={[{ id: "m1", label: "drop", t: 6 }]} onMarkerClick={() => {}} />);
+  // a real width, so the root's scrub handler would act on the move if it were reached
+  screen.getByTestId("tb").getBoundingClientRect = () => ({ left: 0, width: 120, top: 0, height: 20, right: 120, bottom: 20, x: 0, y: 0, toJSON: () => ({}) });
+  const tick = screen.getByTestId("timebar-marker");
+  firePointer(tick, "pointerdown", 60);
+  firePointer(tick, "pointermove", 90);
   expect(onScrub).not.toHaveBeenCalled();
 });

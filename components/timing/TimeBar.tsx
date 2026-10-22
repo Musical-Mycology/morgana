@@ -1,5 +1,5 @@
 "use client";
-import type { PointerEvent } from "react";
+import { memo, useMemo, type PointerEvent } from "react";
 import { sceneOverrun, type DeckLayout } from "@/engine/authoring/deck-clock";
 import type { DeckMarker } from "@/engine/deck-doc";
 
@@ -32,6 +32,20 @@ function waveformPath(peaks: Float32Array): string {
   return `${d} Z`;
 }
 
+/** The soundtrack waveform. Memoised on `peaks`, so a playhead-only re-render (the Player
+ *  re-renders TimeBar ~60×/s) reuses the path instead of rebuilding it. The viewBox is cropped in
+ *  proportion, so when the track runs longer than the bar the svg shows [0, scale] of it. */
+const Waveform = memo(function Waveform({ peaks, peaksDuration, scale }: { peaks: Float32Array; peaksDuration: number; scale: number }) {
+  const d = useMemo(() => waveformPath(peaks), [peaks]);
+  const f = Math.min(1, scale / peaksDuration);
+  return (
+    <svg data-testid="timebar-waveform" pointerEvents="none" viewBox={`0 0 ${peaks.length * f} 2`} preserveAspectRatio="none"
+      style={{ position: "absolute", left: 0, top: 0, height: "100%", width: pct(Math.min(peaksDuration, scale), scale), opacity: 0.35 }}>
+      <path d={d} fill="rgba(255,255,255,0.9)" />
+    </svg>
+  );
+});
+
 /** Whole-deck scrubber shared by the timed Player HUD and the editor's deck ruler. Scene
  *  segments are drawn to scale; a pinned scene's held tail is shaded and content cut off past
  *  its boundary is flagged red. Purely presentational — the caller owns the clock. */
@@ -55,10 +69,7 @@ export function TimeBar({ layout, sceneIds, value, targetSec, onScrub, testId, p
       style={{ position: "relative", height: 26, borderRadius: 4, background: "rgba(255,255,255,0.06)", cursor: "pointer", touchAction: "none", userSelect: "none" }}
     >
       {peaks && peaks.length > 0 && peaksDuration !== undefined && peaksDuration > 0 && (
-        <svg data-testid="timebar-waveform" pointerEvents="none" viewBox={`0 0 ${peaks.length} 2`} preserveAspectRatio="none"
-          style={{ position: "absolute", left: 0, top: 0, height: "100%", width: pct(Math.min(peaksDuration, scale), scale), opacity: 0.35 }}>
-          <path d={waveformPath(peaks)} fill="currentColor" />
-        </svg>
+        <Waveform peaks={peaks} peaksDuration={peaksDuration} scale={scale} />
       )}
       {layout.scenes.filter((s) => s.length > 0).map((s) => {
         const over = sceneOverrun(s);
@@ -81,6 +92,7 @@ export function TimeBar({ layout, sceneIds, value, targetSec, onScrub, testId, p
       {markers?.map((m) => (
         <div key={m.id} data-testid="timebar-marker" data-marker-id={m.id} title={m.label}
           onPointerDown={(e) => e.stopPropagation()}
+          onPointerMove={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onMarkerClick?.(m.t); }}
           style={{ position: "absolute", top: -6, bottom: -6, left: pct(m.t, scale), width: 2, marginLeft: -1, background: "#7fd1ff", cursor: "pointer" }}>
           <span style={{ position: "absolute", top: -12, left: 3, fontSize: 9, whiteSpace: "nowrap", color: "#7fd1ff" }}>{m.label}</span>
