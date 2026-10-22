@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useMemo, useRef, useState, type Ref } from "react";
 import type { Beat, Scene } from "@/engine/deck/types";
 import type { StoryAsset } from "@/engine/deck/story-assets";
 import type { DeckChrome } from "@/engine/deck-doc";
@@ -34,10 +34,16 @@ export function BeatStage({
   // CinematicSlide only issues nightlight for `nightlight` ACTIONS, never the beat's inherited
   // entry value. A host that swaps `beat` on a mounted stage (the timed Player) passes the
   // flattened entry nightlight here, and it must be re-applied on every beat change — including
-  // a backward seek into an earlier beat.
-  useLayoutEffect(() => {
+  // a backward seek into an earlier beat. Applied DURING RENDER (React's "adjust state when a
+  // prop changes" pattern), not in an effect: CinematicSlide's child layout effect runs
+  // renderAt(0) before any parent effect, and a t=0 `nightlight` action it issues must be the
+  // LAST write, so the inherited entry value has to land before the child's effects run.
+  const entryKey = `${sceneId}\u0000${beat.id}\u0000${entryNight ?? ""}`;
+  const [appliedEntryKey, setAppliedEntryKey] = useState(entryKey);
+  if (appliedEntryKey !== entryKey) {
+    setAppliedEntryKey(entryKey);
     if (entryNight != null) setNight(entryNight);
-  }, [entryNight, sceneId, beat.id]);
+  }
 
   const runtime = useMemo(
     () => makeAuthoringRuntime({

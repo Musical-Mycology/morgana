@@ -39,3 +39,16 @@ test("entryNight is re-applied when the beat changes", () => {
   rerender(<BeatStage sceneId="s" beat={beat} autoplay={false} entryNight={1} contained />); // backward swap
   expect(Number(glow(container))).toBeCloseTo(0.6);
 });
+
+test("a t=0 nightlight action beats entryNight (mount and beat swap)", () => {
+  const glow = (c: HTMLElement) => (c.querySelector(".artstage__glow") as HTMLElement).style.opacity;
+  const lit: Beat = { id: "lit", timeline: [{ kind: "nightlight", to: 1 }, { kind: "wait", ms: 500 }] };
+  const plain: Beat = { id: "plain", timeline: [{ kind: "wait", ms: 500 }] };
+  const first = render(<BeatStage sceneId="s" beat={lit} autoplay={false} entryNight={0} contained />);
+  expect(Number(glow(first.container))).toBeCloseTo(0.6);
+  first.unmount();
+  const { rerender, container } = render(<BeatStage sceneId="s" beat={plain} autoplay={false} entryNight={0} contained />);
+  expect(Number(glow(container))).toBeCloseTo(0.15);
+  rerender(<BeatStage sceneId="s" beat={lit} autoplay={false} entryNight={0} contained />);
+  expect(Number(glow(container))).toBeCloseTo(0.6);
+});
