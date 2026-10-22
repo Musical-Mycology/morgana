@@ -1,5 +1,5 @@
 "use client";
-import { memo, useMemo, type PointerEvent } from "react";
+import { memo, useMemo, useRef, type PointerEvent } from "react";
 import { sceneOverrun, type DeckLayout } from "@/engine/authoring/deck-clock";
 import type { DeckMarker } from "@/engine/deck-doc";
 
@@ -51,6 +51,10 @@ const Waveform = memo(function Waveform({ peaks, peaksDuration, scale }: { peaks
  *  its boundary is flagged red. Purely presentational — the caller owns the clock. */
 export function TimeBar({ layout, sceneIds, value, targetSec, onScrub, testId, peaks, peaksDuration, markers, onMarkerClick }: TimeBarProps) {
   const scale = timeBarScale(layout, targetSec);
+  // True only between a pointerdown on the bar and its release. A press that starts on a marker
+  // is stopped before it reaches the root, so it never sets this and cannot scrub the bar.
+  const pressed = useRef(false);
+  const release = () => { pressed.current = false; };
   const scrubFrom = (e: PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     if (r.width <= 0) return;
@@ -64,8 +68,11 @@ export function TimeBar({ layout, sceneIds, value, targetSec, onScrub, testId, p
       aria-valuemin={0}
       aria-valuemax={layout.total}
       aria-valuenow={value}
-      onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); scrubFrom(e); }}
-      onPointerMove={(e) => { if (e.buttons & 1) scrubFrom(e); }}
+      onPointerDown={(e) => { pressed.current = true; e.currentTarget.setPointerCapture(e.pointerId); scrubFrom(e); }}
+      onPointerMove={(e) => { if (pressed.current && e.buttons & 1) scrubFrom(e); }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onLostPointerCapture={release}
       style={{ position: "relative", height: 26, borderRadius: 4, background: "rgba(255,255,255,0.06)", cursor: "pointer", touchAction: "none", userSelect: "none" }}
     >
       {peaks && peaks.length > 0 && peaksDuration !== undefined && peaksDuration > 0 && (

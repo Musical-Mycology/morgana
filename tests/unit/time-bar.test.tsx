@@ -8,7 +8,7 @@ afterEach(cleanup);
 /** jsdom has no global PointerEvent, so fireEvent.pointer* falls back to a bare Event that
  *  drops clientX. Dispatch a MouseEvent under the pointer type string instead (same pattern as
  *  objects-layer-drag.test.tsx); the handler only reads type, buttons and clientX. */
-function firePointer(target: EventTarget, type: "pointerdown" | "pointermove", clientX: number) {
+function firePointer(target: EventTarget, type: "pointerdown" | "pointermove" | "pointerup", clientX: number) {
   target.dispatchEvent(new MouseEvent(type, { clientX, buttons: 1, bubbles: true, cancelable: true }));
 }
 
@@ -112,5 +112,32 @@ test("a drag that starts on a marker does not scrub", () => {
   const tick = screen.getByTestId("timebar-marker");
   firePointer(tick, "pointerdown", 60);
   firePointer(tick, "pointermove", 90);
+  expect(onScrub).not.toHaveBeenCalled();
+});
+
+test("a drag that starts on a marker does not scrub once the pointer leaves the tick", () => {
+  const onScrub = vi.fn();
+  render(<TimeBar layout={layout} sceneIds={["a", "b", "c"]} value={0} targetSec={12} onScrub={onScrub} testId="tb"
+    markers={[{ id: "m1", label: "drop", t: 6 }]} onMarkerClick={() => {}} />);
+  const bar = screen.getByTestId("tb");
+  bar.getBoundingClientRect = () => ({ left: 0, width: 120, top: 0, height: 20, right: 120, bottom: 20, x: 0, y: 0, toJSON: () => ({}) });
+  firePointer(screen.getByTestId("timebar-marker"), "pointerdown", 60);
+  firePointer(bar, "pointermove", 90); // over the bar background, not the tick
+  expect(onScrub).not.toHaveBeenCalled();
+});
+
+test("a press on the bar scrubs until released; the gate resets after pointerup", () => {
+  const onScrub = vi.fn();
+  render(<TimeBar layout={layout} sceneIds={["a", "b", "c"]} value={0} targetSec={12} onScrub={onScrub} testId="tb" />);
+  const bar = screen.getByTestId("tb");
+  bar.getBoundingClientRect = () => ({ left: 0, width: 120, top: 0, height: 20, right: 120, bottom: 20, x: 0, y: 0, toJSON: () => ({}) });
+  bar.setPointerCapture = () => {};
+  firePointer(bar, "pointerdown", 30);
+  expect(onScrub).toHaveBeenLastCalledWith(3);
+  firePointer(bar, "pointermove", 60);
+  expect(onScrub).toHaveBeenLastCalledWith(6);
+  firePointer(bar, "pointerup", 60);
+  onScrub.mockClear();
+  firePointer(bar, "pointermove", 90); // button still reported held, but no press is active
   expect(onScrub).not.toHaveBeenCalled();
 });
