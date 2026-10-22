@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TimeBar, timeBarScale } from "@/components/timing/TimeBar";
 import type { DeckLayout } from "@/engine/authoring/deck-clock";
 
@@ -44,4 +44,34 @@ test("pointer scrubs in deck time, clamped to total", () => {
 test("timeBarScale", () => {
   expect(timeBarScale(layout, 12)).toBe(12);
   expect(timeBarScale(layout)).toBe(10);
+});
+
+test("draws the waveform under the segments when peaks are given", () => {
+  const peaks = Float32Array.from([0, 0.5, 1, 0.5]);
+  render(<TimeBar layout={layout} sceneIds={["a", "b", "c"]} value={0} targetSec={12} onScrub={() => {}} testId="tb" peaks={peaks} peaksDuration={6} />);
+  const svg = screen.getByTestId("timebar-waveform");
+  expect(svg.querySelectorAll("path")).toHaveLength(1);
+  expect(svg.style.width).toBe(`${(6 / 12) * 100}%`); // covers [0, peaksDuration] on the bar's scale
+  expect(svg.getAttribute("pointer-events")).toBe("none");
+});
+
+test("no waveform without peaks", () => {
+  render(<TimeBar layout={layout} sceneIds={["a", "b", "c"]} value={0} onScrub={() => {}} testId="tb" />);
+  expect(screen.queryByTestId("timebar-waveform")).toBeNull();
+});
+
+test("markers render as labelled ticks; clicking one jumps there instead of scrubbing", () => {
+  const onScrub = vi.fn();
+  const onMarkerClick = vi.fn();
+  render(<TimeBar layout={layout} sceneIds={["a", "b", "c"]} value={0} targetSec={12} onScrub={onScrub} testId="tb"
+    markers={[{ id: "m1", label: "drop", t: 6 }]} onMarkerClick={onMarkerClick} />);
+  const tick = screen.getByTestId("timebar-marker");
+  expect(tick.getAttribute("title")).toBe("drop");
+  expect(tick.style.left).toBe("50%");
+  expect(tick.textContent).toContain("drop");
+  fireEvent.click(tick);
+  expect(onMarkerClick).toHaveBeenCalledWith(6);
+  // the tick's pointerdown must not also start a scrub
+  firePointer(tick, "pointerdown", 10);
+  expect(onScrub).not.toHaveBeenCalled();
 });
