@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, readdir, unlink, access, stat } from "node:
 import { join, resolve } from "node:path";
 import { DECK_ID_RE, validateDeckDoc, type DeckDoc, type DeckMeta } from "@/engine/deck-doc";
 
-const dataDir = () => resolve(process.env.MORGANA_DATA_DIR ?? (process.env.NODE_ENV === "production" ? "/data" : "./data"));
+export const dataDir = () => resolve(process.env.MORGANA_DATA_DIR ?? (process.env.NODE_ENV === "production" ? "/data" : "./data"));
 const decksDir = () => join(dataDir(), "decks");
 
 function safeId(id: string): string {
@@ -43,7 +43,11 @@ export async function createDeck(meta: { id: string; title: string; treatment?: 
   return doc;
 }
 
-export async function deleteDeck(id: string): Promise<void> { await unlink(fileFor(id)); }
+export async function deleteDeck(id: string): Promise<void> {
+  await unlink(fileFor(id));
+  const { deleteDeckMedia } = await import("./media-store"); // lazy: media-store imports dataDir from here
+  await deleteDeckMedia(id);
+}
 
 export async function statDeck(id: string): Promise<{ mtimeMs: number }> {
   const s = await stat(fileFor(id));
