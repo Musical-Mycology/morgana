@@ -14,6 +14,18 @@ const cache = new Map<string, Promise<Soundtrack>>();
 /** Tests only. */
 export function __resetSoundtrackCache(): void { cache.clear(); }
 
+/** Frees decoded tracks of deck `deckId` other than `keepMediaId` (each is up to ~90 MB of PCM):
+ *  called by the editor when a soundtrack is replaced or removed. Other decks' entries are untouched. */
+export function releaseSoundtracksExcept(deckId: string, keepMediaId: string | undefined): void {
+  const prefix = mediaPath(deckId, "");
+  const keep = keepMediaId ? mediaPath(deckId, keepMediaId) : null;
+  for (const [url, p] of [...cache]) {
+    if (!url.startsWith(prefix) || url === keep) continue;
+    cache.delete(url);
+    p.then((t) => t.dispose(), () => {});
+  }
+}
+
 /** Decodes deck `deckId`'s soundtrack once per URL for the page (module cache shared by the editor
  *  ruler, Deck settings and the Player). `load` is injectable for tests. The URL handed to `load`
  *  is the UNPREFIXED app path (`mediaPath`): `loadSoundtrack` applies the basePath itself. A failed

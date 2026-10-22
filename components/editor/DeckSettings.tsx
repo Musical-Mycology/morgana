@@ -6,6 +6,7 @@ import { Field } from "./Field";
 import type { Field as FieldSpec } from "@/lib/editor/registry";
 import { deckLayout } from "@/engine/authoring/deck-clock";
 import { formatClock, parseClock } from "@/lib/timing/clock-format";
+import { SoundtrackSettings } from "./SoundtrackSettings";
 import type { DeckDoc } from "@/engine/deck-doc";
 
 const FIELDS: FieldSpec[] = [
@@ -58,6 +59,7 @@ export function DeckSettings() {
         <Field key={f.key} spec={f} value={getPath(doc.meta, f.key)} onChange={(v) => updateMeta(f.key, v)} />
       ))}
       <TimingFields doc={doc} updateMeta={updateMeta} />
+      <SoundtrackSettings />
     </div>
   );
 }
