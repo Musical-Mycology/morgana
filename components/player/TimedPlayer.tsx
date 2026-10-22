@@ -7,8 +7,14 @@ import { flattenStory, resolveBeatArt, resolveEntryArt } from "@/engine/deck/fla
 import { deckLayout, locate, type Located } from "@/engine/authoring/deck-clock";
 import { formatClock } from "@/lib/timing/clock-format";
 import { TimeBar } from "@/components/timing/TimeBar";
+import { loadSoundtrack, type Soundtrack } from "@/lib/audio/soundtrack";
+import { useSoundtrack } from "@/lib/audio/use-soundtrack";
 
 const HUD_IDLE_MS = 2000;
+/** An audio clock that reads non-null but hasn't moved for this long (wall time) is treated as
+ *  stalled — e.g. AudioContext.resume() never succeeded because autoplay was blocked — and the
+ *  timer drives T instead. Must stay well above the ~170 ms a real context takes to start. */
+const AUDIO_STALL_MS = 500;
 
 /** One mounted BeatStage for the whole deck. Memoised on the beat so the per-frame clock
  *  re-render never re-renders the stage; only a beat change does. */
@@ -29,7 +35,7 @@ const Stage = memo(function Stage({ doc, flatIdx, transport }: { doc: DeckDoc; f
   );
 });
 
-export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: number }) {
+export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; initialT?: number; loadTrack?: (url: string) => Promise<Soundtrack> }) {
   const layout = useMemo(() => deckLayout(doc), [doc]);
   const target = doc.meta.timing?.targetSec;
   const transport = useRef<SlideTransport>(null);
@@ -42,6 +48,13 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
   const [hudPinned, setHudPinned] = useState(true); // H toggles; when false the HUD stays hidden
   const idle = useRef<number | null>(null);
   const playingRef = useRef(false);
+  const sound = useSoundtrack(doc.meta.id, doc.meta.soundtrack?.media, loadTrack ?? loadSoundtrack);
+  const track = sound.status === "ready" ? sound.track : null;
+  const trackRef = useRef<Soundtrack | null>(null);
+  const [muted, setMuted] = useState(false);
+  /** The rAF loop's view of the audio clock: its last reading, when (rAF time) it last changed,
+   *  and whether it is stalled (timer driving T). `lastT: null` = no reading since a (re)start. */
+  const audioClock = useRef<{ lastT: number | null; movedAt: number; stalled: boolean }>({ lastT: null, movedAt: 0, stalled: false });
 
   /** Move the deck clock to `to` and paint. A beat change re-renders <Stage>; the seek for the
    *  new beat happens in the layout effect below so the first painted frame is already at localT. */
@@ -55,10 +68,30 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
     setDisplayT(T.current);
   }, [layout]);
 
+  /** A seek: move T, and while playing restart the soundtrack there so sound and picture agree. */
+  const seekTo = useCallback((to: number) => {
+    apply(to);
+    if (playingRef.current && trackRef.current) {
+      trackRef.current.play(T.current);
+      audioClock.current.lastT = null; // the jump is ours, not the audio clock moving on its own
+    }
+  }, [apply]);
+
   /** Play/pause; at the very end it restarts from 0 (shared by Space and the HUD button). */
   const togglePlay = useCallback(() => {
-    if (T.current >= layout.total) { apply(0); setPlaying(true); } else setPlaying((p) => !p);
-  }, [apply, layout.total]);
+    if (T.current >= layout.total) { seekTo(0); setPlaying(true); } else setPlaying((p) => !p);
+  }, [seekTo, layout.total]);
+
+  useEffect(() => { trackRef.current = track; }, [track]);
+  useEffect(() => () => trackRef.current?.pause(), []);
+  useEffect(() => { track?.setMuted(muted); }, [track, muted]);
+  // The soundtrack's transport follows `playing` — which also lets a track that finishes
+  // decoding mid-play join at the current T.
+  useEffect(() => {
+    if (!track) return;
+    audioClock.current.lastT = null;
+    if (playing) track.play(T.current); else track.pause();
+  }, [playing, track]);
 
   // Children's layout effects (CinematicSlide's beat setup) run before this one, so the seek
   // lands on the freshly-mounted beat before the browser paints.
@@ -66,19 +99,43 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
     if (loc && loc.flatIdx != null) transport.current?.seek(locRef.current?.localT ?? loc.localT);
   }, [loc]);
 
-  // The one clock: a single rAF loop while playing.
+  // The one clock: a single rAF loop while playing. While the soundtrack plays, ITS clock is
+  // the deck clock; otherwise (no track, decode failed, past its end, stalled) the timer is.
   useEffect(() => {
     if (!playing) return;
     let last = performance.now();
+    audioClock.current = { lastT: null, movedAt: 0, stalled: false };
     let id = requestAnimationFrame(function step(now) {
       // The first frame's timestamp can predate the performance.now() read above; never let
       // that step the clock (and the stage) backwards on Play.
-      apply(T.current + Math.max(0, now - last) / 1000);
+      const timerT = T.current + Math.max(0, now - last) / 1000;
+      apply(audioDrivenT(now, timerT) ?? timerT);
       last = now;
       if (T.current >= layout.total) { setPlaying(false); return; }
       id = requestAnimationFrame(step);
     });
     return () => cancelAnimationFrame(id);
+
+    /** The audio clock's T for this frame, or null when the timer should drive. */
+    function audioDrivenT(now: number, timerT: number): number | null {
+      const tr = trackRef.current;
+      const a = tr?.now() ?? null;
+      const ac = audioClock.current;
+      if (a === null) { ac.lastT = null; return null; }
+      if (ac.lastT === null) { ac.lastT = a; ac.movedAt = now; } // first reading since a (re)start
+      else if (a !== ac.lastT) {
+        ac.lastT = a;
+        ac.movedAt = now;
+        if (ac.stalled) {
+          // It came alive while the timer was driving: restart it at the picture's T.
+          ac.stalled = false;
+          ac.lastT = null;
+          tr!.play(timerT);
+          return timerT;
+        }
+      } else if (now - ac.movedAt >= AUDIO_STALL_MS) ac.stalled = true;
+      return ac.stalled ? null : a;
+    }
   }, [playing, apply, layout.total]);
 
   // A hidden tab pauses rather than jumping ahead when it comes back.
@@ -101,16 +158,17 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
         // A focused button activates itself on Space (its click handler toggles) — toggling here
         // too would cancel it out.
         case " ": if (el?.tagName === "BUTTON") break; e.preventDefault(); togglePlay(); break;
-        case "ArrowRight": e.preventDefault(); apply(T.current + step); break;
-        case "ArrowLeft": e.preventDefault(); apply(T.current - step); break;
-        case "Home": e.preventDefault(); apply(0); break;
+        case "ArrowRight": e.preventDefault(); seekTo(T.current + step); break;
+        case "ArrowLeft": e.preventDefault(); seekTo(T.current - step); break;
+        case "Home": e.preventDefault(); seekTo(0); break;
         case "f": case "F": void document.documentElement.requestFullscreen?.(); break;
         case "h": case "H": setHudPinned((v) => !v); break;
+        case "m": case "M": setMuted((v) => !v); break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [apply, togglePlay]);
+  }, [seekTo, togglePlay]);
 
   // HUD: always visible while paused; fades 2s after the last pointer move while playing.
   const wake = () => {
@@ -146,9 +204,18 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
             {formatClock(displayT)} / {formatClock(target ?? layout.total, { tenths: false })}
           </span>
           <span className="play__scene" data-testid="play-scene">{sceneId}</span>
+          {sound.status === "loading" && <span className="play__audio" data-testid="play-audio-status">loading audio…</span>}
+          {sound.status === "error" && <span className="play__audio play__audio--err" data-testid="play-audio-status">Soundtrack unavailable — playing silent</span>}
+          {sound.status !== "none" && (
+            <button className="play__btn" data-testid="play-mute" aria-pressed={muted} aria-label={muted ? "Unmute" : "Mute"}
+              onMouseDown={(e) => e.preventDefault()} onClick={() => setMuted((v) => !v)}>{muted ? "🔇" : "🔊"}</button>
+          )}
           <div className="play__bar">
+            {/* Scrub and marker click pause first (the audio stops with them), then jump. */}
             <TimeBar layout={layout} sceneIds={doc.scenes.map((s) => s.id)} value={displayT} targetSec={target}
-              onScrub={(to) => { setPlaying(false); apply(to); }} testId="play-scrub" />
+              onScrub={(to) => { setPlaying(false); apply(to); }} testId="play-scrub"
+              peaks={track?.peaks} peaksDuration={track?.duration} markers={doc.meta.markers}
+              onMarkerClick={(t) => { setPlaying(false); apply(t); }} />
           </div>
         </div>
       )}
