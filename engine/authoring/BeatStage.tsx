@@ -24,7 +24,8 @@ export function BeatStage({
    *  (the timed Player). Default true. */
   autoplay?: boolean;
   /** Flattened entry nightlight for `beat`, supplied by a host that swaps `beat` on a mounted
-   *  stage. Re-applied on every beat change (including backward seeks). */
+   *  stage. Re-applied on every beat change (including backward seeks), and — host-driven only —
+   *  on a backward seek WITHIN the beat (via the runtime's resolveEntryNight). */
   entryNight?: number;
 }) {
   const art = useRef<ArtStageHandle>(null);
@@ -50,9 +51,10 @@ export function BeatStage({
       art, setNight,
       resolveEntry: () => entryLayers,
       resolveEnd: () => endLayers,
+      resolveEntryNight: () => entryNight,
       onGate: () => {}, onWaiting: () => {},
     }),
-    [entryLayers, endLayers],
+    [entryLayers, endLayers, entryNight],
   );
 
   // The one clock (design spec §7b Task 10): CinematicSlide is the sole thing that ever

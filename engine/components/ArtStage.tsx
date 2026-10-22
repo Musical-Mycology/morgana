@@ -8,7 +8,9 @@ import { isOverlay, type StoryAsset } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 
 export interface ArtStageHandle {
-  /** Cross-fade the visible stack to exactly `layers` (bottom→top) using `mode`. */
+  /** Cross-fade the visible stack to exactly `layers` (bottom→top) using `mode`. A no-op when
+   *  `layers` already equals the live stack (by value): re-showing the same stack must not
+   *  restart, or cut short, a crossfade that is still running into it. */
   show(layers: StoryAsset[], mode: ArtMode, durationMs?: number): void;
   /** Fold one transition onto the live stack (mid-timeline art ops). */
   apply(transition: ArtTransition, durationMs?: number): void;
@@ -21,6 +23,10 @@ const DUR: Record<ArtMode, number> = {
 };
 
 interface Props { nightlight: number; reduced?: boolean; transparentBg?: boolean }
+
+function sameStack(a: StoryAsset[], b: StoryAsset[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
 
 export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
   { nightlight, reduced, transparentBg }, ref
@@ -87,7 +93,13 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
   }
 
   useImperativeHandle(ref, () => ({
-    show: (layers, mode, durationMs) => render(layers, mode, durationMs),
+    show: (layers, mode, durationMs) => {
+      // A host-driven stage (the timed Player) issues its resolved entry stack on EVERY beat
+      // change; playing straight into a beat that merely inherits its art must leave the
+      // in-flight stack (and any crossfade into it) alone.
+      if (sameStack(layers, current.current)) return;
+      render(layers, mode, durationMs);
+    },
     apply: (transition, durationMs) => render(applyArt(current.current, transition), transition.mode, durationMs ?? transition.durationMs),
     snap: (layers) => render(layers, "cut"),
   }));
