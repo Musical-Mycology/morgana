@@ -11,11 +11,11 @@ export function formatClock(sec: number, opts: { tenths?: boolean } = {}): strin
   return `${m}:${rest.toFixed(1).padStart(4, "0")}`;
 }
 
-/** "m:ss[.f]" or plain seconds → seconds > 0; anything else (incl. 0) → null. */
-export function parseClock(text: string): number | null {
+/** "m:ss[.f]" or plain seconds → seconds > 0; anything else (incl. 0, unless `allowZero`) → null. */
+export function parseClock(text: string, opts: { allowZero?: boolean } = {}): number | null {
   const t = text.trim();
   const m = /^(?:(\d+):([0-5]\d(?:\.\d+)?)|(\d+(?:\.\d+)?))$/.exec(t);
   if (!m) return null;
   const v = m[3] !== undefined ? Number(m[3]) : Number(m[1]) * 60 + Number(m[2]);
-  return Number.isFinite(v) && v > 0 ? v : null;
+  return Number.isFinite(v) && (v > 0 || (opts.allowZero && v === 0)) ? v : null;
 }

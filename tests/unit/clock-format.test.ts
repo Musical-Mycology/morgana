@@ -17,3 +17,11 @@ test("parseClock", () => {
   expect(parseClock(" 0:15 ")).toBe(15);
   for (const bad of ["", "abc", "1:75", "-1", "1:2:3", "0", "0:00"]) expect(parseClock(bad)).toBeNull();
 });
+
+test("parseClock allowZero", () => {
+  expect(parseClock("0")).toBeNull();
+  expect(parseClock("0", { allowZero: true })).toBe(0);
+  expect(parseClock("0:00", { allowZero: true })).toBe(0);
+  expect(parseClock("0:40.2", { allowZero: true })).toBeCloseTo(40.2);
+  expect(parseClock("-1", { allowZero: true })).toBeNull();
+});

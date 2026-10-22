@@ -1,4 +1,4 @@
-import type { DeckDoc } from "@/engine/deck-doc";
+import type { DeckDoc, DeckMarker } from "@/engine/deck-doc";
 import type { Beat, Scene, Action } from "@/engine/deck/types";
 import { beatLocation } from "./flatten-beats";
 import { descriptorFor } from "./registry";
@@ -148,6 +148,39 @@ export function setSceneDuration(doc: DeckDoc, sceneIdx: number, seconds: number
     if (seconds === null) { const { durationSec: _drop, ...rest } = s; return rest; }
     return { ...s, durationSec: seconds };
   });
+}
+
+/** Replace the marker list; an empty list removes `meta.markers` (validation rejects null/absent-vs-empty drift). */
+function withMarkers(doc: DeckDoc, markers: DeckMarker[]): DeckDoc {
+  const meta = { ...doc.meta };
+  if (markers.length) meta.markers = markers; else delete meta.markers;
+  return { ...doc, meta };
+}
+
+/** Add a cue marker at deck time `t` (rounded to 10 ms). Label "marker N", id "mN", id unique. */
+export function addMarker(doc: DeckDoc, t: number): { doc: DeckDoc; id: string } {
+  const list = doc.meta.markers ?? [];
+  let n = list.length + 1;
+  while (list.some((m) => m.id === `m${n}`)) n++;
+  const id = `m${n}`;
+  return { id, doc: withMarkers(doc, [...list, { id, label: `marker ${n}`, t: Math.round(Math.max(0, t) * 100) / 100 }]) };
+}
+
+/** Rename and/or retime a marker. Unknown id or unchanged values → no-op (same reference). */
+export function updateMarker(doc: DeckDoc, id: string, patch: Partial<Pick<DeckMarker, "label" | "t">>): DeckDoc {
+  const list = doc.meta.markers ?? [];
+  const i = list.findIndex((m) => m.id === id);
+  if (i < 0) return doc;
+  const next = { ...list[i], ...patch };
+  if (next.label === list[i].label && next.t === list[i].t) return doc;
+  return withMarkers(doc, list.map((m, j) => (j === i ? next : m)));
+}
+
+/** Remove a marker (and `meta.markers` when the list empties). Unknown id → no-op. */
+export function deleteMarker(doc: DeckDoc, id: string): DeckDoc {
+  const list = doc.meta.markers ?? [];
+  if (!list.some((m) => m.id === id)) return doc;
+  return withMarkers(doc, list.filter((m) => m.id !== id));
 }
 
 /** Insert a new action of `kind` after `actionIdx` (append to the end when `null`). */

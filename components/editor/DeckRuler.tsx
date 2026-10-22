@@ -17,6 +17,7 @@ export function DeckRuler({ canvasRef, beatT, loadTrack }: { canvasRef: RefObjec
   const doc = useEditor((s) => s.doc);
   const selected = useEditor((s) => s.selected);
   const select = useEditor((s) => s.select);
+  const addMarker = useEditor((s) => s.addMarker);
   const layout = useMemo(() => (doc ? deckLayout(doc) : null), [doc]);
   const sound = useSoundtrack(doc?.meta.id ?? null, doc?.meta.soundtrack?.media, loadTrack ?? loadSoundtrack);
   if (!doc || !layout) return null;
@@ -42,6 +43,7 @@ export function DeckRuler({ canvasRef, beatT, loadTrack }: { canvasRef: RefObjec
           peaks={sound.status === "ready" ? sound.track.peaks : undefined} peaksDuration={sound.status === "ready" ? sound.track.duration : undefined}
           markers={doc.meta.markers} onMarkerClick={onScrub} />
       </div>
+      <button className="ed__pill ed__pill--ghost" data-testid="add-marker" onClick={() => addMarker(T)}>+ Marker</button>
       <PlayLink testId="play-from-here" href={`/play?deck=${doc.meta.id}&t=${T.toFixed(2)}`}>▶ Play from here</PlayLink>
     </div>
   );
