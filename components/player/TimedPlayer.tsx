@@ -41,6 +41,7 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
   const [hudVisible, setHudVisible] = useState(true);
   const [hudPinned, setHudPinned] = useState(true); // H toggles; when false the HUD stays hidden
   const idle = useRef<number | null>(null);
+  const playingRef = useRef(false);
 
   /** Move the deck clock to `to` and paint. A beat change re-renders <Stage>; the seek for the
    *  new beat happens in the layout effect below so the first painted frame is already at localT. */
@@ -49,10 +50,15 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
     const next = locate(layout, T.current);
     const prev = locRef.current;
     locRef.current = next;
-    if (next?.flatIdx !== prev?.flatIdx || next?.phase !== prev?.phase) setLoc(next);
+    if (next?.flatIdx !== prev?.flatIdx || next?.phase !== prev?.phase || next?.sceneIdx !== prev?.sceneIdx) setLoc(next);
     else if (next && next.flatIdx != null) transport.current?.seek(next.localT);
     setDisplayT(T.current);
   }, [layout]);
+
+  /** Play/pause; at the very end it restarts from 0 (shared by Space and the HUD button). */
+  const togglePlay = useCallback(() => {
+    if (T.current >= layout.total) { apply(0); setPlaying(true); } else setPlaying((p) => !p);
+  }, [apply, layout.total]);
 
   // Children's layout effects (CinematicSlide's beat setup) run before this one, so the seek
   // lands on the freshly-mounted beat before the browser paints.
@@ -86,7 +92,7 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
       const step = e.shiftKey ? 5 : 1;
       switch (e.key) {
-        case " ": e.preventDefault(); if (T.current >= layout.total) { apply(0); setPlaying(true); } else setPlaying((p) => !p); break;
+        case " ": e.preventDefault(); togglePlay(); break;
         case "ArrowRight": e.preventDefault(); apply(T.current + step); break;
         case "ArrowLeft": e.preventDefault(); apply(T.current - step); break;
         case "Home": e.preventDefault(); apply(0); break;
@@ -96,15 +102,21 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [apply, layout.total]);
+  }, [apply, togglePlay]);
 
   // HUD: always visible while paused; fades 2s after the last pointer move while playing.
   const wake = () => {
     setHudVisible(true);
     if (idle.current != null) clearTimeout(idle.current);
-    idle.current = window.setTimeout(() => setHudVisible(false), HUD_IDLE_MS);
+    idle.current = null;
+    if (playingRef.current) idle.current = window.setTimeout(() => setHudVisible(false), HUD_IDLE_MS);
   };
-  useEffect(() => { if (!playing) setHudVisible(true); else wake(); }, [playing]);
+  useEffect(() => {
+    playingRef.current = playing;
+    if (!playing && idle.current != null) { clearTimeout(idle.current); idle.current = null; }
+    if (!playing) setHudVisible(true); else wake();
+  }, [playing]);
+  useEffect(() => () => { if (idle.current != null) clearTimeout(idle.current); }, []);
 
   if (layout.total <= 0) {
     return <div className="play play--empty" data-testid="play-empty">Nothing to play — add beats or pin a scene length.</div>;
@@ -119,7 +131,7 @@ export function TimedPlayer({ doc, initialT = 0 }: { doc: DeckDoc; initialT?: nu
       </div>
       {hudPinned && (
         <div className={`play__hud${hudVisible ? "" : " play__hud--hidden"}`} data-testid="play-hud">
-          <button className="play__btn" onClick={() => setPlaying((p) => !p)} aria-label={playing ? "Pause" : "Play"}>{playing ? "❚❚" : "▶"}</button>
+          <button className="play__btn" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>{playing ? "❚❚" : "▶"}</button>
           <span className="play__clock" data-testid="play-clock" data-over={over ? "true" : undefined}>
             {formatClock(displayT)} / {formatClock(target ?? layout.total, { tenths: false })}
           </span>

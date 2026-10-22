@@ -1,9 +1,9 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TimedPlayer } from "@/components/player/TimedPlayer";
 import type { DeckDoc } from "@/engine/deck-doc";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 /** Opacity of the stage's text line — 0 until the beat has been seeked past its fade-in, so it
  *  distinguishes "painted at the seeked localT" from "mounted blank at t=0". */
@@ -63,4 +63,44 @@ test("untimed decks show elapsed / total", () => {
 test("a deck with nothing to play shows the empty message", () => {
   render(<TimedPlayer doc={{ ...doc, scenes: [{ id: "gap", beats: [] }] }} />);
   expect(screen.getByTestId("play-empty").textContent).toContain("Nothing to play");
+});
+
+const hudHidden = () => screen.getByTestId("play-hud").classList.contains("play__hud--hidden");
+
+test("while paused the HUD never auto-hides, even after pointer movement", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const { container } = render(<TimedPlayer doc={doc} initialT={5} />);
+  act(() => { fireEvent.pointerMove(container.firstElementChild!); });
+  act(() => { vi.advanceTimersByTime(5000); });
+  expect(hudHidden()).toBe(false);
+});
+
+test("pausing within the idle window cancels the pending hide", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const { container } = render(<TimedPlayer doc={doc} initialT={0} />);
+  act(() => { fireEvent.keyDown(window, { key: " " }); }); // play
+  act(() => { fireEvent.pointerMove(container.firstElementChild!); });
+  act(() => { fireEvent.keyDown(window, { key: " " }); }); // pause before the timer fires
+  act(() => { vi.advanceTimersByTime(5000); });
+  expect(hudHidden()).toBe(false);
+});
+
+test("the scene label follows the clock across adjacent empty pinned scenes", () => {
+  const gaps: DeckDoc = { ...doc, meta: { id: "p", title: "P" }, scenes: [
+    { id: "gap1", durationSec: 2, beats: [] },
+    { id: "gap2", durationSec: 2, beats: [] },
+    doc.scenes[0],
+  ] };
+  render(<TimedPlayer doc={gaps} initialT={1.5} />);
+  expect(screen.getByTestId("play-scene").textContent).toBe("gap1");
+  act(() => { fireEvent.keyDown(window, { key: "ArrowRight" }); });
+  expect(screen.getByTestId("play-scene").textContent).toBe("gap2");
+});
+
+test("the play button restarts from 0 when the deck has finished", () => {
+  render(<TimedPlayer doc={doc} initialT={100} />);
+  expect(screen.getByTestId("play-clock").textContent).toBe("0:11.8 / 0:12");
+  act(() => { fireEvent.click(screen.getByRole("button", { name: "Play" })); });
+  expect(screen.getByTestId("play-clock").textContent).toBe("0:00.0 / 0:12");
+  expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
 });
