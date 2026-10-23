@@ -48,7 +48,9 @@ test("unknown deck shows the load error", async ({ page }) => {
 });
 
 test.describe("clips", () => {
-  const clipId = "e2e-play-clip";
+  // Per-worker deck id: parallel workers (--repeat-each) must not share a deck.
+  let clipId = "";
+  test.beforeEach(({}, info) => { clipId = `e2e-play-clip-${info.parallelIndex}`; });
   test.afterEach(async ({ request }) => { await request.delete(`/api/decks/${clipId}`); });
 
   test("clip follows the deck clock: deep-link, play, scrub back", async ({ page, request }) => {
@@ -76,8 +78,7 @@ test.describe("clips", () => {
     // Playing: the clip advances with the deck clock.
     const before = await clipTime();
     await page.keyboard.press(" ");
-    await page.waitForTimeout(1000);
-    expect((await clipTime()) - before).toBeGreaterThan(0.5);
+    await expect.poll(clipTime, { timeout: 3000 }).toBeGreaterThan(before + 0.5);
     await page.keyboard.press(" "); // pause, so the scrub target holds
 
     // Scrub back to 0.3 s: the paused clip seeks exactly there.

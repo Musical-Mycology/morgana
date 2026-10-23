@@ -133,8 +133,6 @@ describe("seek mode", () => {
     syncVideo(f.el, () => 2, "seek");
     expect(f.writes).toEqual([]);
     const p = pendingVideoSeeks();
-    f.fireFrame(); // a frame callback before loadeddata does not count
-    expect(f.writes).toEqual([]);
     f.s.readyState = 2;
     f.el.dispatchEvent(new Event("loadeddata"));
     expect(f.writes).toEqual([]);
@@ -176,6 +174,47 @@ describe("seek mode", () => {
     f.fireFrame();
     vi.useRealTimers();
     expect(await pendingVideoSeeks()).toEqual([]);
+  });
+
+  test("releaseVideo during preroll: the orphaned frame callback neither seeks nor arms a timer", async () => {
+    vi.useFakeTimers();
+    const f = fake({ readyState: 1 });
+    syncVideo(f.el, () => 2, "seek");
+    f.s.readyState = 2;
+    f.el.dispatchEvent(new Event("loadeddata")); // preroll: an rVFC is registered
+    releaseVideo(f.el);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+    f.fireFrame(); // the orphaned preroll callback
+    expect(f.writes).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("an element that has loaded data is not fresh again when readyState later drops to 1: seeks at once", async () => {
+    const f = fake({ readyState: 2 });
+    syncVideo(f.el, () => 2, "seek");
+    const p1 = pendingVideoSeeks();
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    expect(await p1).toEqual([]);
+    f.s.readyState = 1; // e.g. mid-pipeline after a far seek; no loadeddata will come
+    syncVideo(f.el, () => 3, "seek");
+    expect(f.writes).toEqual([2, 3]);
+    const p2 = pendingVideoSeeks();
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    expect(await p2).toEqual([]);
+  });
+
+  test("a fresh element that fired loadeddata is remembered as loaded for later seeks", async () => {
+    const f = fake({ readyState: 1 });
+    syncVideo(f.el, () => 0, "seek"); // target = first frame: resolves on loadeddata
+    f.s.readyState = 2;
+    f.el.dispatchEvent(new Event("loadeddata"));
+    expect(await pendingVideoSeeks()).toEqual([]);
+    f.s.readyState = 1;
+    syncVideo(f.el, () => 1, "seek");
+    expect(f.writes).toEqual([1]);
   });
 
   test("already at target but only metadata (readyState 1): waits for loadeddata", async () => {

@@ -120,18 +120,22 @@ test.describe("clips", () => {
     await request.delete(`/api/decks/${clipsId}`).catch(() => {});
     await request.post("/api/decks", { data: { id: clipsId, title: "Render clips" } });
   });
-  test.afterEach(async ({ request }) => { await request.delete(`/api/decks/${clipsId}`); });
+  test.afterEach(async ({ request }) => {
+    await request.delete(`/api/decks/${clipsId}`);
+    await request.delete(`/api/decks/${clipsId}-noart`).catch(() => {});
+  });
 
   test("clips are deterministic: stepped and jumped frames are byte-equal, across a clip crossfade, a tile loop and a backward jump", async ({ page, request }) => {
     const h264 = await upload(request, clipsId, "clip-h264.mp4", "video/mp4");
     const vp9 = await upload(request, clipsId, "clip-vp9.webm", "video/webm");
     // Beat a (0-2 s): the h264 clip from its 0.5 s in-point. Beat b (2-5 s): crossfade to the vp9 clip
     // (2.0-2.9 s) and a looping h264 tile from ~2 s, so by 4.6 the 2 s tile clip has wrapped.
+    const beatB = { id: "b", art: { to: vp9, mode: "crossfade" }, timeline: [
+      { kind: "media", id: "tile", pos: { x: 0.6, y: 0.2 }, width: 0.3, src: h264, clip: { loop: true } }, { kind: "wait", ms: 3000 },
+    ] };
     const clipDoc = { version: 1, meta: { id: clipsId, title: "Render clips" }, scenes: [{ id: "s0", beats: [
       { id: "a", art: { to: h264, mode: "crossfade", clips: { [h264]: { in: 0.5 } } }, timeline: [{ kind: "wait", ms: 2000 }] },
-      { id: "b", art: { to: vp9, mode: "crossfade" }, timeline: [
-        { kind: "media", id: "tile", pos: { x: 0.6, y: 0.2 }, width: 0.3, src: h264, clip: { loop: true } }, { kind: "wait", ms: 3000 },
-      ] },
+      beatB,
     ] }] };
     expect((await request.put(`/api/decks/${clipsId}`, { data: clipDoc })).status()).toBe(200);
 
@@ -160,7 +164,15 @@ test.describe("clips", () => {
     const failed: string[] = [];
     const step = async (ts: number[]) => { for (const t of ts) failed.push(...await frame(t)); };
 
-    await step([0, 0.3, 0.6, 0.9, 1.2]);
+    // Two stage corners: covered by the full-stage art layer but outside the radial .artstage__glow.
+    // (An extra composited layer can shift the glow gradient's dithering by 1-2 levels, so the
+    // invisibility check compares only where the art alone would contribute.)
+    const corners = [{ x: 0, y: 0, width: 140, height: 80 }, { x: 540, y: 310, width: 100, height: 50 }];
+    const shootCorners = () => Promise.all(corners.map((clip) => page.screenshot({ clip })));
+    await step([0]);
+    const stepZero = await capture(); // the h264 art at its fade-in start: clamped to MIN_VIDEO_OPACITY
+    const zeroCorners = await shootCorners();
+    await step([0.3, 0.6, 0.9, 1.2]);
     const stepA = await capture();
     await step([1.5, 1.8, 2.1, 2.3]);
     const stepCross = await capture();
@@ -173,9 +185,11 @@ test.describe("clips", () => {
     expect(Math.abs(timeOf(stepA.dom, h264)! - (0.5 + 1.2))).toBeLessThanOrEqual(1e-3);
     expect(stepCross.dom.layers.map((l) => l[0]).sort()).toEqual([h264, vp9].sort());
     expect(stepCross.dom.videos.map((v) => v[0])).toContain(`tile:${h264}`);
+    // Beat a is exactly its 2 s wait, so the tile (beat b's first action) enters at T=2.0 with in 0:
+    // at T=4.6 it has been on screen 2.6 s; the 2 s clip loops, so its clip time is 2.6 mod 2 = 0.6
+    // (a clip held at its end would read ~2).
     const tileT = timeOf(stepLoop.dom, `tile:${h264}`)!;
-    expect(tileT).toBeGreaterThanOrEqual(0);
-    expect(tileT).toBeLessThan(2); // 2.6 s on screen, a 2 s clip: it wrapped
+    expect(Math.abs(tileT - 0.6)).toBeLessThanOrEqual(1e-3);
 
     // Jump forward from the start to mid-crossfade, and to the wrapped tile.
     await frame(0);
@@ -195,6 +209,28 @@ test.describe("clips", () => {
     const jumpBack = await capture();
     expect(jumpBack.dom).toEqual(stepA.dom);
     expect(jumpBack.png.equals(stepA.png)).toBe(true);
+
+    // The 1/1024 opacity floor is invisible: at T=0 the clamped h264 layer's corners are byte-equal to
+    // T=0 of an otherwise identical deck without beat a's art. Media ids are content hashes, so the refs match.
+    expect(stepZero.dom.layers.map((l) => l[0])).toEqual([h264]);
+    expect(Number(stepZero.dom.layers[0][1])).toBeCloseTo(1 / 1024, 6); // the style serialises to 9 digits
+    const noArt = `${clipsId}-noart`;
+    await request.delete(`/api/decks/${noArt}`).catch(() => {});
+    await request.post("/api/decks", { data: { id: noArt, title: "Render clips" } });
+    expect(await upload(request, noArt, "clip-h264.mp4", "video/mp4")).toBe(h264);
+    expect(await upload(request, noArt, "clip-vp9.webm", "video/webm")).toBe(vp9);
+    const noArtDoc = { version: 1, meta: { id: noArt, title: "Render clips" }, scenes: [{ id: "s0", beats: [
+      { id: "a", timeline: [{ kind: "wait", ms: 2000 }] },
+      beatB,
+    ] }] };
+    expect((await request.put(`/api/decks/${noArt}`, { data: noArtDoc })).status()).toBe(200);
+    await page.goto(`/render?deck=${noArt}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+    await frame(0);
+    const bare = await capture();
+    expect(bare.dom.layers).toEqual([]);
+    const bareCorners = await shootCorners();
+    bareCorners.forEach((png, i) => expect(png.equals(zeroCorners[i]), `corner ${i}`).toBe(true));
   });
 
   test("a clip whose media is missing is reported failed and the frame does not hang", async ({ page, request }) => {
@@ -219,7 +255,7 @@ test.describe("clips", () => {
     });
     expect(res.failed, "renderFrame(0.5) did not resolve within 10 s").not.toBeNull();
     expect(res.src).toMatch(/\/media\/0000000000000000\.mp4$/);
-    expect(res.failed).toContain(res.src);
+    expect(res.failed!.filter((s) => s === res.src)).toHaveLength(1); // reported exactly once
     expect(res.ms).toBeLessThan(10_000);
   });
 });

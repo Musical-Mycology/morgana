@@ -31,6 +31,14 @@ interface SeekRec {
 
 const pending = new Set<Promise<void>>();
 const records = new WeakMap<HTMLVideoElement, SeekRec>();
+/** The src each element has decoded a frame of (loadeddata seen, or readyState >= 2 observed).
+ *  readyState can later dip back to 1 (mid-pipeline), so it alone cannot tell a fresh element. */
+const loadedSrc = new WeakMap<HTMLVideoElement, string>();
+const srcOf = (el: HTMLVideoElement) => el.currentSrc || el.src;
+function hasLoaded(el: HTMLVideoElement): boolean {
+  if (el.readyState >= 2) loadedSrc.set(el, srcOf(el));
+  return loadedSrc.get(el) === srcOf(el);
+}
 const failed: string[] = [];
 
 export function createClipVideo(src: string): HTMLVideoElement {
@@ -44,7 +52,7 @@ export function createClipVideo(src: string): HTMLVideoElement {
 }
 
 function recordFailure(el: HTMLVideoElement): void {
-  const s = el.currentSrc || el.src;
+  const s = srcOf(el);
   if (!failed.includes(s)) failed.push(s);
 }
 
@@ -61,6 +69,7 @@ function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, ex
     return;
   }
   const ready = el.readyState >= 1;
+  hasLoaded(el); // remember a decoded frame seen now, for later syncs
   if (ready) {
     const t = clipT(el.duration);
     // already there AND a frame is decoded: nothing to wait for
@@ -108,6 +117,7 @@ function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, ex
     },
     /** Write the latest target if it differs. Returns true when a write happened. */
     apply: () => {
+      if (settled) return false; // a finished record never seeks or arms a watchdog again
       const t = rec.clipT(el.duration);
       if (Math.abs(el.currentTime - t) <= SEEK_EPS) return false;
       // state first: the write may dispatch `seeked` synchronously
@@ -124,18 +134,19 @@ function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, ex
     // A fresh element (no decoded frame yet) is not seeked until its first frame has been decoded
     // and presented: a seek issued now races that preroll frame, and Chromium can then leave the
     // preroll frame on screen even though rVFC reports the seeked one (a one-frame stale render).
-    if (el.readyState < 2 && !el.seeking) { rec.stage = "loading"; return; }
+    if (!hasLoaded(el) && !el.seeking) { rec.stage = "loading"; return; }
     if (rec.apply()) return;
     if (el.seeking) rec.stage = "seeking";
     else rec.finish();
   }
   function onLoaded() {
+    loadedSrc.set(el, srcOf(el));
     if (rec.stage !== "loading") return;
     if (Math.abs(el.currentTime - rec.clipT(el.duration)) <= SEEK_EPS) { rec.finish(); return; } // the first frame is the target
     rec.stage = "preroll";
     const g = rec.gen;
     const landed = () => {
-      if (rec.gen !== g || rec.stage !== "preroll") return;
+      if (settled || rec.gen !== g || rec.stage !== "preroll") return;
       clearPresent();
       if (!rec.apply()) rec.finish();
     };
