@@ -44,9 +44,10 @@ export default defineConfig({
       env: { ...process.env, MORGANA_DATA_DIR: dataDir("library") },
     },
   ],
+  // The library regexes are anchored to the file name so e.g. media-library.spec.ts stays on `default`.
   projects: [
-    { name: "default", testIgnore: /library\.spec\.ts/, use: { baseURL: "http://localhost:3000" } },
+    { name: "default", testIgnore: /(^|[\\/])library\.spec\.ts$/, use: { baseURL: "http://localhost:3000" } },
     { name: "standalone", testMatch: /editor\.spec\.ts/, use: { baseURL: "http://localhost:3100" } },
-    { name: "library", testMatch: /library\.spec\.ts/, use: { baseURL: "http://localhost:3200" } },
+    { name: "library", testMatch: /(^|[\\/])library\.spec\.ts$/, use: { baseURL: "http://localhost:3200" } },
   ],
 });

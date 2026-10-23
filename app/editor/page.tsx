@@ -183,7 +183,7 @@ export default function Editor() {
         </DeckAssetsProvider>
       </div>
       <Timeline canvasRef={canvasRef} time={time} />
-      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <Inspector />}
+      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <DeckAssetsProvider deckId={deckId}><Inspector /></DeckAssetsProvider>}
     </div>
     </DeckMediaContext.Provider>
     </FlushSaveContext.Provider>
