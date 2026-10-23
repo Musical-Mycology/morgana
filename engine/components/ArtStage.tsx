@@ -6,6 +6,7 @@ import type { ArtMode, ArtTransition } from "@/engine/deck/types";
 import { applyArt } from "@/engine/deck/flatten";
 import { isOverlay, type StoryAsset } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
+import { ART_DURATION_MS } from "@/engine/authoring/art-clock";
 
 export interface ArtStageHandle {
   /** Cross-fade the visible stack to exactly `layers` (bottom→top) using `mode`. A no-op when
@@ -17,10 +18,6 @@ export interface ArtStageHandle {
   /** Snap instantly (reduced motion / jump nav / PDF). */
   snap(layers: StoryAsset[]): void;
 }
-
-const DUR: Record<ArtMode, number> = {
-  cut: 0, fade: 700, crossfade: 900, morph: 800, dissolve: 1100,
-};
 
 interface Props { nightlight: number; reduced?: boolean; transparentBg?: boolean }
 
@@ -41,7 +38,7 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
   function render(targets: StoryAsset[], mode: ArtMode, durationMs?: number) {
     const host = root.current;
     if (!host) return;
-    const d = (durationMs ?? DUR[mode]) / 1000;
+    const d = (durationMs ?? ART_DURATION_MS[mode]) / 1000;
     const existing = Array.from(host.querySelectorAll<HTMLImageElement>(".artstage__layer"));
     const kept: HTMLImageElement[] = [];
     const added: HTMLImageElement[] = [];
