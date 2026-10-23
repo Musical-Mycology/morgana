@@ -8,6 +8,7 @@ import { flattenStory } from "@/engine/deck/flatten";
 import { deckLayout, locate, type DeckLayout, type Located } from "@/engine/authoring/deck-clock";
 import { artAt, artEvents, nightAt, nightEvents } from "@/engine/authoring/art-clock";
 import type { ClipMode } from "@/engine/components/video-sync";
+import type { Framing } from "@/engine/deck/types";
 
 /** The imperative face of a deck stage (the render page drives frames through it). */
 export interface DeckStageHandle { apply(T: number): void; total: number; current(): number }
@@ -24,7 +25,7 @@ function beatClipClock(layout: DeckLayout, loc: Located, T: number): number {
 /** One mounted BeatStage for the whole deck. Memoised on the beat so the per-frame clock
  *  re-render never re-renders the stage; only a beat change does. Its own ArtStage is not
  *  mounted (`art={false}`): the deck stage owns the one ArtStage. */
-const Stage = memo(function Stage({ doc, flatIdx, transport, clipModeRef }: { doc: DeckDoc; flatIdx: number; transport: React.RefObject<SlideTransport | null>; clipModeRef: React.RefObject<ClipMode> }) {
+const Stage = memo(function Stage({ doc, flatIdx, transport, clipModeRef, cameraRef }: { doc: DeckDoc; flatIdx: number; transport: React.RefObject<SlideTransport | null>; clipModeRef: React.RefObject<ClipMode>; cameraRef?: React.RefObject<Framing> }) {
   const slides = useMemo(() => flattenStory(doc.scenes), [doc]);
   const slide = slides[flatIdx];
   if (!slide || slide.layout !== "cinematic") return null;
@@ -33,7 +34,7 @@ const Stage = memo(function Stage({ doc, flatIdx, transport, clipModeRef }: { do
   return (
     <BeatStage
       sceneId={slide.slots.sceneId} beat={slide.slots.beat} scene={scene} beatIndex={beatIndex}
-      chrome={doc.meta.chrome} autoplay={false} art={false} transport={transport} clipModeRef={clipModeRef} contained
+      chrome={doc.meta.chrome} autoplay={false} art={false} transport={transport} clipModeRef={clipModeRef} cameraRef={cameraRef} contained
     />
   );
 });

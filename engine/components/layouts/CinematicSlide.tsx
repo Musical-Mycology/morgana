@@ -3,7 +3,7 @@
 import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import type { ArtAsset, ArtMode, ArtTransition, CinematicSlideSlots, Action, ClipOpts, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
+import type { ArtAsset, ArtMode, ArtTransition, CinematicSlideSlots, Action, ClipOpts, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec, Framing } from "@/engine/deck/types";
 import type { DeckChrome } from "@/engine/deck-doc";
 import { isMediaRef, isVideoRef, type MediaRef } from "@/engine/deck/media-ref";
 import { clipTimeAt } from "@/engine/deck/clip-clock";
@@ -19,6 +19,7 @@ import {
   letterFly, letterUp, wordUp, blurIn, typewriter,
 } from "../effects/cinematic-anim";
 import { foldAt, rebuildBoundary, beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
+import { cameraAt, cameraTransform, FULL_FRAME, type CameraEvent } from "@/engine/authoring/camera-clock";
 
 /**
  * Position a text box at `pos` per its align. Right boxes anchor their RIGHT edge (via the
@@ -113,9 +114,25 @@ interface Props {
   /** The host's clip mode for this beat's video tiles, read at paint time (a ref, so a mode
    *  change never re-renders the slide). Undefined = autoplay: "play". Consumed by media tiles. */
   clipModeRef?: React.RefObject<ClipMode>;
+  /** Host-driven camera: the framing at the deck time being painted, read at paint time (a ref,
+   *  so a framing change never re-renders the slide). Painted on `.cin__world` (the media tiles);
+   *  the text stage never moves. Wins over `camera`. */
+  cameraRef?: React.RefObject<Framing>;
+  /** Autoplay camera (no deck clock): the deck's camera events and this beat's deck start, so
+   *  the framing at beat-local `t` is `cameraAt(events, beatStart + t)`. Ignored when
+   *  `cameraRef` is set; with neither, the world stays at FULL_FRAME. */
+  camera?: BeatCamera;
 }
 
-export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true, clipModeRef }: Props) {
+/** A beat's view of the deck camera for autoplay: the deck's events and the beat's deck start. */
+export interface BeatCamera { events: CameraEvent[]; beatStart: number }
+
+/** The framing to paint at beat-local `t`: the host's ref when given, else the autoplay events. */
+export function beatFraming(t: number, cameraRef?: React.RefObject<Framing>, camera?: BeatCamera): Framing {
+  return cameraRef?.current ?? (camera ? cameraAt(camera.events, camera.beatStart + t) : FULL_FRAME);
+}
+
+export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true, clipModeRef, cameraRef, camera }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
   // The single gsap.ticker listener currently driving playback, or null when paused. play()
@@ -179,6 +196,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // as done yet) left stuck past where it should have re-armed.
   const lastDestructive = useRef(-1);
   const lastT = useRef(0);
+  // The camera's world layer (media tiles) and the last transform written to it ("none" = the
+  // initial, untransformed full frame, so a deck with no camera never writes it at all).
+  const world = useRef<HTMLDivElement>(null);
+  const lastCamera = useRef("none");
   const [againRevealed, setAgainRevealed] = useState(false);
 
   useGSAP(() => {
@@ -374,9 +395,16 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     currentLine.current = null;
   }
 
-  /** The 16:9 stage element that free-positioned overlays (line-boxes, counter, media) attach to. */
+  /** The 16:9 stage element that free-positioned text overlays (line-boxes, counter) attach to.
+   *  It never takes the camera. */
   function stageParent(): HTMLElement | null {
     return scope.current?.querySelector<HTMLElement>(".cin__stage") ?? scope.current;
+  }
+
+  /** The 16:9 world layer media tiles attach to: it takes the camera transform and sits beneath
+   *  the text stage. */
+  function worldParent(): HTMLElement | null {
+    return world.current ?? scope.current;
   }
 
   /** Build the counter's DOM at rest (opacity 1, no offset) — no entrance animation here;
@@ -577,7 +605,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       if (!el) {
         if (!a) continue; // no show action reached yet for this id (shouldn't happen: mediaStateAt only emits ids it has seen)
         el = makeMediaEl(a);
-        stageParent()?.appendChild(el);
+        worldParent()?.appendChild(el);
         mediaTiles.current.set(id, el);
       }
       el.style.left = `${s.x * 100}%`;
@@ -892,6 +920,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     else gsap.set([host, ...lineBoxes.current], { opacity: 1 - fadeOutP });
     paintCounter(counter, counterValueP, counterEntranceP, counterHideP);
     paintMedia(mediaFold, mediaStateAt(mediaFold, t), clipT);
+    paintCamera(t);
     setAgainRevealed(revealAgain);
     lastT.current = t;
     // The one clock (design spec §7b Task 10, ambiguity res. #1): every renderAt call notifies
@@ -899,6 +928,16 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // objects) off THIS callback — instead of a second ticker of its own — stays in lockstep,
     // including pausing exactly when playback pauses at a click_gate.
     onTime?.(t);
+  }
+
+  /** Paint the camera on the world layer at beat-local `t` — only when the transform changes. */
+  function paintCamera(t: number) {
+    const w = world.current;
+    if (!w) return;
+    const next = cameraTransform(beatFraming(t, cameraRef, camera));
+    if (next === lastCamera.current) return;
+    lastCamera.current = next;
+    w.style.transform = next;
   }
 
   // --- SlideTransport: one time axis + gate boundaries, replacing the old per-segment GSAP
@@ -978,6 +1017,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
 
   return (
     <div className={`cin${slots.sceneId === "intro" ? " cin--intro" : ""}`} ref={scope}>
+      {/* The camera's world (media tiles): before the text stage and at a lower z-index, so text
+          always paints above it and never moves. */}
+      <div className="cin__world" ref={world} />
       <div className="cin__stage">
         {slots.sceneId === "intro" && chrome?.splash && (
           <div className="cin__splash">
@@ -1007,6 +1049,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         /* A fixed 16:9 box matching the letterboxed art rect — the slide canvas that
            text positions (and note anchors) are normalized against. */
         .cin__stage { position: absolute; inset: 0; margin: auto; z-index: 2; pointer-events: none;
+          width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16)); }
+        /* The camera's world: the same 16:9 box as .cin__stage (tile positions are normalized
+           against it), beneath the text. It takes the camera transform about its top-left. */
+        .cin__world { position: absolute; inset: 0; margin: auto; z-index: 1; pointer-events: none; transform-origin: 0 0;
           width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16)); }
         .cin__text { position: absolute; max-width: 90%; text-align: left; color: var(--color-mm-cream); text-shadow: 0 2px 14px rgba(0,0,0,0.6); }
         /* Intro is bright day — dark ink for legibility on the light ground. */

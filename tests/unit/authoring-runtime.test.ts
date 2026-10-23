@@ -28,7 +28,7 @@ test("the authoring runtime still carries the art / gate / nav surface", () => {
 
 test("runtime.art forwards the entry transition's clip options to ArtStage.show", () => {
   const calls: unknown[][] = [];
-  const art = { current: { show: (...a: unknown[]) => calls.push(a), apply: () => {}, snap: () => {}, renderState: () => {} } as ArtStageHandle };
+  const art = { current: { show: (...a: unknown[]) => calls.push(a), apply: () => {}, snap: () => {}, renderState: () => {}, setCamera: () => {} } as ArtStageHandle };
   const rt = makeAuthoringRuntime({ art, setNight: () => {}, resolveEntry: () => [], resolveEnd: () => [], onGate: () => {}, onWaiting: () => {} });
   rt.art(["media:a.mp4"], "fade", 500, { "media:a.mp4": { in: 1 } });
   expect(calls).toEqual([[["media:a.mp4"], "fade", 500, { "media:a.mp4": { in: 1 } }]]);

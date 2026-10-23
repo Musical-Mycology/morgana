@@ -32,6 +32,10 @@ export interface ArtStageHandle {
    *  the same whether reached by stepping or jumping. Video layers are synced to their clip time
    *  at deck time `T` (seconds, default 0) in clip `mode` (default "seek"). */
   renderState(layers: ArtLayerState[], night: number, T?: number, mode?: ClipMode): void;
+  /** Paint the camera: `transform` (a camera-clock `cameraTransform` string) on the
+   *  `.artstage__world` that holds the art layers. The glow and nightlight filter stay on the
+   *  fixed root. Writes only when the string changes. */
+  setCamera(transform: string): void;
 }
 
 interface Props {
@@ -92,6 +96,10 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
   const assetsRef = useRef(assets);
   assetsRef.current = assets;
   const root = useRef<HTMLDivElement>(null);
+  // The camera's world layer: every art layer lives here; the glow stays on the fixed root.
+  const world = useRef<HTMLDivElement>(null);
+  // Last transform written to the world ("none" = the initial, untransformed full frame).
+  const lastCamera = useRef("none");
   const current = useRef<ArtAsset[]>([]);
 
   /** One layer element for `asset`: a clip <video> for a video ref, an <img> for an uploaded
@@ -123,7 +131,7 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
    *  `clipPlayback` off) parks every video layer, kept ones included, paused on its in-point, so
    *  the editor shows an edited in-point at once. */
   function render(targets: ArtAsset[], mode: ArtMode, durationMs?: number, clips?: ArtClips, play = true) {
-    const host = root.current;
+    const host = world.current;
     if (!host) return;
     const playing = play && clipPlayback;
     const d = (durationMs ?? ART_DURATION_MS[mode]) / 1000;
@@ -194,7 +202,7 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
   // root really left the document: StrictMode's simulated unmount keeps the DOM (and the layers
   // a host painted imperatively), so disposing there would strand an emptied stage in dev.
   useEffect(() => {
-    const host = root.current;
+    const host = world.current;
     return () => {
       if (!host || host.isConnected) return;
       host.querySelectorAll<HTMLElement>(".artstage__layer").forEach(dispose);
@@ -203,7 +211,7 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
 
   /** Park the on-stage video layers of `layers` on their in-points (clips), paused. */
   function holdStack(layers: ArtAsset[], clips?: ArtClips) {
-    const host = root.current;
+    const host = world.current;
     if (!host) return;
     host.querySelectorAll<HTMLVideoElement>("video.artstage__layer").forEach((v) => {
       const asset = v.dataset.asset as ArtAsset;
@@ -227,8 +235,9 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
     snap: (layers, clips) => render(layers, "cut", undefined, clips, false),
     renderState: (layers, night, T = 0, mode = "seek") => {
       const host = root.current;
-      if (!host) return;
-      const existing = Array.from(host.querySelectorAll<HTMLElement>(".artstage__layer"));
+      const layerHost = world.current;
+      if (!host || !layerHost) return;
+      const existing = Array.from(layerHost.querySelectorAll<HTMLElement>(".artstage__layer"));
       const used = new Set<HTMLElement>();
       const els = layers.map((l) => {
         let el = existing.find((e) => e.dataset.asset === l.asset && !used.has(e));
@@ -248,10 +257,10 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
       existing.filter((e) => !used.has(e)).forEach(dispose);
       // DOM order = array order (z breaks nothing). Only the layers from the first out-of-place one
       // on are (re)appended: moving a <video> every paint is needless DOM churn for a stable stack.
-      const inDom = Array.from(host.querySelectorAll<HTMLElement>(".artstage__layer"));
+      const inDom = Array.from(layerHost.querySelectorAll<HTMLElement>(".artstage__layer"));
       let same = 0;
       while (same < els.length && inDom[same] === els[same]) same++;
-      for (let i = same; i < els.length; i++) host.appendChild(els[i]);
+      for (let i = same; i < els.length; i++) layerHost.appendChild(els[i]);
       // Clip time is a pure function of deck time: the layer's entry (`since`) and clip options.
       layers.forEach((l, i) => {
         const v = asVideo(els[i]);
@@ -263,6 +272,12 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
       const glow = host.querySelector<HTMLElement>(".artstage__glow");
       if (glow) { glow.style.transition = "none"; glow.style.opacity = String(0.15 + 0.45 * g); }
     },
+    setCamera: (transform) => {
+      const w = world.current;
+      if (!w || transform === lastCamera.current) return;
+      lastCamera.current = transform;
+      w.style.transform = transform;
+    },
   }));
 
   // nightlight: warm glow rises with night; subtle saturation lift on the art.
@@ -272,6 +287,10 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
          style={{ filter: `saturate(${0.85 + 0.3 * glow}) brightness(${0.9 + 0.15 * glow})`,
                   ...(transparentBg ? { background: "transparent" } : null) }}>
       <div className="artstage__glow" style={{ opacity: 0.15 + 0.45 * glow }} />
+      {/* The camera's world: art layers live here and take the camera transform; the glow above
+          and the root's nightlight filter stay fixed. No z-index and, at full frame, no transform,
+          so it forms no stacking context: layers stack against the glow exactly as before. */}
+      <div className="artstage__world" ref={world} style={{ position: "absolute", inset: 0, transformOrigin: "0 0" }} />
       <style>{`
         .artstage { position: absolute; inset: 0; overflow: hidden; background: #1a1410; }
         .artstage__layer {

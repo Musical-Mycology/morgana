@@ -89,8 +89,8 @@ describe("ArtStage.renderState — DOM moves (final review M6)", () => {
   it("a stable stack is not re-appended on a repaint", () => {
     const { ref, root, layers } = setup();
     ref.current!.renderState(two, 1);
-    const append = vi.spyOn(root, "appendChild");
-    const insert = vi.spyOn(root, "insertBefore");
+    const append = vi.spyOn(root.querySelector<HTMLElement>(".artstage__world")!, "appendChild");
+    const insert = vi.spyOn(root.querySelector<HTMLElement>(".artstage__world")!, "insertBefore");
     ref.current!.renderState(two.map((l) => ({ ...l, opacity: 0.6 })), 1);
     expect(append).not.toHaveBeenCalled();
     expect(insert).not.toHaveBeenCalled();
@@ -100,7 +100,7 @@ describe("ArtStage.renderState — DOM moves (final review M6)", () => {
   it("only the new layer moves when one is added on top", () => {
     const { ref, root, layers } = setup();
     ref.current!.renderState(two, 1);
-    const append = vi.spyOn(root, "appendChild");
+    const append = vi.spyOn(root.querySelector<HTMLElement>(".artstage__world")!, "appendChild");
     ref.current!.renderState([...two, { asset: "1.02", opacity: 1, scale: 1, z: 3, overlay: false, since: 0 }], 1);
     expect(append).toHaveBeenCalledTimes(1);
     expect(layers().map((e) => e.dataset.asset)).toEqual(["1.01", "MusicScore", "1.02"]);
