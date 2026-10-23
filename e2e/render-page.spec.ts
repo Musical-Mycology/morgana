@@ -388,9 +388,17 @@ test.describe("camera", () => {
       expect(dom.stage).toEqual([""]); // the text layer never moves
     };
 
+    // A bottom-right patch of the frame that only the art covers (the text is top-left, the tile near
+    // (0.3, 0.4), the glow is fixed): between T=0.5 (zoom 1, the move's start) and T=1.0 only the camera
+    // changes it.
+    const artOnly = { x: 440, y: 280, width: 200, height: 80 };
+
     // Stepping through the whole deck.
-    for (const t of [0, 0.25, 0.5, 0.75, 1.0]) await frame(t);
+    for (const t of [0, 0.25, 0.5]) await frame(t);
+    const preMoveArt = await page.screenshot({ clip: artOnly });
+    for (const t of [0.75, 1.0]) await frame(t);
     const stepMid = await capture();
+    const midMoveArt = await page.screenshot({ clip: artOnly });
     for (const t of [1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]) await frame(t);
     const stepCut = await capture();
     for (const t of [5.0, 5.2, 5.4]) await frame(t);
@@ -412,6 +420,11 @@ test.describe("camera", () => {
     expect(stepCut.dom.text).toEqual(["Second line"]);
     expect(stepCut.dom.layers).toEqual([clip]);
     await expectFraming(stepOut.dom, 5.4);
+    // The PNG half can't pass with an invisible camera: the frames differ in pixels, and the art-only
+    // patch differs between zoom 1 and mid-zoom.
+    expect(stepMid.png.equals(stepCut.png)).toBe(false);
+    expect(stepCut.png.equals(stepOut.png)).toBe(false);
+    expect(preMoveArt.equals(midMoveArt), "the camera moved the art pixels").toBe(false);
 
     // Jumps from the start straight to each point.
     for (const [T, stepped] of [[1.0, stepMid], [4.5, stepCut], [5.4, stepOut]] as const) {

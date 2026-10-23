@@ -24,11 +24,21 @@ const noopRuntime: CinematicRuntime = {
   resolveEntry: () => [], resolveEnd: () => [], onGate: () => {}, onWaiting: () => {},
 } as unknown as CinematicRuntime;
 
-/** Attribute writes on `el` since the observer started (synchronous, via takeRecords). */
+/** Calls to `el.style.transform`'s setter since watching started. Counts every write, including a
+ *  same-value one: jsdom queues no MutationObserver record for a write that leaves the attribute
+ *  unchanged, so an observer could not tell a write-on-change guard from no guard at all. */
 function watchStyle(el: HTMLElement) {
-  const mo = new MutationObserver(() => {});
-  mo.observe(el, { attributes: true, attributeFilter: ["style"] });
-  return { count: () => mo.takeRecords().length, stop: () => mo.disconnect() };
+  let desc: PropertyDescriptor | undefined;
+  for (let p: object | null = el.style; p && !desc; p = Object.getPrototypeOf(p)) desc = Object.getOwnPropertyDescriptor(p, "transform");
+  if (!desc?.set || !desc.get) throw new Error("style.transform has no accessor descriptor");
+  const { get, set } = desc;
+  let n = 0;
+  Object.defineProperty(el.style, "transform", {
+    set(v: string) { n++; set.call(this, v); },
+    get() { return get.call(this); },
+    configurable: true,
+  });
+  return { count: () => n, stop: () => { delete (el.style as unknown as Record<string, unknown>).transform; } };
 }
 
 const isFull = (s: string) => s === "none" || s === "";

@@ -268,3 +268,40 @@ test("camera: a framing change alone never re-renders Stage", () => {
   expect(seen.size).toBe(5); // the framing really changed every step
   expect(beatStageRenders.n).toBe(before);
 });
+
+test("camera: a doc change at the same T repaints every world with the new doc's framing", () => {
+  // Same timing as CAM, a different target: the paint-camera layout effect must run before the
+  // re-seek effect, so the beat's worlds read the new doc's framing, not the stale ref.
+  const CAM_B = doc([{ id: "s1", beats: [{ ...camBeat("a", 10000), timeline: camBeat("a", 10000).timeline.map((a) =>
+    a.kind === "camera" ? { ...a, to: { zoom: 2, x: 0.7, y: 0.6 } } : a) }] }]);
+  const ref = createRef<DeckStageHandle>();
+  const { container, rerender } = render(<Host ref={ref} doc={CAM} />);
+  act(() => { ref.current!.apply(1.5); });
+  expectFraming(container, cameraTransform(cameraAt(cameraEvents(CAM), 1.5)));
+  rerender(<Host ref={ref} doc={CAM_B} />);
+  expect(ref.current!.current()).toBe(1.5);
+  const want = cameraTransform(cameraAt(cameraEvents(CAM_B), 1.5));
+  expect(want).not.toBe(cameraTransform(cameraAt(cameraEvents(CAM), 1.5)));
+  expectFraming(container, want);
+});
+
+test("camera: mid-move inside a pinned scene's hold, every world follows deck time", () => {
+  // The beat ends at 1.4 s (text + tile; localT clamps there); the scene is pinned to 4 s and the 3 s move runs on
+  // through the hold, so successive applies seek the beat to the SAME clamped localT.
+  const HOLD = doc([{ id: "s1", durationSec: 4, beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
+    { kind: "camera", to: { zoom: 3, x: 0.3, y: 0.4 }, durationMs: 3000 },
+    { kind: "text", value: "Held words", in: "fade" },
+    { kind: "media", id: "m", pos: { x: 0.3, y: 0.4 }, label: "tile" },
+  ] }] }]);
+  const ev = cameraEvents(HOLD);
+  const { container, apply } = setup(HOLD);
+  const seen = new Set<string>();
+  for (const T of [2, 2.5]) {
+    apply(T);
+    const tf = cameraTransform(cameraAt(ev, T));
+    expect(tf).not.toBe(cameraTransform({ zoom: 3, x: 0.3, y: 0.4 })); // genuinely mid-move
+    expectFraming(container, tf);
+    seen.add(tf);
+  }
+  expect(seen.size).toBe(2);
+});
