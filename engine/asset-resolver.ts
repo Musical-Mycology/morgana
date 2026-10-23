@@ -2,13 +2,14 @@ import type { StoryAsset } from "@/engine/deck/story-assets";
 import { storyAssetUrl } from "@/engine/deck/story-assets";
 import { sporekleAsset, type SporekleAsset } from "@/engine/sporekles";
 import { withBasePath } from "@/lib/base-path";
-import { mediaRefId, type MediaRef } from "@/engine/deck/media-ref";
+import { MEDIA_ID_PATTERN, mediaRefId, type MediaRef } from "@/engine/deck/media-ref";
 import { mediaUrl } from "@/lib/api/media-client";
 
 export interface AssetResolver {
   story(key: StoryAsset): string;
   brand(file: SporekleAsset | string): string;
-  /** `media:<id>` ref → URL of that deck's uploaded media. "" when there is no deck. */
+  /** `media:<id>` ref → URL of that deck's uploaded media. "" when there is no deck, or when the
+   *  id is not a stored media id (MEDIA_ID_PATTERN). */
   media(ref: MediaRef): string;
 }
 
@@ -33,7 +34,15 @@ export const defaultAssetResolver: AssetResolver = {
 };
 
 /** Resolver for a loaded deck: media refs map to that deck's media URL (base path applied by
- *  mediaUrl — the one seam). Everything else behaves as the default. */
+ *  mediaUrl — the one seam). A ref whose id is not a stored media id ("media:../../x",
+ *  "media:a.mp4?b") resolves to "" rather than to a URL the doc author shaped. Everything else
+ *  behaves as the default. */
 export function deckAssetResolver(deckId: string): AssetResolver {
-  return { ...defaultAssetResolver, media: (ref) => mediaUrl(deckId, mediaRefId(ref)) };
+  return {
+    ...defaultAssetResolver,
+    media: (ref) => {
+      const id = mediaRefId(ref);
+      return MEDIA_ID_PATTERN.test(id) ? mediaUrl(deckId, id) : "";
+    },
+  };
 }

@@ -21,3 +21,12 @@ test("isVideoRef matches .mp4/.webm media refs, case-insensitive", () => {
   expect(isVideoRef("media:x.png")).toBe(false);
   expect(isVideoRef("1.01")).toBe(false);
 });
+
+test("MEDIA_ID_PATTERN (pure) matches the store's ids and is what deck-doc re-exports", async () => {
+  const { MEDIA_ID_PATTERN } = await import("@/engine/deck/media-ref");
+  const docMod = await import("@/engine/deck-doc");
+  expect(docMod.MEDIA_ID_PATTERN).toBe(MEDIA_ID_PATTERN);
+  expect(MEDIA_ID_PATTERN.test("0123456789abcdef.mp4")).toBe(true);
+  expect(MEDIA_ID_PATTERN.test("../../x")).toBe(false);
+  expect(MEDIA_ID_PATTERN.test("a.mp4?b")).toBe(false);
+});

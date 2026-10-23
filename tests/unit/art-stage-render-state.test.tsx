@@ -85,6 +85,35 @@ describe("ArtStage.renderState", () => {
   });
 });
 
+describe("ArtStage.renderState — DOM moves (final review M6)", () => {
+  it("a stable stack is not re-appended on a repaint", () => {
+    const { ref, root, layers } = setup();
+    ref.current!.renderState(two, 1);
+    const append = vi.spyOn(root, "appendChild");
+    const insert = vi.spyOn(root, "insertBefore");
+    ref.current!.renderState(two.map((l) => ({ ...l, opacity: 0.6 })), 1);
+    expect(append).not.toHaveBeenCalled();
+    expect(insert).not.toHaveBeenCalled();
+    expect(layers().map((e) => e.style.opacity)).toEqual(["0.6", "0.6"]);
+  });
+
+  it("only the new layer moves when one is added on top", () => {
+    const { ref, root, layers } = setup();
+    ref.current!.renderState(two, 1);
+    const append = vi.spyOn(root, "appendChild");
+    ref.current!.renderState([...two, { asset: "1.02", opacity: 1, scale: 1, z: 3, overlay: false, since: 0 }], 1);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(layers().map((e) => e.dataset.asset)).toEqual(["1.01", "MusicScore", "1.02"]);
+  });
+
+  it("a reordered stack still ends in array order", () => {
+    const { ref, layers } = setup();
+    ref.current!.renderState(two, 1);
+    ref.current!.renderState([two[1], two[0]], 1);
+    expect(layers().map((e) => e.dataset.asset)).toEqual(["MusicScore", "1.01"]);
+  });
+});
+
 describe("ArtStage.renderState — interplay with tweened show()", () => {
   it("kills an in-flight show() tween on a reused layer (advancing GSAP time leaves it put)", () => {
     const { ref, layers } = setup();
@@ -121,7 +150,7 @@ describe("ArtStage.renderState — media refs", () => {
     const root = container.querySelector<HTMLElement>(".artstage")!;
     return { ref, root, videos: () => Array.from(root.querySelectorAll<HTMLVideoElement>("video.artstage__layer")) };
   }
-  const vid: ArtLayerState = { asset: "media:a.mp4", opacity: 1, scale: 1, z: 1, overlay: false, since: 2 };
+  const vid: ArtLayerState = { asset: "media:aaaaaaaaaaaaaaaa.mp4", opacity: 1, scale: 1, z: 1, overlay: false, since: 2 };
 
   it("a video ref becomes a muted <video> synced to its clip time at deck time T", () => {
     stubMedia();
@@ -130,8 +159,8 @@ describe("ArtStage.renderState — media refs", () => {
     const [v] = videos();
     expect(videos()).toHaveLength(1);
     expect(v.className).toBe("artstage__layer");
-    expect(v.dataset.asset).toBe("media:a.mp4");
-    expect(v.getAttribute("src")).toBe(mediaUrl("d1", "a.mp4"));
+    expect(v.dataset.asset).toBe("media:aaaaaaaaaaaaaaaa.mp4");
+    expect(v.getAttribute("src")).toBe(mediaUrl("d1", "aaaaaaaaaaaaaaaa.mp4"));
     expect(v.muted).toBe(true);
     expect(syncVideo).toHaveBeenCalledTimes(1);
     const [el, clipT, mode, opts] = vi.mocked(syncVideo).mock.calls[0];
@@ -186,7 +215,7 @@ describe("ArtStage.renderState — media refs", () => {
     stubMedia();
     const { ref, root } = setupDeck();
     expect(MIN_VIDEO_OPACITY).toBe(1 / 1024);
-    ref.current!.renderState([{ ...vid, opacity: 0 }, { ...vid, asset: "media:p.png", opacity: 0 }, { ...vid, asset: "1.01", opacity: 0 }], 0, 2, "seek");
+    ref.current!.renderState([{ ...vid, opacity: 0 }, { ...vid, asset: "media:dddddddddddddddd.png", opacity: 0 }, { ...vid, asset: "1.01", opacity: 0 }], 0, 2, "seek");
     const v = root.querySelector<HTMLVideoElement>("video.artstage__layer")!;
     expect(Number(v.style.opacity)).toBe(1 / 1024);
     expect(syncVideo).toHaveBeenCalledTimes(1);
@@ -197,10 +226,10 @@ describe("ArtStage.renderState — media refs", () => {
 
   it("an image media ref becomes an <img> with the assets.media src (no video sync)", () => {
     const { ref, root } = setupDeck();
-    ref.current!.renderState([{ ...vid, asset: "media:p.png" }], 0, 3.5, "seek");
+    ref.current!.renderState([{ ...vid, asset: "media:dddddddddddddddd.png" }], 0, 3.5, "seek");
     const img = root.querySelector<HTMLImageElement>("img.artstage__layer")!;
-    expect(img.dataset.asset).toBe("media:p.png");
-    expect(img.getAttribute("src")).toBe(mediaUrl("d1", "p.png"));
+    expect(img.dataset.asset).toBe("media:dddddddddddddddd.png");
+    expect(img.getAttribute("src")).toBe(mediaUrl("d1", "dddddddddddddddd.png"));
     expect(root.querySelector("video")).toBeNull();
     expect(syncVideo).not.toHaveBeenCalled();
   });

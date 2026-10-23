@@ -49,6 +49,13 @@ test("deckAssetResolver maps a media ref to the deck's media URL", () => {
   expect(r.media(REF)).toBe("/api/decks/d1/media/0123456789abcdef.mp4");
 });
 
+test("deckAssetResolver returns \"\" for a ref whose id is not a media id (final review M1)", () => {
+  const r = deckAssetResolver("d1");
+  for (const bad of ["media:../../x", "media:a.mp4?b", "media:0123456789abcdef.mp4/../y", "media:A123456789abcdef.mp4", "media:x.mp4"]) {
+    expect(r.media(bad as `media:${string}`), bad).toBe("");
+  }
+});
+
 test("deckAssetResolver leaves story() and brand() unchanged", () => {
   const r = deckAssetResolver("d1");
   expect(r.story("1.01")).toBe(defaultAssetResolver.story("1.01"));
@@ -66,7 +73,7 @@ test("DeckAssetsProvider resolves media for its deck and keeps a stable resolver
   const seen: AssetResolver[] = [];
   function Probe() { seen.push(useAssetResolver()); return null; }
   const { rerender } = render(<DeckAssetsProvider deckId="d1"><Probe /></DeckAssetsProvider>);
-  expect(seen[0].media("media:x.mp4")).toBe(mediaUrl("d1", "x.mp4"));
+  expect(seen[0].media(REF)).toBe(mediaUrl("d1", "0123456789abcdef.mp4"));
   rerender(<DeckAssetsProvider deckId="d1"><Probe /></DeckAssetsProvider>);
   expect(seen[seen.length - 1]).toBe(seen[0]);
 });
@@ -79,6 +86,6 @@ test("DeckAssetsProvider with a null id falls back to the default resolver and n
   const { rerender } = render(ui(null));
   expect(seen[0]).toBe(defaultAssetResolver);
   rerender(ui("d1"));
-  expect(seen[seen.length - 1].media("media:x.mp4")).toBe(mediaUrl("d1", "x.mp4"));
+  expect(seen[seen.length - 1].media(REF)).toBe(mediaUrl("d1", "0123456789abcdef.mp4"));
   expect(mounts).toBe(1);
 });

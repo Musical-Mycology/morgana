@@ -1,6 +1,9 @@
 /** `media:<mediaId>` — a reference to this deck's uploaded media, usable wherever an art panel key
  *  or a media tile src goes (spec §2). Pure. */
 export const MEDIA_REF_PREFIX = "media:";
+/** A stored media id: 16 hex digits + a lowercase extension. The same pattern as
+ *  lib/store/media-store.ts MEDIA_ID_RE, kept here so browser code never imports the fs store. */
+export const MEDIA_ID_PATTERN = /^[0-9a-f]{16}\.[a-z0-9]{1,5}$/;
 export type MediaRef = `media:${string}`;
 export function isMediaRef(s: unknown): s is MediaRef { return typeof s === "string" && s.startsWith(MEDIA_REF_PREFIX) && s.length > MEDIA_REF_PREFIX.length; }
 export function mediaRefId(ref: MediaRef): string { return ref.slice(MEDIA_REF_PREFIX.length); }

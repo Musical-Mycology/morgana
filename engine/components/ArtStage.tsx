@@ -100,7 +100,11 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
     const a = assetsRef.current;
     let el: HTMLElement;
     if (isVideoRef(asset)) {
-      el = createClipVideo(a.media(asset));
+      const v = createClipVideo(a.media(asset));
+      // No playback here (editor canvas, library thumbnails): fetch metadata only. The in-point
+      // seek (holdAtIn) still fetches and decodes that one frame.
+      if (!clipPlayback) v.preload = "metadata";
+      el = v;
       el.dataset.video = "1";
     } else {
       const img = document.createElement("img");
@@ -242,7 +246,12 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
         return el;
       });
       existing.filter((e) => !used.has(e)).forEach(dispose);
-      els.forEach((el) => host.appendChild(el)); // appendChild moves: DOM order = array order (z breaks nothing)
+      // DOM order = array order (z breaks nothing). Only the layers from the first out-of-place one
+      // on are (re)appended: moving a <video> every paint is needless DOM churn for a stable stack.
+      const inDom = Array.from(host.querySelectorAll<HTMLElement>(".artstage__layer"));
+      let same = 0;
+      while (same < els.length && inDom[same] === els[same]) same++;
+      for (let i = same; i < els.length; i++) host.appendChild(els[i]);
       // Clip time is a pure function of deck time: the layer's entry (`since`) and clip options.
       layers.forEach((l, i) => {
         const v = asVideo(els[i]);
