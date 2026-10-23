@@ -95,7 +95,10 @@ duration 0 (or `cut`) means `p = 1`; plain layers use `power2.inOut` (GSAP namin
 `p < .5 ? 4p³ : 1 − (−2p+2)³/2`), overlays use `back.out(2)` for scale `0.9 → 1` and opacity, and
 `morph` plain layers enter from scale 1.04. Layers leaving fade out from **their opacity at the
 event's start** (recursively, so a transition starting mid-crossfade continues smoothly) to 0
-with `power2.inOut`, and are dropped once `p = 1`. Kept layers are at opacity 1. Incoming/kept
+with `power2.inOut`, and are dropped once `p = 1`. Kept layers continue any in-flight fade-in —
+opacity and scale follow the fade that brought them in (its original start, duration and ease,
+evaluated at T) until it completes, then hold at 1 — a deliberate change from autoplay, where
+ArtStage's layer reuse snaps a kept layer straight to 1 (ruling from the final branch review). Incoming/kept
 layers take z from the target stack order; outgoing layers keep the z they had (GSAP parity); z is
 authoritative for stacking, array order only breaks ties. Mid-beat art actions crossfade over their
 authored duration — a deliberate change from autoplay, where zero-length actions currently land

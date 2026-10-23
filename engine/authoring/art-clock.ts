@@ -96,25 +96,41 @@ export function nightAt(tl: NightTimeline, T: number): number {
   return v;
 }
 
+/** A layer's fade-in: the event that brought it into the stack (start, duration, morph scale). */
+interface FadeIn { start: number; duration: number; morph: boolean }
+
+/** Opacity + scale of a layer entering via `f`, evaluated at time `at`. No fade (or a finished one) = at rest. */
+function entering(f: FadeIn | undefined, overlay: boolean, at: number): { opacity: number; scale: number } {
+  const p = !f || f.duration <= 0 ? 1 : clamp01((at - f.start) / f.duration);
+  if (p >= 1) return { opacity: 1, scale: 1 };
+  if (overlay) { const q = backOut2(p); return { opacity: clamp01(q), scale: 0.9 + 0.1 * q }; }
+  const q = power2InOut(p);
+  return { opacity: q, scale: f!.morph ? 1.04 + (1 - 1.04) * q : 1 };
+}
+
 /** The art layer stack at deck time T, with crossfade opacities. Paint by `z` (array order only
  *  breaks ties — outgoing layers are listed first but keep their old z). Each event is evaluated up to the
- *  next event's start (or T): kept layers sit at 1 (as ArtStage's reuse snaps them), incoming
- *  layers ease in, outgoing layers ease out from their opacity when the event began. */
+ *  next event's start (or T): incoming layers ease in; kept layers continue any fade-in still in
+ *  flight (its original start, duration and ease — a deliberate change from autoplay, where
+ *  ArtStage's reuse snaps them to 1) and otherwise sit at 1; outgoing layers ease out from their
+ *  opacity when the event began. */
 export function artAt(events: ArtEvent[], T: number): ArtLayerState[] {
   let visible: ArtLayerState[] = [];
+  let fades = new Map<StoryAsset, FadeIn>(); // the target stack's layers → the fade-in that brought each in
   for (let i = 0; i < events.length && events[i].start <= T; i++) {
     const e = events[i];
     const until = i + 1 < events.length && events[i + 1].start <= T ? events[i + 1].start : T;
     const p = e.duration <= 0 ? 1 : clamp01((until - e.start) / e.duration);
-    const prev = new Map(visible.map((l) => [l.asset, l]));
+    const prev = new Set(visible.map((l) => l.asset));
+    const nextFades = new Map<StoryAsset, FadeIn>();
     const incoming: ArtLayerState[] = e.to.map((asset, idx) => {
       const overlay = isOverlay(asset);
-      const base = { asset, z: idx + 1, overlay };
-      if (prev.has(asset) || p >= 1) return { ...base, opacity: 1, scale: 1 };
-      if (overlay) { const q = backOut2(p); return { ...base, opacity: clamp01(q), scale: 0.9 + 0.1 * q }; }
-      const q = power2InOut(p);
-      return { ...base, opacity: q, scale: e.mode === "morph" ? 1.04 + (1 - 1.04) * q : 1 };
+      // Kept: its own fade-in (undefined if it was outgoing, or already settled → at rest). New: this event's.
+      const f = prev.has(asset) ? fades.get(asset) : { start: e.start, duration: e.duration, morph: e.mode === "morph" };
+      if (f) nextFades.set(asset, f);
+      return { asset, z: idx + 1, overlay, ...entering(f, overlay, until) };
     });
+    fades = nextFades;
     const outgoing = p >= 1 ? [] : visible
       .filter((l) => !e.to.includes(l.asset))
       .map((l) => ({ ...l, opacity: l.opacity * (1 - power2InOut(p)) }));

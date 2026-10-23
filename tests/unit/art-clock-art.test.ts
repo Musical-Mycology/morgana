@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import { artEvents, artAt, power2InOut, backOut2 } from "@/engine/authoring/art-clock";
 import type { DeckDoc } from "@/engine/deck-doc";
 import type { Scene } from "@/engine/deck/types";
@@ -131,4 +131,58 @@ test("an unpinned scene's trailing zero-length beat with entry art is emitted at
     { id: "b", art: { to: "1.02", mode: "cut" }, timeline: [] },
   ] }]);
   expect(artEvents(Dz).map((e) => [e.start, e.to])).toEqual([[0, ["1.01"]], [1, ["1.02"]]]);
+});
+
+// Ruling (amends spec §2.1): a layer kept by a later event while still fading in CONTINUES that
+// fade-in (its original start, duration and ease) instead of popping to 1.
+describe("kept layers continue an in-flight fade-in", () => {
+  // Crossfade 1.01 → 1.02 at T=1 (900 ms, so it ends at 1.9); mid-beat at T=1.3 an overlay is added keeping 1.02.
+  const probe = (mode: "crossfade" | "cut") => doc([{ id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
+    { kind: "wait", ms: 1000 }, { kind: "art", art: { to: "1.02", mode: "crossfade" } },
+    { kind: "wait", ms: 300 }, { kind: "art", art: { to: "MusicScore", mode, keep: ["1.02"] } },
+    { kind: "wait", ms: 2000 },
+  ] }] }]);
+
+  test("the probe case is continuous across the keeping event (no pop)", () => {
+    const ev = artEvents(probe("crossfade"));
+    const before = op(artAt(ev, 1.29), "1.02")!;
+    const at = op(artAt(ev, 1.3), "1.02")!;
+    expect(before).toBeCloseTo(power2InOut(0.29 / 0.9), 6);
+    expect(Math.abs(at - before)).toBeLessThan(0.05);
+    expect(at).toBeCloseTo(power2InOut(0.3 / 0.9), 6);
+  });
+
+  test("it keeps following the original fade and reaches 1 at the original fade's end, then holds", () => {
+    const ev = artEvents(probe("crossfade"));
+    expect(op(artAt(ev, 1.6), "1.02")).toBeCloseTo(power2InOut(0.6 / 0.9), 6);
+    expect(op(artAt(ev, 1.9), "1.02")).toBe(1);
+    expect(op(artAt(ev, 2.5), "1.02")).toBe(1);
+  });
+
+  test("z stays authoritative and the outgoing layer is unchanged", () => {
+    const ev = artEvents(probe("crossfade"));
+    const s = artAt(ev, 1.6);
+    expect(s.find((l) => l.asset === "1.02")!.z).toBe(1);
+    expect(s.find((l) => l.asset === "MusicScore")!.z).toBe(2);
+    // 1.01 was at 1 − power2InOut(0.3/0.9) when the keeping event began; it fades out from there.
+    const from = 1 - power2InOut(0.3 / 0.9);
+    expect(op(s, "1.01")).toBeCloseTo(from * (1 - power2InOut(0.3 / 0.9)), 6);
+  });
+
+  test("an instant (cut) keeping event still lets the kept layer finish its fade", () => {
+    const ev = artEvents(probe("cut"));
+    expect(op(artAt(ev, 1.3), "1.02")).toBeCloseTo(power2InOut(0.3 / 0.9), 6);
+    expect(op(artAt(ev, 1.9), "1.02")).toBe(1);
+  });
+
+  test("a kept overlay continues its back.out(2) scale and opacity", () => {
+    const Dov = doc([{ id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
+      { kind: "art", art: { to: "MusicScore", mode: "fade", keep: ["1.01"] } },
+      { kind: "wait", ms: 200 }, { kind: "art", art: { to: "1.02", mode: "fade", keep: ["MusicScore"] } },
+      { kind: "wait", ms: 2000 },
+    ] }] }]);
+    const l = artAt(artEvents(Dov), 0.35).find((x) => x.asset === "MusicScore")!;
+    expect(l.scale).toBeCloseTo(0.9 + 0.1 * backOut2(0.5), 6);
+    expect(l.opacity).toBeCloseTo(Math.min(1, backOut2(0.5)), 6);
+  });
 });
