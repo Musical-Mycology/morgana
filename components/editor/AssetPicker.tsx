@@ -100,7 +100,14 @@ export function AssetPicker({ value, multiple, accept = [], clips, onChange, onC
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => { if (root.current && !root.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    // The popover owns Escape while open: the editor's window handler would also exit the group.
+    // (document's listener runs before window's in the bubble phase.)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };

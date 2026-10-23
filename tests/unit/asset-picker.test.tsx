@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { AssetPicker } from "@/components/editor/AssetPicker";
 import { Field } from "@/components/editor/Field";
 import { Inspector } from "@/components/editor/Inspector";
@@ -211,4 +211,24 @@ test("Inspector wires the tile clip at clip", () => {
   fireEvent.click(screen.getByTestId(`clip-loop-${VID_REF}`));
   const m = useEditor.getState().doc!.scenes[0].beats[0].timeline[1] as { clip?: unknown };
   expect(m.clip).toEqual({ in: 0.25, loop: true });
+});
+
+test("Escape closes the popover and does not reach the editor's window handler (final review T12)", () => {
+  withMedia(<AssetPicker value={undefined} accept={[...TILE_ACCEPT]} onChange={() => {}} />);
+  const editorKey = vi.fn();
+  window.addEventListener("keydown", editorKey);
+  try {
+    open();
+    const option = screen.getByTestId(`asset-option-${VID_REF}`);
+    const ev = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    act(() => { option.dispatchEvent(ev); });
+    expect(screen.queryByTestId("asset-picker-popover")).toBeNull();
+    expect(editorKey).not.toHaveBeenCalled();
+    expect(ev.defaultPrevented).toBe(true);
+    // Closed: Escape is the editor's again.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(editorKey).toHaveBeenCalledTimes(1);
+  } finally {
+    window.removeEventListener("keydown", editorKey);
+  }
 });
