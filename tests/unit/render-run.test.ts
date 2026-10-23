@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
-  CHROMIUM_LAUNCH_OPTIONS, exitCodeFor, RenderAbortedError, RenderSetupError, runRender,
+  CHROMIUM_LAUNCH_OPTIONS, exitCodeFor, KILL_WAIT_MS, RenderAbortedError, RenderPageError, RenderSetupError, runRender,
   type FfmpegProcess, type RenderBrowser, type RenderDeps, type RenderPage,
 } from "@/lib/render/run";
 import { ffmpegArgs } from "@/lib/render/ffmpeg";
@@ -13,6 +13,13 @@ const OPTS: RenderOptions = { deck: "d1", out: "/tmp/out.mp4", baseUrl: BASE, fp
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 
 type RenderGlobal = NonNullable<Window["__morganaRender"]>;
+
+/** The temp soundtrack path ffmpeg was given (the input right after `-ss <offset>`). */
+function audioArg(args: string[]): string {
+  const i = args.indexOf("-ss");
+  expect(i).toBeGreaterThan(-1);
+  return args[i + 3];
+}
 
 /** A child-process stand-in: stdin captures writes; end() makes ffmpeg "exit" with `exitCode`. */
 class FakeFfmpeg extends EventEmitter implements FfmpegProcess {
@@ -82,6 +89,7 @@ function setup(opts: { render?: RenderGlobal; meta?: Record<string, unknown>; de
     }) as typeof fetch,
     log: (l) => logs.push(l),
     unlink: vi.fn(async () => {}),
+    unlinkSync: vi.fn(),
     stat: vi.fn(async () => ({ size: 2_500_000 })),
     now: () => (clock += 1100),
   };
@@ -118,6 +126,17 @@ describe("runRender — happy path", () => {
     expect(rendered.map((t) => +t.toFixed(9))).toEqual([1, 1.1, 1.2]);
     expect(s.spawnArgs[0]).toEqual(ffmpegArgs({ fps: 10, out: OPTS.out, duration: 1.3 - 1, audioOffset: 1 }));
     expect(res.frames).toBe(3);
+    expect(s.logs.some((l) => l.startsWith("warning"))).toBe(false);
+  });
+
+  test("--to past the deck's end is clamped to the total, with a one-line warning", async () => {
+    const rendered: number[] = [];
+    const s = setup({ render: readyRender(0.3, (T) => { rendered.push(T); }) });
+    const res = await runRender({ ...OPTS, to: 5 }, s.deps);
+    expect(rendered).toEqual([0, 0.1, 0.2]);
+    expect(s.spawnArgs[0]).toEqual(ffmpegArgs({ fps: 10, out: OPTS.out, duration: 0.3, audioOffset: 0 }));
+    expect(res.seconds).toBe(0.3);
+    expect(s.logs.filter((l) => l.startsWith("warning"))).toEqual(["warning: --to 5s is past the deck's end (0.3s); rendering to 0.3s"]);
   });
 
   test("progress is logged at most once per second", async () => {
@@ -132,7 +151,7 @@ describe("runRender — happy path", () => {
     await runRender(OPTS, s.deps);
     expect(s.fetched).toEqual([`${BASE}/api/decks/d1`, `${BASE}/api/decks/d1/media/abc123.wav`]);
     const args = s.spawnArgs[0];
-    const audioPath = args[args.indexOf("-ss") + 3];
+    const audioPath = audioArg(args);
     expect(audioPath).toMatch(/abc123\.wav$/);
     expect(args).toEqual(ffmpegArgs({ fps: 10, out: OPTS.out, duration: 0.3, audioPath, audioOffset: 0 }));
     expect(existsSync(audioPath)).toBe(false);
@@ -166,7 +185,7 @@ describe("runRender — failures clean up", () => {
     expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
     expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
     const args = s.spawnArgs[0];
-    expect(existsSync(args[args.indexOf("-ss") + 3])).toBe(false);
+    expect(existsSync(audioArg(args))).toBe(false);
   });
 
   test("a non-zero ffmpeg exit rejects with the stderr tail and removes the output", async () => {
@@ -205,7 +224,7 @@ describe("runRender — failures clean up", () => {
     expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
     expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
     const args = s.spawnArgs[0];
-    expect(existsSync(args[args.indexOf("-ss") + 3])).toBe(false);
+    expect(existsSync(audioArg(args))).toBe(false);
   });
 
   test("an already-aborted signal never launches Chromium or ffmpeg", async () => {
@@ -240,10 +259,11 @@ describe("runRender — failures clean up", () => {
     expect(s.deps.launchBrowser).not.toHaveBeenCalled();
   });
 
-  test("ready: false rejects with RenderSetupError carrying the page's error; browser closed, ffmpeg never spawned", async () => {
+  test("ready: false rejects with RenderPageError (exit 1) carrying the page's error; browser closed, ffmpeg never spawned", async () => {
     const s = setup({ render: { ready: false, error: "deck has no duration" } });
     const err = await runRender(OPTS, s.deps).catch((e: Error) => e);
-    expect(err).toBeInstanceOf(RenderSetupError);
+    expect(err).toBeInstanceOf(RenderPageError);
+    expect(exitCodeFor(err)).toBe(1);
     expect((err as Error).message).toContain("deck has no duration");
     expect(s.browser.close).toHaveBeenCalledTimes(1);
     expect(s.spawnArgs).toHaveLength(0);
@@ -252,7 +272,6 @@ describe("runRender — failures clean up", () => {
 
   test("the render page never deciding (timeout) is a RenderSetupError", async () => {
     const s = setup();
-    s.calls.goto = [];
     const { browser } = fakeBrowser(undefined);
     s.deps.launchBrowser = async () => browser;
     const err = await runRender(OPTS, s.deps).catch((e: Error) => e);
@@ -261,18 +280,139 @@ describe("runRender — failures clean up", () => {
     expect(browser.close).toHaveBeenCalledTimes(1);
   });
 
-  test("--from at or past the deck's end is a RenderSetupError", async () => {
-    const s = setup({ render: readyRender(0.3) });
-    await expect(runRender({ ...OPTS, from: 0.3 }, s.deps)).rejects.toThrow(RenderSetupError);
-    expect(s.spawnArgs).toHaveLength(0);
+  test("--from at or past the deck's end is a RenderSetupError (exit 2) with a clear message", async () => {
+    for (const from of [0.3, 1]) {
+      const s = setup({ render: readyRender(0.3) });
+      const err = await runRender({ ...OPTS, from }, s.deps).catch((e: Error) => e);
+      expect(err).toBeInstanceOf(RenderSetupError);
+      expect((err as Error).message).toBe(`--from ${from}s is at or past the deck's end (0.3s) — nothing to render`);
+      expect(s.spawnArgs).toHaveLength(0);
+      expect(s.browser.close).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  test("an abort coinciding with a rejecting renderFrame (Chromium SIGINTed: 'Target closed') is RenderAbortedError", async () => {
+    const ac = new AbortController();
+    const s = setup({ render: readyRender(1, (T) => {
+      if (T > 0.05) { ac.abort(); throw new Error("Target page, context or browser has been closed"); }
+    }) });
+    const err = await runRender(OPTS, { ...s.deps, signal: ac.signal }).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(RenderAbortedError);
+    expect(exitCodeFor(err)).toBe(130);
+    expect(s.browser.close).toHaveBeenCalledTimes(1);
+    expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
+  });
+
+  test("an abort coinciding with ffmpeg exiting 255 (ffmpeg SIGINTed) is RenderAbortedError", async () => {
+    const ac = new AbortController();
+    const s = setup({ render: readyRender(0.3, (T) => { if (T > 0.15) ac.abort(); }) }); // during the LAST frame
+    s.ff.exitCode = 255;
+    s.ff.stderrOnExit = "Exiting normally, received signal 2.\n";
+    const err = await runRender(OPTS, { ...s.deps, signal: ac.signal }).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(RenderAbortedError);
+    expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
+    expect(s.browser.close).toHaveBeenCalledTimes(1);
+  });
+
+  test("a stdin EPIPE (ffmpeg dying) stops feeding frames and fails with ffmpeg's exit — no hang, no crash", async () => {
+    const s = setup({ render: readyRender(1) });
+    const write = s.ff.stdin.write;
+    s.ff.stdin.write = (chunk: Buffer) => {
+      const r = write(chunk);
+      if (s.ff.writes.length === 1) s.ff.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+      return r;
+    };
+    const done = runRender(OPTS, s.deps).catch((e: Error) => e);
+    await vi.waitFor(() => expect(s.ff.writes).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(s.ff.writes).toHaveLength(1); // nothing more pushed into the broken pipe
+    s.ff.stderr.emit("data", Buffer.from("av_interleaved_write_frame(): Broken pipe\n"));
+    s.ff.emit("close", 1, null);
+    const err = await done;
+    expect((err as Error).message).toMatch(/ffmpeg exited with code 1[\s\S]*Broken pipe/);
+    expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
+  });
+
+  test("if the SIGKILLed ffmpeg never reports close, cleanup still deletes the output after KILL_WAIT_MS", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const s = setup({ render: readyRender(0.3, (T) => { if (T > 0.15) throw new Error("boom"); }) });
+      s.ff.kill.mockImplementation(() => true); // never emits close
+      const done = runRender(OPTS, s.deps).catch((e: Error) => e);
+      for (let i = 0; i < 100 && s.ff.kill.mock.calls.length === 0; i++) await new Promise((r) => setImmediate(r));
+      expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
+      await vi.advanceTimersByTimeAsync(KILL_WAIT_MS - 1);
+      expect(s.deps.unlink).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(((await done) as Error).message).toMatch(/frame 2.*boom/);
+      expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  test("the bounded kill wait clears its timer as soon as ffmpeg exits", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const s = setup({ render: readyRender(0.3, (T) => { if (T > 0.15) throw new Error("boom"); }) });
+      await expect(runRender(OPTS, s.deps)).rejects.toThrow(/boom/);
+      expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  test("ffmpeg is killed before a hung browser.close() resolves", async () => {
+    const s = setup({ render: readyRender(0.3, (T) => { if (T > 0.15) throw new Error("boom"); }) });
+    let releaseClose!: () => void;
+    s.browser.close.mockImplementation(() => new Promise<void>((r) => { releaseClose = r; }));
+    const done = runRender(OPTS, s.deps).catch((e: Error) => e);
+    await vi.waitFor(() => expect(s.browser.close).toHaveBeenCalled());
+    expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
+    releaseClose();
+    expect(((await done) as Error).message).toMatch(/frame 2.*boom/);
+    expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
+  });
+
+  test("a failing browser.close() never masks the original error", async () => {
+    const s = setup({ render: readyRender(0.3, (T) => { if (T > 0.15) throw new Error("boom"); }) });
+    s.browser.close.mockRejectedValue(new Error("close failed"));
+    await expect(runRender(OPTS, s.deps)).rejects.toThrow(/frame 2.*boom/);
+    expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
+  });
+
+  test("the synchronous emergency cleanup (forced second signal) SIGKILLs ffmpeg and deletes the output and temp audio", async () => {
+    let emergency: (() => void) | undefined;
+    const seen = { killed: false, unlinked: false, audioLeft: true };
+    const s = setup({ meta: { soundtrack: { media: "abc123.wav" } }, render: readyRender(1, (T) => {
+      if (T < 0.05) return;
+      const audio = audioArg(s.spawnArgs[0]);
+      emergency!();
+      // Everything happened synchronously — nothing was awaited since emergency() was called.
+      seen.killed = s.ff.kill.mock.calls.some(([sig]) => sig === "SIGKILL");
+      seen.unlinked = (s.deps.unlinkSync as ReturnType<typeof vi.fn>).mock.calls.some(([p]) => p === OPTS.out);
+      seen.audioLeft = existsSync(audio);
+      throw new Error("stop");
+    }) });
+    await runRender(OPTS, { ...s.deps, onEmergencyCleanup: (fn) => { emergency = fn; } }).catch(() => {});
+    expect(seen).toEqual({ killed: true, unlinked: true, audioLeft: false });
+  });
+
+  test("the emergency cleanup before ffmpeg starts deletes nothing (the user's existing file is safe)", async () => {
+    let emergency: (() => void) | undefined;
+    const s = setup({ deckStatus: 404 });
+    await runRender(OPTS, { ...s.deps, onEmergencyCleanup: (fn) => { emergency = fn; } }).catch(() => {});
+    emergency!();
+    expect(s.deps.unlinkSync).not.toHaveBeenCalled();
   });
 });
 
 describe("exitCodeFor", () => {
-  test("usage/setup errors exit 2, everything else exits 1", () => {
+  test("usage/setup errors exit 2, aborts 130, everything else (incl. a page error) exits 1", () => {
     expect(exitCodeFor(new RenderArgError("x"))).toBe(2);
     expect(exitCodeFor(new RenderSetupError("x"))).toBe(2);
-    expect(exitCodeFor(new RenderAbortedError())).toBe(1);
+    expect(exitCodeFor(new RenderPageError("x"))).toBe(1);
+    expect(exitCodeFor(new RenderAbortedError())).toBe(130);
     expect(exitCodeFor(new Error("x"))).toBe(1);
   });
 });
