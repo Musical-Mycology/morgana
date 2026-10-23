@@ -35,7 +35,7 @@ test("media library: upload, HEVC rejection, pick a clip as art, set its in-poin
   await page.getByTestId("media-upload").setInputFiles(fixture("clip-hevc.mp4"));
   const err = page.getByTestId("media-error");
   await expect(err).toContainText("unsupported video codec (hvc1)");
-  await expect(err).toContainText("ffmpeg -i");
+  await expect(err).toContainText("convert with: ffmpeg -i 'clip-hevc.mp4' -c:v libx264");
   await expect(library.locator("[data-testid^='media-item-']")).toHaveCount(2);
   await page.getByTestId("deck-settings-toggle").click(); // back to the Inspector
 

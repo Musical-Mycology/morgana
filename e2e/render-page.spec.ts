@@ -20,6 +20,8 @@ const MID_NIGHT = 0.8;
 const MID_CROSSFADE = 3.05;
 
 test.describe("determinism", () => {
+  // Byte-equality is the render's contract: a flaky mismatch must fail, never pass on a CI retry.
+  test.describe.configure({ retries: 0 });
   test.beforeEach(async ({ request }, info) => {
     id = `e2e-render-${info.parallelIndex}`;
     await request.delete(`/api/decks/${id}`).catch(() => {});
@@ -113,6 +115,8 @@ async function upload(request: APIRequestContext, deck: string, name: string, mi
 }
 
 test.describe("clips", () => {
+  // Byte-equality is the render's contract: a flaky mismatch must fail, never pass on a CI retry.
+  test.describe.configure({ retries: 0 });
   // Per-worker id: --repeat-each runs this describe in parallel workers, which must not share a deck.
   let clipsId = "";
   test.beforeEach(async ({ request }, info) => {
@@ -231,6 +235,46 @@ test.describe("clips", () => {
     expect(bare.dom.layers).toEqual([]);
     const bareCorners = await shootCorners();
     bareCorners.forEach((png, i) => expect(png.equals(zeroCorners[i]), `corner ${i}`).toBe(true));
+  });
+
+  // Final review I1: in a pinned scene's hold the beat's local time is clamped at its end, which
+  // froze tile clips while art layers kept playing. Tiles now run on the unclamped beat clock.
+  test("a tile clip keeps playing through a pinned scene's hold, and a held frame is the same stepped or jumped", async ({ page, request }) => {
+    const h264 = await upload(request, clipsId, "clip-h264.mp4", "video/mp4");
+    // One 5 s pinned scene whose only beat ends at 1.6 s (0.6 s show + 1 s wait): 1.6-5 s is the hold.
+    const holdDoc = { version: 1, meta: { id: clipsId, title: "Render clips" }, scenes: [{ id: "s0", durationSec: 5, beats: [
+      { id: "a", timeline: [{ kind: "media", id: "tile", pos: { x: 0.5, y: 0.5 }, width: 0.4, src: h264, clip: { loop: true } }, { kind: "wait", ms: 1000 }] },
+    ] }] };
+    expect((await request.put(`/api/decks/${clipsId}`, { data: holdDoc })).status()).toBe(200);
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto(`/render?deck=${clipsId}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+
+    const frame = (t: number) => page.evaluate(async (t) => {
+      const r = window.__morganaRender!;
+      if (!r.ready) throw new Error("not ready");
+      return (await r.renderFrame(t)).failed;
+    }, t);
+    const tileTime = () => page.evaluate(() => {
+      const v = document.querySelector<HTMLVideoElement>("[data-render-root] .cin__media video");
+      return v ? Math.round(v.currentTime * 1000) / 1000 : NaN;
+    });
+
+    const failed: string[] = [];
+    for (const t of [0, 0.5, 1.0, 1.5, 2.0, 2.5]) failed.push(...await frame(t));
+    const atA = await tileTime();
+    for (const t of [2.9, 3.3]) failed.push(...await frame(t));
+    const atB = await tileTime();
+    const stepped = await page.screenshot();
+    expect(failed.filter((src) => src.includes("/media/"))).toEqual([]);
+    // The tile enters at 0 with in 0 and loops a 2 s clip: 2.5 → 0.5, 3.3 → 1.3 (frozen would be 1.6 twice).
+    expect(Math.abs(atA - 0.5)).toBeLessThanOrEqual(1e-3);
+    expect(Math.abs(atB - 1.3)).toBeLessThanOrEqual(1e-3);
+
+    await frame(0);
+    await frame(3.3);
+    expect(await tileTime()).toBe(atB);
+    expect((await page.screenshot()).equals(stepped)).toBe(true);
   });
 
   test("a clip whose media is missing is reported failed and the frame does not hang", async ({ page, request }) => {

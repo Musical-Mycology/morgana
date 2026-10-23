@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveBinary } from "../lib/render/ffmpeg";
+
+const ffmpeg = resolveBinary("ffmpeg", process.env);
+const hasFfmpeg = (() => { const r = spawnSync(ffmpeg, ["-version"], { stdio: "ignore" }); return !r.error && r.status === 0; })();
 
 const id = "e2e-play";
 const doc = { version: 1, meta: { id, title: "Play", timing: { targetSec: 12 } }, scenes: [
@@ -86,5 +93,79 @@ test.describe("clips", () => {
     const box = (await bar.boundingBox())!;
     await page.mouse.click(box.x + box.width * (0.3 / 4), box.y + box.height / 2);
     await expect.poll(async () => Math.abs((await clipTime()) - 0.3)).toBeLessThanOrEqual(0.15);
+  });
+
+  // Final review I2: on long-GOP footage a /play seek decodes from a keyframe up to 8 s back, so it
+  // lands behind a deck clock that kept moving; drift correction then re-seeked forever (a stuck,
+  // stuttering clip). The clip must keep advancing and converge on the deck clock.
+  test("a long-GOP 1080p clip keeps advancing and converges on the deck clock", async ({ page, request }) => {
+    if (process.env.CI) expect(hasFfmpeg, `ffmpeg not found (${ffmpeg}) — the CI e2e job must install it`).toBe(true);
+    test.skip(!hasFfmpeg, "ffmpeg not installed — the CI job installs it");
+    test.setTimeout(90_000);
+    const dir = mkdtempSync(join(tmpdir(), "morgana-gop-"));
+    try {
+      const file = join(dir, "gop250.mp4");
+      const enc = spawnSync(ffmpeg, ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=30:duration=10",
+        "-c:v", "libx264", "-g", "250", "-pix_fmt", "yuv420p", "-an", file]);
+      expect(enc.status, enc.stderr?.toString()).toBe(0);
+
+      await request.delete(`/api/decks/${clipId}`).catch(() => {});
+      await request.post("/api/decks", { data: { id: clipId, title: "GOP clip" } });
+      const up = await request.post(`/api/decks/${clipId}/media`, { multipart: { file: { name: "gop250.mp4", mimeType: "video/mp4", buffer: readFileSync(file) } } });
+      expect(up.status()).toBe(201);
+      const clip = `media:${(await up.json()).id}`;
+      // Beat a (0-2 s) has no art; beat b cuts to the clip from its 4 s in-point. Played across T=2,
+      // the fresh element must seek ~120 frames past the only keyframe while the deck keeps moving:
+      // the seek lands behind, and drift correction must converge rather than re-seek forever.
+      const gopDoc = { version: 1, meta: { id: clipId, title: "GOP clip", timing: { targetSec: 10 } }, scenes: [
+        { id: "s", durationSec: 10, beats: [
+          { id: "a", timeline: [{ kind: "wait", ms: 2000 }] },
+          { id: "b", art: { to: clip, mode: "cut", clips: { [clip]: { in: 4 } } }, timeline: [{ kind: "wait", ms: 8000 }] },
+        ] },
+      ] };
+      expect((await request.put(`/api/decks/${clipId}`, { data: gopDoc })).status()).toBe(200);
+
+      const sel = `video.artstage__layer[data-asset="${clip}"]`;
+      const sample = () => page.evaluate((s) => {
+        const v = document.querySelector<HTMLVideoElement>(s);
+        return {
+          clip: v?.currentTime ?? NaN, seeking: v?.seeking ?? true,
+          deck: Number(document.querySelector("[data-testid=play-scrub]")?.getAttribute("aria-valuenow")),
+        };
+      }, sel);
+      const lag = (x: { clip: number; deck: number }) => Math.abs((x.clip - 4) - (x.deck - 2)); // clip time vs deck time
+
+      await page.goto(`/play?deck=${clipId}&t=1.5`);
+      await expect(page.getByTestId("play-clock")).toHaveText("0:01.5 / 0:10");
+      // Count every seek (media events don't bubble, but a capture listener on document sees them).
+      await page.evaluate(() => {
+        const w = window as unknown as { seeks: number };
+        w.seeks = 0;
+        document.addEventListener("seeking", () => { w.seeks++; }, true);
+      });
+      await page.keyboard.press(" ");
+      await page.waitForFunction((s) => (document.querySelector<HTMLVideoElement>(s)?.readyState ?? 0) >= 2, sel, { timeout: 10_000 });
+      // Converged: not seeking, and the clip within 0.3 s of the deck.
+      await expect.poll(async () => { const x = await sample(); return !x.seeking && lag(x) <= 0.3; }, { timeout: 5000 }).toBe(true);
+
+      // From here, ~3 s of playback: the clip keeps advancing, stays on the deck clock, and does not
+      // keep re-seeking (the old loop seeked every ~0.3 s here, each one forward — so currentTime
+      // alone could still rise).
+      const seeksBefore = await page.evaluate(() => (window as unknown as { seeks: number }).seeks);
+      const samples: { clip: number; deck: number }[] = [];
+      for (let i = 0; i < 12; i++) {
+        await page.waitForTimeout(250);
+        samples.push(await sample());
+      }
+      const clips = samples.map((x) => x.clip);
+      for (let i = 1; i < clips.length; i++) expect(clips[i], `clip time stalled or jumped back: ${clips.join(", ")}`).toBeGreaterThan(clips[i - 1]);
+      const last = samples[samples.length - 1];
+      expect(last.deck - samples[0].deck).toBeGreaterThan(2.5); // the deck really played ~3 s
+      expect(lag(last), `clip ${last.clip} vs deck ${last.deck}`).toBeLessThanOrEqual(0.3);
+      const seeks = (await page.evaluate(() => (window as unknown as { seeks: number }).seeks)) - seeksBefore;
+      expect(seeks, "re-seeks during converged playback").toBeLessThanOrEqual(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
