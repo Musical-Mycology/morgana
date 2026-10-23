@@ -236,13 +236,42 @@ describe("BeatStage world", () => {
     }
   });
 
-  it("autoplay with a camera prop paints the framing at beatStart + t", async () => {
-    const events: CameraEvent[] = [{ start: 0, duration: 0, to: { zoom: 2 }, ease: "linear" }];
-    const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} camera={{ events, beatStart: 0 }} contained />);
+  // A cut to zoom 2 at deck time 3. The beat's own clock starts at 0, so only beatStart decides
+  // whether the move has happened: a beat starting at 3 shows zoom 2 from t ≈ 0; one starting at 0
+  // never reaches deck time 3 (the beat is ~1-2 s long) and stays at full frame.
+  const cutAt3: CameraEvent[] = [{ start: 3, duration: 0, to: { zoom: 2 }, ease: "linear" }];
+
+  it("autoplay with a camera prop paints the framing at beatStart + t (every world, art included)", async () => {
+    const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} camera={{ events: cutAt3, beatStart: 3 }} contained />);
     await waitFor(() => {
       expect(container.querySelector<HTMLElement>(".cin__world")!.style.transform).toContain("scale(2)");
       for (const w of container.querySelectorAll<HTMLElement>(".beat__world")) expect(w.style.transform).toContain("scale(2)");
+      expect(container.querySelector<HTMLElement>(".artstage__world")!.style.transform).toContain("scale(2)");
     });
+  });
+
+  it("autoplay: the same events with beatStart 0 stay at full frame (zoom 1)", async () => {
+    const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} camera={{ events: cutAt3, beatStart: 0 }} contained />);
+    // Wait until the slide has painted (its text is in), so "full frame" is a painted state, not a pre-paint one.
+    await waitFor(() => expect(container.querySelector(".cin__stage")!.textContent).toContain("Fixed words"));
+    for (const sel of [".beat__world", ".cin__world", ".artstage__world"]) {
+      for (const el of container.querySelectorAll<HTMLElement>(sel)) expect(isFull(el.style.transform), sel).toBe(true);
+    }
+  });
+
+  it("an unchanged framing causes no write to either .beat__world wrapper", () => {
+    const transport = createRef<SlideTransport>();
+    const cameraRef = { current: { x: 0.25, y: 0.75, zoom: 2 } } as React.RefObject<Framing>;
+    const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} autoplay={false} transport={transport} cameraRef={cameraRef} contained />);
+    transport.current!.seek(0.4);
+    const worlds = Array.from(container.querySelectorAll<HTMLElement>(".beat__world"));
+    expect(worlds).toHaveLength(2);
+    for (const w of worlds) expect(w.style.transform).toBe(cameraTransform(cameraRef.current));
+    const watches = worlds.map(watchStyle);
+    transport.current!.seek(0.6);
+    transport.current!.seek(0.8);
+    expect(watches.map((w) => w.count())).toEqual([0, 0]);
+    watches.forEach((w) => w.stop());
   });
 });
 
