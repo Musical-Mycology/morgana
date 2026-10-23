@@ -186,11 +186,12 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
               onMouseDown={(e) => e.preventDefault()} onClick={() => setMuted((v) => !v)}>{muted ? "🔇" : "🔊"}</button>
           )}
           <div className="play__bar">
-            {/* Scrub and marker click pause first (the audio stops with them), then jump. */}
+            {/* Scrub and marker click pause first (the audio stops with them), then jump — in seek
+                mode already, so clips don't play for the one frame before the `playing` effect. */}
             <TimeBar layout={layout} sceneIds={doc.scenes.map((s) => s.id)} value={displayT} targetSec={target}
-              onScrub={(to) => { setPlaying(false); apply(to); }} testId="play-scrub"
+              onScrub={(to) => { setPlaying(false); clipMode.current = "seek"; apply(to); }} testId="play-scrub"
               peaks={track?.peaks} peaksDuration={track?.duration} markers={doc.meta.markers}
-              onMarkerClick={(t) => { setPlaying(false); apply(t); }} />
+              onMarkerClick={(t) => { setPlaying(false); clipMode.current = "seek"; apply(t); }} />
           </div>
         </div>
       )}

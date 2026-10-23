@@ -51,11 +51,37 @@ const clipIn = (opts: ClipOpts | undefined) => clipTimeAt(0, 0, opts);
 
 const asVideo = (el: Element): HTMLVideoElement | null => (el instanceof HTMLVideoElement ? el : null);
 
+/** Autoplay looping (no deck clock): each looping clip's `ended` listener, so whoever takes the
+ *  element over (renderState's syncVideo, a non-playing re-seek, dispose) can switch it off. */
+const autoLoops = new WeakMap<HTMLVideoElement, () => void>();
+
+function startAutoLoop(v: HTMLVideoElement, inPt: number): void {
+  stopAutoLoop(v);
+  const onEnded = () => { v.currentTime = inPt; v.play().catch(() => {}); };
+  autoLoops.set(v, onEnded);
+  v.addEventListener("ended", onEnded);
+}
+
+function stopAutoLoop(v: HTMLVideoElement): void {
+  const onEnded = autoLoops.get(v);
+  if (!onEnded) return;
+  v.removeEventListener("ended", onEnded);
+  autoLoops.delete(v);
+}
+
+/** Non-playing paths (snap, the editor): park a clip on its in-point, paused. Writes only on a
+ *  change, so redrawing the same frame issues no seek. */
+function holdAtIn(v: HTMLVideoElement, inPt: number): void {
+  stopAutoLoop(v);
+  if (Math.abs(v.currentTime - inPt) > 1e-4) v.currentTime = inPt;
+  if (!v.paused) v.pause();
+}
+
 /** Take a layer off the stage for good: cancel its tweens, release a video's decoder, detach. */
 function dispose(el: HTMLElement): void {
   gsap.killTweensOf(el);
   const v = asVideo(el);
-  if (v) releaseVideo(v);
+  if (v) { stopAutoLoop(v); releaseVideo(v); }
   el.remove();
 }
 
@@ -87,11 +113,15 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
   }
 
   /** Reconcile the DOM layer stack to exactly `targets`; reuse matching layers (no flicker).
-   *  `play`: whether a newly added video layer starts playing (from its in-point in `clips`);
-   *  otherwise it waits there, paused. Kept video layers are left as they are. */
+   *  `play`: whether a newly added video layer starts playing from its in-point in `clips` (a
+   *  `loop` clip restarts there on `ended`). Autoplay leaves kept video layers as they are: their
+   *  options came with the transition that brought them in. A non-playing call (snap, or
+   *  `clipPlayback` off) parks every video layer, kept ones included, paused on its in-point, so
+   *  the editor shows an edited in-point at once. */
   function render(targets: ArtAsset[], mode: ArtMode, durationMs?: number, clips?: ArtClips, play = true) {
     const host = root.current;
     if (!host) return;
+    const playing = play && clipPlayback;
     const d = (durationMs ?? ART_DURATION_MS[mode]) / 1000;
     const existing = Array.from(host.querySelectorAll<HTMLElement>(".artstage__layer"));
     const kept: HTMLElement[] = [];
@@ -105,6 +135,8 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
         reuse.style.opacity = "1";
         reuse.style.transform = "none";
         kept.push(reuse);
+        const kv = asVideo(reuse);
+        if (kv && !playing) holdAtIn(kv, clipIn(clips?.[asset as MediaRef]));
         return;
       }
       const el = makeLayerEl(asset);
@@ -119,11 +151,16 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
       }
       host.appendChild(el);
       added.push(el);
-      const v = asVideo(el);
-      if (v && isMediaRef(asset)) {
+      const v = asVideo(el); // a <video> only ever comes from a video ref
+      if (v) {
         // No deck clock here: start at the in-point (applied once metadata loads if it isn't yet).
-        v.currentTime = clipIn(clips?.[asset]);
-        if (play && clipPlayback) v.play().catch(() => {});
+        const opts = clips?.[asset as MediaRef];
+        const inPt = clipIn(opts);
+        v.currentTime = inPt;
+        if (playing) {
+          v.play().catch(() => {});
+          if (opts?.loop) startAutoLoop(v, inPt);
+        }
       }
     });
 
@@ -160,12 +197,26 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
     };
   }, []);
 
+  /** Park the on-stage video layers of `layers` on their in-points (clips), paused. */
+  function holdStack(layers: ArtAsset[], clips?: ArtClips) {
+    const host = root.current;
+    if (!host) return;
+    host.querySelectorAll<HTMLVideoElement>("video.artstage__layer").forEach((v) => {
+      const asset = v.dataset.asset as ArtAsset;
+      if (layers.includes(asset)) holdAtIn(v, clipIn(clips?.[asset as MediaRef]));
+    });
+  }
+
   useImperativeHandle(ref, () => ({
     show: (layers, mode, durationMs, clips) => {
       // Re-showing the stack already on screen (an entry art that folds to the stack the beat
       // inherits) must leave the in-flight stack (and any crossfade into it) alone. art-clock's
-      // artEvents mirrors this by dropping such no-op entry events.
-      if (sameStack(layers, current.current)) return;
+      // artEvents mirrors this by dropping such no-op entry events. With clip playback off (the
+      // editor) nothing is in flight to protect, and an edited in-point must still land.
+      if (sameStack(layers, current.current)) {
+        if (!clipPlayback) holdStack(layers, clips);
+        return;
+      }
       render(layers, mode, durationMs, clips);
     },
     apply: (transition, durationMs) => render(applyArt(current.current, transition), transition.mode, durationMs ?? transition.durationMs, transition.clips),
@@ -177,8 +228,11 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
       const used = new Set<HTMLElement>();
       const els = layers.map((l) => {
         let el = existing.find((e) => e.dataset.asset === l.asset && !used.has(e));
-        if (el) gsap.killTweensOf(el); // a stale in-flight fade must not remove or re-fade it
-        else el = makeLayerEl(l.asset);
+        if (el) {
+          gsap.killTweensOf(el); // a stale in-flight fade must not remove or re-fade it
+          const rv = asVideo(el);
+          if (rv) stopAutoLoop(rv); // deck time owns it now: an autoplay loop would fight syncVideo
+        } else el = makeLayerEl(l.asset);
         used.add(el);
         if (l.overlay) { el.dataset.overlay = "1"; el.style.mixBlendMode = "screen"; }
         el.style.opacity = String(l.opacity);

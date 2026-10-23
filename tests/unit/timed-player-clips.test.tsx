@@ -35,3 +35,18 @@ test("play switches the art clip to play mode immediately; pause switches it bac
   act(() => { fireEvent.keyDown(window, { key: " " }); }); // pause
   expect(pause.mock.contexts).toContain(video);
 });
+
+test("a scrub while playing paints in seek mode straight away (no play-then-pause frame)", () => {
+  render(<TimedPlayer doc={doc} initialT={1} />);
+  const video = screen.getByTestId("play-stage").querySelector<HTMLVideoElement>("video.artstage__layer")!;
+  act(() => { fireEvent.keyDown(window, { key: " " }); }); // play
+  play.mockClear();
+  const bar = screen.getByTestId("play-scrub");
+  bar.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 10, right: 100, bottom: 10, x: 0, y: 0, toJSON: () => ({}) });
+  bar.setPointerCapture = () => {};
+  // jsdom has no PointerEvent: a MouseEvent under the pointer type keeps clientX (time-bar.test pattern).
+  act(() => { bar.dispatchEvent(new MouseEvent("pointerdown", { clientX: 50, buttons: 1, bubbles: true, cancelable: true })); });
+  expect(play).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Play" })).toBeTruthy();
+  expect(video.isConnected).toBe(true);
+});

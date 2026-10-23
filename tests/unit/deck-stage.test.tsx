@@ -122,14 +122,14 @@ const ClipHost = forwardRef<DeckStageHandle & { clipMode: React.MutableRefObject
 
 const V = doc([{ id: "s", beats: [{ id: "a", art: { to: "media:a.mp4", mode: "cut" }, timeline: [{ kind: "wait", ms: 3000 }] }] }]);
 
-function setupClip() {
+function setupClip(d: DeckDoc = V) {
   vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(1);
   vi.spyOn(HTMLMediaElement.prototype, "duration", "get").mockReturnValue(10);
   const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
   const ref = createRef<DeckStageHandle & { clipMode: React.MutableRefObject<ClipMode> }>();
-  const { container } = render(<ClipHost ref={ref} doc={V} />);
+  const { container } = render(<ClipHost ref={ref} doc={d} />);
   const video = () => container.querySelector<HTMLVideoElement>('video.artstage__layer[data-asset="media:a.mp4"]')!;
   const apply = (t: number) => act(() => { ref.current!.apply(t); });
   return { ref, play, video, apply };
@@ -153,4 +153,19 @@ test("clip art: clipMode 'play' makes apply play the clip; a scrub back seeks", 
   ref.current!.clipMode.current = "seek";
   apply(0.5);
   expect(video().currentTime).toBeCloseTo(0.5, 9);
+});
+
+// The clip enters with the SECOND beat (deck time 3): its clip time is deck time since entry,
+// not beat-local time or deck time itself.
+const V2 = doc([{ id: "s", beats: [
+  { id: "a", art: { to: "1.01", mode: "cut" }, timeline: [{ kind: "wait", ms: 3000 }] },
+  { id: "b", art: { to: "media:a.mp4", mode: "cut" }, timeline: [{ kind: "wait", ms: 3000 }] },
+] }]);
+
+test("clip art entering at a later beat: clip time counts from its entry in deck time", () => {
+  const { video, apply } = setupClip(V2);
+  apply(4.25);
+  expect(video().currentTime).toBeCloseTo(1.25, 9);
+  apply(5.5);
+  expect(video().currentTime).toBeCloseTo(2.5, 9);
 });

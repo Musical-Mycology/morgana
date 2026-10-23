@@ -152,3 +152,86 @@ describe("ArtStage autoplay — releasing removed video layers", () => {
     expect(releaseVideo).toHaveBeenCalledWith(v);
   });
 });
+
+describe("ArtStage — non-playing paths re-seek kept clips to the (edited) in-point", () => {
+  it("snap() re-seeks a kept clip to the new in-point and pauses it", () => {
+    const { ref, video } = setup();
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    ref.current!.snap(["media:a.mp4"], { "media:a.mp4": { in: 0 } });
+    const v = video()!;
+    pause.mockClear();
+    vi.spyOn(HTMLMediaElement.prototype, "paused", "get").mockReturnValue(false); // say it was playing
+    ref.current!.snap(["media:a.mp4"], { "media:a.mp4": { in: 2 } });
+    expect(video()).toBe(v);
+    expect(v.currentTime).toBe(2);
+    expect(pause.mock.contexts).toContain(v);
+  });
+
+  it("clipPlayback={false}: show() of the same stack still re-seeks to the new in-point", () => {
+    const { ref, video } = setup({ clipPlayback: false });
+    ref.current!.show(["media:a.mp4"], "fade", 1, { "media:a.mp4": { in: 1 } });
+    const v = video()!;
+    ref.current!.show(["media:a.mp4"], "fade", 1, { "media:a.mp4": { in: 3 } });
+    expect(video()).toBe(v);
+    expect(v.currentTime).toBe(3);
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it("autoplay show() leaves a kept, playing clip alone (its options came with the transition that brought it in)", () => {
+    const { ref, video } = setup();
+    ref.current!.show(["media:a.mp4"], "fade", undefined, { "media:a.mp4": { in: 1 } });
+    const v = video()!;
+    v.currentTime = 4; // it has been playing
+    ref.current!.show(["media:a.mp4"], "fade", undefined, { "media:a.mp4": { in: 3 } }); // same stack: no-op
+    ref.current!.show(["media:a.mp4", "MusicScore"], "fade", undefined, { "media:a.mp4": { in: 3 } }); // kept
+    expect(v.currentTime).toBe(4);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ArtStage autoplay — looping clips", () => {
+  const loopClip = { "media:a.mp4": { in: 1, loop: true } } as const;
+
+  it("a loop clip seeks back to its in-point on `ended` and plays again", () => {
+    const { ref, video } = setup();
+    ref.current!.show(["media:a.mp4"], "cut", undefined, loopClip);
+    const v = video()!;
+    v.currentTime = 9.5;
+    v.dispatchEvent(new Event("ended"));
+    expect(v.currentTime).toBe(1);
+    expect(playedOn().filter((c) => c === v)).toHaveLength(2);
+  });
+
+  it("a clip without loop does nothing on `ended` (holds its last frame)", () => {
+    const { ref, video } = setup();
+    ref.current!.show(["media:a.mp4"], "cut", undefined, { "media:a.mp4": { in: 1 } });
+    const v = video()!;
+    v.currentTime = 9.5;
+    v.dispatchEvent(new Event("ended"));
+    expect(v.currentTime).toBe(9.5);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it("once renderState takes the element over, `ended` no longer restarts it", () => {
+    const { ref, video } = setup();
+    ref.current!.show(["media:a.mp4"], "cut", undefined, loopClip);
+    const v = video()!;
+    ref.current!.renderState([{ asset: "media:a.mp4", opacity: 1, scale: 1, z: 1, overlay: false, since: 0, clip: { in: 1, loop: true } }], 0, 0, "seek");
+    expect(video()).toBe(v);
+    v.currentTime = 9.5;
+    play.mockClear();
+    v.dispatchEvent(new Event("ended"));
+    expect(v.currentTime).toBe(9.5);
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it("a disposed loop clip no longer restarts on `ended`", () => {
+    const { ref, video } = setup();
+    ref.current!.show(["media:a.mp4"], "cut", undefined, loopClip);
+    const v = video()!;
+    ref.current!.show(["1.01"], "cut");
+    play.mockClear();
+    v.dispatchEvent(new Event("ended"));
+    expect(play).not.toHaveBeenCalled();
+  });
+});
