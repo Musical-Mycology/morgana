@@ -21,7 +21,8 @@ export function BeatStage({
    *  straight through (design spec §7b §4.1). Optional: most callers just let it autoplay. */
   transport?: Ref<SlideTransport>;
   /** false = host-driven: no autoplay ticker; the host drives time via `transport.seek`
-   *  (the timed Player). Default true. */
+   *  (the timed Player). The slide then issues no art/nightlight, so a host that paints art
+   *  itself also passes `art={false}`. Default true. */
   autoplay?: boolean;
   /** false = don't mount this stage's own ArtStage: the host owns one (persistent across beats)
    *  and paints art + nightlight from art-clock (the timed Player). The wrapper's background is

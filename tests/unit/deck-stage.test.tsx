@@ -57,6 +57,16 @@ test("backward scrub across an art change shows only the earlier art", () => {
   expect(layer("1.02")).toBeNull();
 });
 
+test("backward scrub within a beat, to before its mid-beat art, shows only the entry art", () => {
+  const { layer, layers, apply } = setup(D);
+  apply(4); // beat b, after its crossfade to 1.02 (2.5 s → 3.4 s)
+  expect(layers()).toEqual(["1.02"]);
+  apply(2.2); // still beat b, before the crossfade starts
+  expect(layers()).toEqual(["1.01"]);
+  expect(layer("1.01")!.style.opacity).toBe("1");
+  expect(layer("1.02")).toBeNull();
+});
+
 // Beat a: nightlight → 1 over 400 ms at 0.5 s. Beat b (starts at 2 s) has entry nightlight 0 → a 200 ms
 // beat-entry transition back down.
 const N = doc([{ id: "s", beats: [
@@ -72,7 +82,7 @@ test("nightlight: the glow follows nightAt mid-transition", () => {
   expect(glow()).toBeCloseTo(0.15 + 0.45 * nightAt(tl, 0.7), 6);
 });
 
-test("nightlight survives a React re-render of the stage (beat swap mid-transition)", () => {
+test("glow/filter still match nightAt after a beat-change re-render (regression check)", () => {
   const { glow, apply, container } = setup(N);
   apply(0.7);
   expect(glow()).toBeCloseTo(0.15 + 0.45 * nightAt(tl, 0.7), 6);

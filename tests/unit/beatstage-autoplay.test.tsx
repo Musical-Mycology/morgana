@@ -40,17 +40,29 @@ const midArt: Beat = { id: "mid", art: { to: "1.01", mode: "cut" }, timeline: [
   { kind: "wait", ms: 2000 },
 ] };
 
+// midArt plus a line of text after the 2 s wait: present only once seeked past 2 s, so a stage
+// that wrongly mounted at the static end state would show it at mount.
+const midArtText: Beat = { ...midArt, id: "midText", timeline: [
+  { kind: "wait", ms: 2000 },
+  { kind: "text", value: "Late line", in: "fade" },
+  { kind: "art", art: { to: "3.01", mode: "cut" } },
+  { kind: "nightlight", to: 1 },
+  { kind: "wait", ms: 2000 },
+] };
+
 test("host-driven mode ignores a hidden tab at mount: no static end state, and it never issues art/nightlight", () => {
   const vis = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
   const add = vi.spyOn(gsap.ticker, "add");
   const transport = createRef<SlideTransport>();
-  const { container } = render(<BeatStage sceneId="s" beat={midArt} autoplay={false} transport={transport}
+  const { container } = render(<BeatStage sceneId="s" beat={midArtText} autoplay={false} transport={transport}
     entryLayers={["1.01"]} endLayers={["3.01"]} contained />);
-  // Not the static end state (which would cut to 3.01 at glow 0.6): host-driven, the host owns
+  // Mounted at t=0 (entry text), not the static end state; host-driven, the host owns
   // art + nightlight, so the slide issues none — at mount or on any seek.
+  expect(container.textContent).not.toContain("Late line");
   expect(layersOf(container)).toEqual([]);
   expect(glowOf(container)).toBeCloseTo(0.15);
   act(() => { transport.current!.seek(3); });
+  expect(container.textContent).toContain("Late line");
   expect(layersOf(container)).toEqual([]);
   expect(glowOf(container)).toBeCloseTo(0.15);
   expect(add).not.toHaveBeenCalled();

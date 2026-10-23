@@ -125,10 +125,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // lineBoxes.current) every time it lands inside an in-flight fade_out.
   const built = useRef<Map<number, { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement }>>(new Map());
   // Last-issued art transition (JSON of its ArtTransition, since object identity changes every
-  // render) and nightlight target. ArtStage.show() runs its own crossfade as a side effect on a
-  // SIBLING component — calling it on every scrub frame would restart that crossfade
-  // continuously, so renderAt's fold loop below only calls into the runtime when the folded
-  // value actually differs from what was last issued (design spec §7b §7, ambiguity res. #1).
+  // render) and nightlight target. Autoplay only (host-driven stages never call into the runtime
+  // for art/nightlight). ArtStage.apply() runs its own crossfade as a side effect on a SIBLING
+  // component, and the fold re-emits the reached action on every ticker frame — re-issuing it
+  // each frame would restart that crossfade continuously, so renderAt's fold loop below only
+  // calls into the runtime when the folded value actually differs from what was last issued
+  // (design spec §7b §7, ambiguity res. #1).
   // Cleared ONLY on an actual backward seek (the `t < lastT.current` preamble in renderAt), never
   // by resetFrom / a re-folded `clear` — review round 1 finding 1: `clear` wiping text has no
   // bearing on what art is on screen, and foldAt re-emits every reached action (including
@@ -193,7 +195,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // The hidden-tab case applies ONLY to autoplay: a host-driven stage (the timed Player)
     // paints every frame from transport.seek, so it must keep seek-driven rendering even when
     // it mounts in a background tab — otherwise it would mount at the end state and later
-    // seeks would never restore the entry state (design spec §10 "static mode at mount").
+    // seeks would never restore the entry text (design spec §10 "static mode at mount").
     const staticMode = !animate || (autoplay && document.visibilityState !== "visible");
     if (staticMode) {
       // Establish the FULL, self-contained end-state art stack directly (design spec §7b §7,
@@ -577,7 +579,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // forward frame — invalidates already-issued art/nightlight (ambiguity res. #3), and (by
       // the same reasoning) already-fired one-shot side effects (reveal_arrows/pulse_arrow):
       // clearing the whole set means anything still reached at the new `t` fires again this same
-      // call, and anything not yet re-reached fires again when forward-crossed later.
+      // call, and anything not yet re-reached fires again when forward-crossed later. The
+      // art/nightlight refs only matter for an autoplay stage seeked via transport: host-driven
+      // stages never issue art/nightlight (the host paints them from art-clock).
       appliedArt.current = null;
       appliedNight.current = null;
       firedOnce.current.clear();
