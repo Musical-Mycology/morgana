@@ -11,7 +11,7 @@ export function BeatThumbnail({ beat }: { beat: Beat }) {
   const textHost = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (textHost.current) renderBeatAt(beat.timeline, 0, { textHost: textHost.current, art: art.current });
+    if (textHost.current) renderBeatAt(beat.timeline, 0, { textHost: textHost.current, art: art.current, entryArt: beat.art });
   }, [beat]);
 
   return (

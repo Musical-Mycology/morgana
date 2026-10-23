@@ -31,7 +31,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     const beatIndex = loc ? loc.beatIdx : 0;
     const dur = () => (flat ? beatDuration(flat.beat.timeline) : 0);
     const draw = () => {
-      if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight });
+      if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight, entryArt: flat.beat.art });
       if (scene) objStage.current?.renderAt(scene, beatIndex, t.current);
       if (scene) notes.current?.renderAt(scene, beatIndex, t.current);
     };
