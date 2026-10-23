@@ -9,6 +9,10 @@ export type ClipMode = "play" | "seek";
 export const DRIFT_SEC = 0.1;
 
 const SEEK_EPS = 1e-4;
+/** Fallback if requestVideoFrameCallback never fires (opacity 0, off-viewport, occluded, hidden tab). */
+export const PRESENT_FALLBACK_MS = 250;
+/** A pending record that has not settled by now is reported failed so the render continues. */
+export const PENDING_WATCHDOG_MS = 10_000;
 
 type Stage = "meta" | "seeking" | "presenting" | "loading";
 interface SeekRec {
@@ -40,11 +44,6 @@ function recordFailure(el: HTMLVideoElement): void {
   if (!failed.includes(s)) failed.push(s);
 }
 
-function onNextFrame(el: HTMLVideoElement, cb: () => void): void {
-  if (typeof el.requestVideoFrameCallback === "function") el.requestVideoFrameCallback(() => cb());
-  else requestAnimationFrame(() => cb());
-}
-
 function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, existing?: SeekRec): void {
   if (existing) {
     // Re-seek while pending: one record per element, latest target wins.
@@ -59,12 +58,29 @@ function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, ex
   const ready = el.readyState >= 1;
   if (ready) {
     const t = clipT(el.duration);
-    if (Math.abs(el.currentTime - t) <= SEEK_EPS && !el.seeking) return; // already there: nothing to wait for
+    // already there AND a frame is decoded: nothing to wait for
+    if (Math.abs(el.currentTime - t) <= SEEK_EPS && !el.seeking && el.readyState >= 2) return;
   }
 
   let settled = false;
   let resolve!: () => void;
   const promise = new Promise<void>((r) => (resolve = r));
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  let presentTimer: ReturnType<typeof setTimeout> | undefined;
+  let rafId: number | undefined;
+
+  const clearPresent = () => {
+    if (presentTimer !== undefined) clearTimeout(presentTimer);
+    if (rafId !== undefined && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
+    presentTimer = rafId = undefined;
+  };
+  const armWatchdog = () => {
+    if (watchdog !== undefined) clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      recordFailure(el);
+      rec.finish();
+    }, PENDING_WATCHDOG_MS);
+  };
   const rec: SeekRec = {
     clipT,
     stage: "meta",
@@ -73,10 +89,14 @@ function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, ex
     finish: () => {
       if (settled) return;
       settled = true;
+      if (watchdog !== undefined) clearTimeout(watchdog);
+      watchdog = undefined;
+      clearPresent();
       el.removeEventListener("loadedmetadata", onMeta);
       el.removeEventListener("loadeddata", onLoaded);
       el.removeEventListener("seeked", onSeeked);
       el.removeEventListener("error", onError);
+      el.removeEventListener("emptied", onError);
       pending.delete(promise);
       if (records.get(el) === rec) records.delete(el);
       resolve();
@@ -84,13 +104,14 @@ function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, ex
     /** Write the latest target if it differs. Returns true when a write happened. */
     apply: () => {
       const t = rec.clipT(el.duration);
-      if (Math.abs(el.currentTime - t) > SEEK_EPS) {
-        el.currentTime = t;
-        rec.gen++;
-        rec.stage = "seeking";
-        return true;
-      }
-      return false;
+      if (Math.abs(el.currentTime - t) <= SEEK_EPS) return false;
+      // state first: the write may dispatch `seeked` synchronously
+      rec.gen++;
+      rec.stage = "seeking";
+      clearPresent();
+      armWatchdog();
+      el.currentTime = t;
+      return true;
     },
   };
   function onMeta() {
@@ -107,27 +128,35 @@ function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, ex
     if (rec.stage !== "seeking" || el.seeking) return; // el.seeking: a newer seek is still in flight
     rec.stage = "presenting";
     const g = rec.gen;
-    onNextFrame(el, () => {
+    const done = () => {
       if (rec.gen === g && rec.stage === "presenting") rec.finish();
-    });
+    };
+    // A video that is never presented (opacity 0, off-viewport, occluded) never fires rVFC: race a timer.
+    presentTimer = setTimeout(done, PRESENT_FALLBACK_MS);
+    if (typeof el.requestVideoFrameCallback === "function") el.requestVideoFrameCallback(done);
+    else rafId = requestAnimationFrame(done);
   }
   function onError() {
-    recordFailure(el);
+    recordFailure(el); // error, or emptied (src reassigned mid-seek)
     rec.finish();
   }
   el.addEventListener("loadedmetadata", onMeta);
   el.addEventListener("loadeddata", onLoaded);
   el.addEventListener("seeked", onSeeked);
   el.addEventListener("error", onError);
+  el.addEventListener("emptied", onError);
   records.set(el, rec);
   pending.add(promise);
-  if (ready) {
-    rec.stage = "seeking";
-    rec.apply();
-  }
+  armWatchdog();
+  if (ready) onMeta();
 }
 
-export function syncVideo(el: HTMLVideoElement, clipT: (duration: number) => number, mode: ClipMode): void {
+export function syncVideo(
+  el: HTMLVideoElement,
+  clipT: (duration: number) => number,
+  mode: ClipMode,
+  opts?: { loop?: boolean },
+): void {
   if (mode === "seek") {
     el.pause();
     seekExact(el, clipT, records.get(el));
@@ -135,9 +164,16 @@ export function syncVideo(el: HTMLVideoElement, clipT: (duration: number) => num
   }
   // play mode: never registers a pending promise
   if (el.readyState < 1) return; // metadata not here yet; the next paint retries
+  // A non-looping clip that reached its end stays on its last frame, never replayed.
+  if (!opts?.loop && el.ended) {
+    if (!el.paused) el.pause();
+    return;
+  }
+  // A seek is in flight: currentTime reports its target, so re-targeting would abort it every paint.
+  if (el.seeking) return;
   const d = el.duration;
   const t = clipT(d);
-  if (Number.isFinite(d) && t >= d - 2 * HOLD_EPSILON) {
+  if (!opts?.loop && Number.isFinite(d) && t >= d - 2 * HOLD_EPSILON) {
     // clamped at the end: hold the last frame, don't loop
     if (Math.abs(el.currentTime - t) > SEEK_EPS) el.currentTime = t;
     if (!el.paused) el.pause();
@@ -145,7 +181,7 @@ export function syncVideo(el: HTMLVideoElement, clipT: (duration: number) => num
     el.currentTime = t;
     el.play().catch(() => {});
   } else if (Math.abs(el.currentTime - t) > DRIFT_SEC) {
-    el.currentTime = t;
+    el.currentTime = t; // for a looping clip the wrap shows up here as drift
   }
 }
 

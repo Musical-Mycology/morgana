@@ -1,20 +1,39 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { createClipVideo, DRIFT_SEC, pendingVideoSeeks, releaseVideo, syncVideo } from "@/engine/components/video-sync";
+import {
+  createClipVideo,
+  DRIFT_SEC,
+  PENDING_WATCHDOG_MS,
+  pendingVideoSeeks,
+  PRESENT_FALLBACK_MS,
+  releaseVideo,
+  syncVideo,
+} from "@/engine/components/video-sync";
 import { HOLD_EPSILON } from "@/engine/deck/clip-clock";
 
 interface Fake {
   el: HTMLVideoElement;
-  s: { currentTime: number; paused: boolean; readyState: number; duration: number };
+  s: {
+    currentTime: number;
+    paused: boolean;
+    readyState: number;
+    duration: number;
+    seeking: boolean;
+    ended: boolean;
+    error: unknown;
+  };
   writes: number[];
   play: ReturnType<typeof vi.fn>;
   pause: ReturnType<typeof vi.fn>;
   fireFrame: () => void;
 }
 
+const made: HTMLVideoElement[] = [];
+
 function fake(init: Partial<Fake["s"]> = {}, opts: { rvfc?: boolean } = {}): Fake {
   const el = document.createElement("video");
   el.src = "http://localhost/clip.mp4";
-  const s = { currentTime: 0, paused: true, readyState: 1, duration: 5, ...init };
+  const s = { currentTime: 0, paused: true, readyState: 1, duration: 5, seeking: false, ended: false, error: null as unknown, ...init };
+  made.push(el);
   const writes: number[] = [];
   const frames: Array<() => void> = [];
   const play = vi.fn(() => {
@@ -32,7 +51,7 @@ function fake(init: Partial<Fake["s"]> = {}, opts: { rvfc?: boolean } = {}): Fak
       s.currentTime = v;
     },
   });
-  for (const k of ["paused", "readyState", "duration"] as const) {
+  for (const k of ["paused", "readyState", "duration", "seeking", "ended", "error"] as const) {
     Object.defineProperty(el, k, { configurable: true, get: () => s[k] });
   }
   Object.defineProperty(el, "play", { configurable: true, value: play });
@@ -59,6 +78,8 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
 });
 afterEach(async () => {
+  for (const el of made.splice(0)) releaseVideo(el); // one leaked record must not hang later hooks
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await pendingVideoSeeks();
 });
@@ -77,8 +98,8 @@ describe("seek mode", () => {
     expect(await p).toEqual([]);
   });
 
-  test("already within 1e-4: no write, resolves immediately", async () => {
-    const f = fake({ currentTime: 2 });
+  test("already within 1e-4 with a decoded frame: no write, resolves immediately", async () => {
+    const f = fake({ currentTime: 2, readyState: 2 });
     syncVideo(f.el, () => 2.00005, "seek");
     expect(f.writes).toEqual([]);
     expect(await pendingVideoSeeks()).toEqual([]);
@@ -99,6 +120,17 @@ describe("seek mode", () => {
     expect(await settled(p)).toBe(false);
     f.el.dispatchEvent(new Event("seeked"));
     f.fireFrame();
+    expect(await p).toEqual([]);
+  });
+
+  test("already at target but only metadata (readyState 1): waits for loadeddata", async () => {
+    const f = fake({ currentTime: 2, readyState: 1 });
+    syncVideo(f.el, () => 2, "seek");
+    expect(f.writes).toEqual([]);
+    const p = pendingVideoSeeks();
+    expect(await settled(p)).toBe(false);
+    f.s.readyState = 2;
+    f.el.dispatchEvent(new Event("loadeddata"));
     expect(await p).toEqual([]);
   });
 
@@ -173,12 +205,161 @@ describe("seek mode", () => {
     expect(raf).toHaveBeenCalledTimes(1);
   });
 
+  test("frame callback before seeked does not resolve", async () => {
+    const f = fake();
+    syncVideo(f.el, () => 2, "seek");
+    const p = pendingVideoSeeks();
+    f.fireFrame();
+    expect(await settled(p)).toBe(false);
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    expect(await p).toEqual([]);
+  });
+
+  test("seeked while el.seeking (newer seek in flight) is ignored", async () => {
+    const f = fake();
+    syncVideo(f.el, () => 2, "seek");
+    const p = pendingVideoSeeks();
+    f.s.seeking = true;
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    expect(await settled(p)).toBe(false);
+    f.s.seeking = false;
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    expect(await p).toEqual([]);
+  });
+
+  test("at target but el.seeking: waits for seeked instead of resolving", async () => {
+    const f = fake({ currentTime: 2, readyState: 2, seeking: true });
+    syncVideo(f.el, () => 2, "seek");
+    const p = pendingVideoSeeks();
+    expect(await settled(p)).toBe(false);
+    f.s.seeking = false;
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    expect(await p).toEqual([]);
+  });
+
+  test("element already in error: reports the src, registers nothing", async () => {
+    const f = fake({ readyState: 0, error: { code: 4 } });
+    syncVideo(f.el, () => 2, "seek");
+    expect(await pendingVideoSeeks()).toEqual([f.el.src]);
+    expect(f.writes).toEqual([]);
+  });
+
+  test("same src failing on two elements is reported once per drain", async () => {
+    const a = fake();
+    const b = fake();
+    syncVideo(a.el, () => 2, "seek");
+    syncVideo(b.el, () => 2, "seek");
+    const p = pendingVideoSeeks();
+    a.el.dispatchEvent(new Event("error"));
+    b.el.dispatchEvent(new Event("error"));
+    expect(await p).toEqual([a.el.src]);
+  });
+
+  test("emptied mid-seek finishes the record as a failure", async () => {
+    const f = fake();
+    syncVideo(f.el, () => 2, "seek");
+    const p = pendingVideoSeeks();
+    f.el.dispatchEvent(new Event("emptied"));
+    expect(await p).toEqual([f.el.src]);
+  });
+
+  test("a synchronously dispatched seeked during the write is not dropped", async () => {
+    const f = fake();
+    f.el.addEventListener("seeked", () => f.fireFrame());
+    // dispatch seeked from inside the currentTime setter
+    const desc = Object.getOwnPropertyDescriptor(f.el, "currentTime")!;
+    Object.defineProperty(f.el, "currentTime", {
+      configurable: true,
+      get: desc.get,
+      set: (v: number) => {
+        desc.set!.call(f.el, v);
+        f.el.dispatchEvent(new Event("seeked"));
+      },
+    });
+    syncVideo(f.el, () => 2, "seek");
+    expect(await pendingVideoSeeks()).toEqual([]);
+  });
+
   test("releaseVideo resolves a pending seek on a removed element", async () => {
     const f = fake();
     syncVideo(f.el, () => 2, "seek");
     const p = pendingVideoSeeks();
     releaseVideo(f.el);
     expect(await p).toEqual([]);
+  });
+});
+
+describe("bounded waits (fake timers)", () => {
+  test("rVFC never fires: resolves after the fallback, no failure", async () => {
+    vi.useFakeTimers();
+    const f = fake();
+    syncVideo(f.el, () => 2, "seek");
+    f.el.dispatchEvent(new Event("seeked"));
+    let out: string[] | undefined;
+    void pendingVideoSeeks().then((r) => (out = r));
+    await vi.advanceTimersByTimeAsync(PRESENT_FALLBACK_MS - 1);
+    expect(out).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(2);
+    expect(out).toEqual([]);
+  });
+
+  test("seeked never fires: the watchdog resolves it and reports the src", async () => {
+    vi.useFakeTimers();
+    const f = fake();
+    syncVideo(f.el, () => 2, "seek");
+    let out: string[] | undefined;
+    void pendingVideoSeeks().then((r) => (out = r));
+    await vi.advanceTimersByTimeAsync(PENDING_WATCHDOG_MS - 1);
+    expect(out).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(2);
+    expect(out).toEqual([f.el.src]);
+  });
+
+  test("a stalled metadata load is also bounded by the watchdog", async () => {
+    vi.useFakeTimers();
+    const f = fake({ readyState: 0, duration: NaN });
+    syncVideo(f.el, () => 2, "seek");
+    let out: string[] | undefined;
+    void pendingVideoSeeks().then((r) => (out = r));
+    await vi.advanceTimersByTimeAsync(PENDING_WATCHDOG_MS + 1);
+    expect(out).toEqual([f.el.src]);
+  });
+
+  test("no timers remain after finish", async () => {
+    vi.useFakeTimers();
+    const f = fake();
+    syncVideo(f.el, () => 2, "seek");
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("no timers remain after releaseVideo or an error", async () => {
+    vi.useFakeTimers();
+    const a = fake();
+    const b = fake();
+    syncVideo(a.el, () => 2, "seek");
+    syncVideo(b.el, () => 2, "seek");
+    releaseVideo(a.el);
+    b.el.dispatchEvent(new Event("error"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("rAF fallback path leaves no timers after finish", async () => {
+    vi.useFakeTimers();
+    const f = fake({}, { rvfc: false });
+    syncVideo(f.el, () => 2, "seek");
+    f.el.dispatchEvent(new Event("seeked"));
+    await vi.advanceTimersByTimeAsync(40); // a rAF tick
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
@@ -201,6 +382,41 @@ describe("play mode", () => {
     const f = fake({ paused: false, currentTime: 1 });
     syncVideo(f.el, () => 1.2, "play");
     expect(f.writes).toEqual([1.2]);
+  });
+
+  test("a seek in flight: leaves the element alone (no seek storm)", () => {
+    const paused = fake({ seeking: true });
+    syncVideo(paused.el, () => 3, "play");
+    expect(paused.writes).toEqual([]);
+    expect(paused.play).not.toHaveBeenCalled();
+    const playing = fake({ seeking: true, paused: false, currentTime: 1 });
+    syncVideo(playing.el, () => 3, "play");
+    expect(playing.writes).toEqual([]);
+  });
+
+  test("loop clip near its end keeps playing", () => {
+    const f = fake({ paused: false, currentTime: 4.9995 });
+    syncVideo(f.el, () => 5 - HOLD_EPSILON / 2, "play", { loop: true });
+    expect(f.pause).not.toHaveBeenCalled();
+    expect(f.writes).toEqual([]);
+  });
+
+  test("loop clip wrap shows up as drift and re-seeks", () => {
+    const f = fake({ paused: false, currentTime: 4.9 });
+    syncVideo(f.el, () => 0.1, "play", { loop: true });
+    expect(f.writes).toEqual([0.1]);
+  });
+
+  test("non-loop clip that ended while the deck trails is held, not replayed", () => {
+    const f = fake({ paused: false, ended: true, currentTime: 5 });
+    syncVideo(f.el, () => 3, "play");
+    expect(f.pause).toHaveBeenCalled();
+    expect(f.play).not.toHaveBeenCalled();
+    expect(f.writes).toEqual([]);
+    const g = fake({ paused: true, ended: true, currentTime: 5 });
+    syncVideo(g.el, () => 3, "play");
+    expect(g.play).not.toHaveBeenCalled();
+    expect(g.writes).toEqual([]);
   });
 
   test("held at end: pauses, does not loop", () => {
