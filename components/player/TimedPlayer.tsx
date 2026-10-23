@@ -1,10 +1,7 @@
 "use client";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DeckDoc } from "@/engine/deck-doc";
-import { BeatStage } from "@/engine/authoring/BeatStage";
-import type { SlideTransport } from "@/engine/components/layouts/CinematicSlide";
-import { flattenStory, resolveBeatArt, resolveEntryArt } from "@/engine/deck/flatten";
-import { deckLayout, locate, type Located } from "@/engine/authoring/deck-clock";
+import { useDeckStage } from "./DeckStage";
 import { formatClock } from "@/lib/timing/clock-format";
 import { TimeBar } from "@/components/timing/TimeBar";
 import { loadSoundtrack, type Soundtrack } from "@/lib/audio/soundtrack";
@@ -16,33 +13,10 @@ const HUD_IDLE_MS = 2000;
  *  timer drives T instead. Must stay well above the ~170 ms a real context takes to start. */
 const AUDIO_STALL_MS = 500;
 
-/** One mounted BeatStage for the whole deck. Memoised on the beat so the per-frame clock
- *  re-render never re-renders the stage; only a beat change does. */
-const Stage = memo(function Stage({ doc, flatIdx, transport }: { doc: DeckDoc; flatIdx: number; transport: React.RefObject<SlideTransport | null> }) {
-  const slides = useMemo(() => flattenStory(doc.scenes), [doc]);
-  const slide = slides[flatIdx];
-  const entryLayers = useMemo(() => resolveEntryArt(slides, flatIdx).layers, [slides, flatIdx]);
-  const endLayers = useMemo(() => resolveBeatArt(slides, flatIdx).layers, [slides, flatIdx]);
-  if (!slide || slide.layout !== "cinematic") return null;
-  const scene = doc.scenes.find((s) => s.id === slide.slots.sceneId)!;
-  const beatIndex = scene.beats.indexOf(slide.slots.beat);
-  return (
-    <BeatStage
-      sceneId={slide.slots.sceneId} beat={slide.slots.beat} scene={scene} beatIndex={beatIndex}
-      entryLayers={entryLayers} endLayers={endLayers} entryNight={slide.nightlight}
-      chrome={doc.meta.chrome} autoplay={false} transport={transport} contained
-    />
-  );
-});
-
 export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; initialT?: number; loadTrack?: (url: string) => Promise<Soundtrack> }) {
-  const layout = useMemo(() => deckLayout(doc), [doc]);
+  // The picture (beat + art + nightlight) as a function of deck time; its `apply` is the only writer of T.
+  const { apply, T, displayT, loc, layout, stage } = useDeckStage(doc, initialT);
   const target = doc.meta.timing?.targetSec;
-  const transport = useRef<SlideTransport>(null);
-  const T = useRef(Math.max(0, Math.min(layout.total, initialT)));
-  const [displayT, setDisplayT] = useState(T.current);
-  const [loc, setLoc] = useState<Located | null>(() => locate(layout, T.current));
-  const locRef = useRef(loc);
   const [playing, setPlaying] = useState(false);
   const [hudVisible, setHudVisible] = useState(true);
   const [hudPinned, setHudPinned] = useState(true); // H toggles; when false the HUD stays hidden
@@ -60,18 +34,6 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
   /** The rAF loop's view of the audio clock: its last reading, when (rAF time) it last changed,
    *  and whether it is stalled (timer driving T). `lastT: null` = no reading since a (re)start. */
   const audioClock = useRef<{ lastT: number | null; movedAt: number; stalled: boolean }>({ lastT: null, movedAt: 0, stalled: false });
-
-  /** Move the deck clock to `to` and paint. A beat change re-renders <Stage>; the seek for the
-   *  new beat happens in the layout effect below so the first painted frame is already at localT. */
-  const apply = useCallback((to: number) => {
-    T.current = Math.max(0, Math.min(layout.total, to));
-    const next = locate(layout, T.current);
-    const prev = locRef.current;
-    locRef.current = next;
-    if (next?.flatIdx !== prev?.flatIdx || next?.phase !== prev?.phase || next?.sceneIdx !== prev?.sceneIdx) setLoc(next);
-    else if (next && next.flatIdx != null) transport.current?.seek(next.localT);
-    setDisplayT(T.current);
-  }, [layout]);
 
   /** A seek: move T, and while playing restart the soundtrack there so sound and picture agree. */
   const seekTo = useCallback((to: number) => {
@@ -97,12 +59,6 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
     audioClock.current.lastT = null;
     if (playing) track.play(T.current); else track.pause();
   }, [playing, track]);
-
-  // Children's layout effects (CinematicSlide's beat setup) run before this one, so the seek
-  // lands on the freshly-mounted beat before the browser paints.
-  useLayoutEffect(() => {
-    if (loc && loc.flatIdx != null) transport.current?.seek(locRef.current?.localT ?? loc.localT);
-  }, [loc]);
 
   // The one clock: a single rAF loop while playing. While the soundtrack plays, ITS clock is
   // the deck clock; otherwise (no track, decode failed, past its end, stalled) the timer is.
@@ -205,7 +161,7 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
   return (
     <div className="play" onPointerMove={wake}>
       <div className="play__frame" data-testid="play-stage">
-        {loc && loc.flatIdx != null && <Stage doc={doc} flatIdx={loc.flatIdx} transport={transport} />}
+        {stage}
       </div>
       {hudPinned && (
         <div className={`play__hud${hudVisible ? "" : " play__hud--hidden"}`} data-testid="play-hud">

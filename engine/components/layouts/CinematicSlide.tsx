@@ -61,10 +61,6 @@ export interface CinematicRuntime {
   resolveEntry(): StoryAsset[];
   /** End-state layers for this beat (after all its art ops) — for PDF/static. */
   resolveEnd(): StoryAsset[];
-  /** Optional: this beat's flattened ENTRY nightlight, for a host-driven (seek-slaved) stage to
-   *  restore on a backward seek within the beat. `undefined` = nothing to restore. Runtimes that
-   *  never seek backward (live /story, PDF) simply omit it. */
-  resolveEntryNight?(): number | undefined;
   /** Jump to a 0-based slide index (inline jump links). */
   jumpTo(index: number): void;
 }
@@ -100,7 +96,8 @@ interface Props {
    *  seeked in lockstep, including across click_gate pauses. */
   onTime?: (t: number) => void;
   /** false = never start the autoplay ticker on mount; the host drives time via
-   *  `transport.seek` (the timed Player). Entry art is still issued. Default true. */
+   *  `transport.seek` (the timed Player). Host-driven: the host paints art + nightlight from
+   *  art-clock, so this slide never calls runtime.art/applyArt/setNightlight. Default true. */
   autoplay?: boolean;
 }
 
@@ -128,10 +125,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // lineBoxes.current) every time it lands inside an in-flight fade_out.
   const built = useRef<Map<number, { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement }>>(new Map());
   // Last-issued art transition (JSON of its ArtTransition, since object identity changes every
-  // render) and nightlight target. ArtStage.show() runs its own crossfade as a side effect on a
-  // SIBLING component — calling it on every scrub frame would restart that crossfade
-  // continuously, so renderAt's fold loop below only calls into the runtime when the folded
-  // value actually differs from what was last issued (design spec §7b §7, ambiguity res. #1).
+  // render) and nightlight target. Autoplay only (host-driven stages never call into the runtime
+  // for art/nightlight). ArtStage.apply() runs its own crossfade as a side effect on a SIBLING
+  // component, and the fold re-emits the reached action on every ticker frame — re-issuing it
+  // each frame would restart that crossfade continuously, so renderAt's fold loop below only
+  // calls into the runtime when the folded value actually differs from what was last issued
+  // (design spec §7b §7, ambiguity res. #1).
   // Cleared ONLY on an actual backward seek (the `t < lastT.current` preamble in renderAt), never
   // by resetFrom / a re-folded `clear` — review round 1 finding 1: `clear` wiping text has no
   // bearing on what art is on screen, and foldAt re-emits every reached action (including
@@ -196,7 +195,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // The hidden-tab case applies ONLY to autoplay: a host-driven stage (the timed Player)
     // paints every frame from transport.seek, so it must keep seek-driven rendering even when
     // it mounts in a background tab — otherwise it would mount at the end state and later
-    // seeks would never restore the entry state (design spec §10 "static mode at mount").
+    // seeks would never restore the entry text (design spec §10 "static mode at mount").
     const staticMode = !animate || (autoplay && document.visibilityState !== "visible");
     if (staticMode) {
       // Establish the FULL, self-contained end-state art stack directly (design spec §7b §7,
@@ -220,7 +219,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // this branch (e.g. suppress renderAt's art/nightlight dispatch for this one static call)
       // if/when a `keep`/`out` mid-timeline `art` action is authored anywhere (see task 11
       // report — flagged and deferred, not fixed, per the brief's literal replacement).
-      runtime.art(runtime.resolveEnd(), "cut");
+      if (autoplay) runtime.art(runtime.resolveEnd(), "cut"); // host-driven: the host paints art + nightlight from art-clock
       // The settled state IS the fold at the end of the axis: every action kind (text, clear,
       // fade_out, counters, media, art, nightlight, rotateList, reveal_again, the one-shot
       // arrows/pulse calls) already renders correctly from renderAt(t) — Tasks 5-8 built exactly
@@ -239,15 +238,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     }
 
     // Entry art: resolveEntry() already folds this beat's entry transition, so show
-    // it as an absolute cross-fade using the entry op's mode.
-    // Autoplay visits beats strictly in order, so a beat with no `art` op of its own can rely on
-    // ArtStage's live stack already holding the art it inherits. A host-driven stage cannot: a
-    // scrub/deep link/backward jump lands on a beat whose predecessors never played here, so it
-    // ALWAYS issues the resolved entry stack (an inheriting beat cuts to it). Straight-through
-    // play into an inheriting beat stays seamless because ArtStage.show() is a no-op when the
-    // target stack already equals the live one (an in-flight crossfade is left running).
-    if (!autoplay) runtime.art(runtime.resolveEntry(), slots.beat.art?.mode ?? "cut", slots.beat.art?.durationMs);
-    else if (slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs);
+    // it as an absolute cross-fade using the entry op's mode. Autoplay visits beats strictly in
+    // order, so a beat with no `art` op of its own relies on ArtStage's live stack already holding
+    // the art it inherits. Host-driven: the host paints art + nightlight from art-clock.
+    if (autoplay && slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs);
 
     // Autoplay from t=0 — observable behaviour is unchanged from the old per-segment
     // machinery (design spec §7b §4.4): a ticker now drives the single time axis instead of
@@ -585,21 +579,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // forward frame — invalidates already-issued art/nightlight (ambiguity res. #3), and (by
       // the same reasoning) already-fired one-shot side effects (reveal_arrows/pulse_arrow):
       // clearing the whole set means anything still reached at the new `t` fires again this same
-      // call, and anything not yet re-reached fires again when forward-crossed later.
+      // call, and anything not yet re-reached fires again when forward-crossed later. The
+      // art/nightlight refs only matter for an autoplay stage seeked via transport: host-driven
+      // stages never issue art/nightlight (the host paints them from art-clock).
       appliedArt.current = null;
       appliedNight.current = null;
       firedOnce.current.clear();
-      // Host-driven: the art/nightlight the forward fold issued (mid-beat `art`, `nightlight`
-      // actions) are live state on SIBLING components, not DOM this component can tear down —
-      // nulling the diff refs above only lets them re-issue. Restore the beat's entry baseline
-      // first, so the refold below re-applies exactly the actions reached by `t` onto the true
-      // entry stack (and an action no longer reached is genuinely undone). Autoplay callers
-      // keep their existing behaviour.
-      if (!autoplay) {
-        runtime.art(runtime.resolveEntry(), "cut");
-        const entryNight = runtime.resolveEntryNight?.();
-        if (typeof entryNight === "number") runtime.setNightlight(entryNight);
-      }
     }
     // Counter state is a fold over the reached actions (design spec §7b §5): counter_show
     // seeds {from,to}; counter_to/counter_add advance it, tracking `from` as the PREVIOUS
@@ -716,6 +701,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         continue;
       }
       if (f.action.kind === "art") {
+        if (!autoplay) continue; // host-driven: the host paints art + nightlight from art-clock
         // Diff against the last-issued transition, not the fold's own phase: the fold re-emits
         // this same entry on every frame within the action's window (settled or in-flight), and
         // ArtStage.show() runs its own crossfade as a side effect, so re-issuing on every frame
@@ -733,6 +719,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         continue;
       }
       if (f.action.kind === "nightlight") {
+        if (!autoplay) continue; // host-driven: the host paints art + nightlight from art-clock
         if (appliedNight.current !== f.action.to) {
           appliedNight.current = f.action.to;
           runtime.setNightlight(f.action.to, f.phase === "settled" ? 0 : f.action.durationMs);
@@ -1032,6 +1019,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
           to   { opacity: 1; transform: translateX(-50%); }
         }
         @media (prefers-reduced-motion: reduce) { .cin__ending { animation: none; } }
+        /* MP4 render page: interactive end-cards are not part of a rendered video (spec §2.4) — and
+           frames are a pure function of deck time, so no wall-clock entrance animation either. */
+        html[data-render="1"] .cin__ending { display: none; animation: none; }
         /* Primary Vision-link pills (solid brand ink). */
         .cin__cta { pointer-events: auto; cursor: pointer; text-decoration: none; white-space: nowrap;
           font-family: var(--font-display); font-size: clamp(1rem, 1.8cqw, 1.4rem); letter-spacing: 0.03em;

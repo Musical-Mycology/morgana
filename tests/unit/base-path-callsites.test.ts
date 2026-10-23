@@ -127,7 +127,8 @@ test("every ALLOWED_RAW_URL_LITERAL entry still matches RAW_URL_LITERAL", () => 
  * (file no longer contains fetch( at all) fails the test below on its own.
  */
 const ALLOWED_RAW_FETCH: Record<string, string> = {
-  // (none at present — every current fetch( call site imports withBasePath())
+  "lib/render/run.ts":
+    "Node-side MP4 CLI: fetches absolute URLs built from --base-url, which already carries any sub-path (spec §4); withBasePath() would double it.",
 };
 
 const BASE_PATH_IMPORT = /from\s+["']@\/lib\/base-path["']/;

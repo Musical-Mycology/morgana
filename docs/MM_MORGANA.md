@@ -97,7 +97,8 @@ Notable in-repo docs:
 - **Timed video is a six-part roadmap** driven by a Morgana-rendered festival submission video
   (spec `docs/superpowers/specs/2026-10-22-deck-clock-timed-player-design.md` §0.2): (1) deck
   clock + timed Player — **landed**; (2) soundtrack + deck media store — **landed** (spec
-  `docs/superpowers/specs/2026-10-23-soundtrack-design.md`); (3) frame-stepped MP4 render; (4) video
+  `docs/superpowers/specs/2026-10-23-soundtrack-design.md`); (3) frame-stepped MP4 render —
+  **landed** (spec `docs/superpowers/specs/2026-10-24-mp4-render-design.md`); (4) video
   clips; (5) camera moves; (6) credits + text particles. Each later sub-project gets its own
   spec → plan.
   **Gotcha, now RESOLVED (§7b, 2026-07-28) — `CinematicSlide`'s GSAP master used to be a
@@ -127,8 +128,8 @@ Notable in-repo docs:
   compatibility but is inert. Do not re-add per-sprite GSAP tweens: a second note animation
   implementation is exactly the drift liability §7 exists to remove.
   **Purity is a one-way import rule, and — as of §7b — it is enforced.**
-  `note-state.ts`, `lib/editor/object-state.ts`, `engine/authoring/deck-clock.ts` and
-  `lib/timing/clock-format.ts` must not import anything that touches the DOM (`beat-clock.ts`
+  `note-state.ts`, `lib/editor/object-state.ts`, `engine/authoring/deck-clock.ts`,
+  `engine/authoring/art-clock.ts` and `lib/timing/clock-format.ts` must not import anything that touches the DOM (`beat-clock.ts`
   included, since they depend on it): the dependency runs *toward* these pure cores and never
   back. `tests/unit/pure-import-graph.test.ts` walks each module's
   runtime import graph (type-only imports are erased, so they don't count) and fails if any
@@ -158,20 +159,44 @@ Notable in-repo docs:
 - **Host-driven mode: `autoplay={false}` (timed video sub-project 1).** `CinematicSlide` /
   `BeatStage` accept `autoplay={false}`: no ticker is ever registered, the mount paints `t=0`,
   and the host owns time via `transport.seek`. This is how the timed Player drives a deck, and
-  how sub-project 3's frame-stepped export will. Host-driven mode carries three obligations
-  that autoplay never needed, because autoplay always visits beats in order:
-  - **Entry art is always re-issued** on beat change (`runtime.resolveEntry()`, with the
-    beat's own mode or `"cut"`), not only `if (beat.art)`. Otherwise a beat that *inherits* its
-    art and is reached by a jump shows whatever ArtStage last had. `ArtStage.show` is a no-op
-    when the target stack equals the current stack, so straight-through play into an
-    inheriting beat doesn't cut an in-flight crossfade.
-  - **A backward seek restores the entry baseline** (`resolveEntry()` art + the optional
-    `runtime.resolveEntryNight()`) before refolding, so seeking back past a mid-beat
-    `art`/`nightlight` action undoes it.
-  - **Inherited nightlight comes from the host**: `BeatStage`'s `entryNight` prop is applied
-    during render (not in an effect), so it lands before `CinematicSlide`'s mount effect and a
-    beat's own t=0 `nightlight` action still wins. `CinematicSlide` itself only ever issues
-    nightlight for `nightlight` *actions*.
+  how `/render` does. **A host-driven `CinematicSlide` never issues art or nightlight** — not on
+  mount, not in `renderAt`'s fold, not in static mode (all gated on `autoplay`). The host paints
+  them as a pure function of deck time (next bullet). The sub-project-1 workarounds (always
+  re-issue entry art, backward-seek entry baseline, `BeatStage`'s `entryNight` prop,
+  `runtime.resolveEntryNight`) were deleted in sub-project 3 — don't bring them back.
+- **Art + nightlight are pure functions of deck time** (`engine/authoring/art-clock.ts`, sub-project
+  3). `artEvents(doc)`/`artAt(events, T)` give the art layer stack (asset, opacity, scale, z,
+  overlay) at any `T`; `nightEvents`/`nightAt` the nightlight. Eases are closed-form GSAP ports
+  (`power2.inOut`, `back.out(2)`) and durations come from `ART_DURATION_MS`, shared with
+  `ArtStage`. `ArtStage.renderState(layers, night)` paints that state statelessly (reconciles
+  layers by asset, kills stale tweens, `transition: none` on the glow). `useDeckStage`
+  (`components/player/DeckStage.tsx`) owns the one host `ArtStage` (`BeatStage art={false}`) and
+  its `apply(T)` — the only writer of `T` — paints art + night every call. Deliberate
+  differences from autoplay, all ruled: a mid-beat `art` action crossfades over its authored
+  duration (autoplay cuts); a kept layer still fading in continues its fade (autoplay pops to 1);
+  an empty pinned scene shows the current art on brown (not black).
+  **Gotcha:** the host must pass `ArtStage` a **constant** `nightlight` prop — React rewrites the
+  prop-derived inline filter/glow whenever the prop changes, clobbering what `renderState`
+  painted. **Known divergence (parked):** thumbnails/editor (`resolveEntryArt`) still fold art
+  that falls past an overrun pinned scene's cut; `/play` and the render drop it. Lint flags
+  overruns; §7c's editor move to `artAt` resolves it.
+- **MP4 render: `npm run render -- --deck <id> --out <file.mp4>`** (`scripts/render.ts`,
+  `lib/render/{args,ffmpeg,run}.ts`; README "Render to MP4"). Runs on the user's machine against a
+  running Morgana (`--base-url`, carries any sub-path — no `withBasePath` in the CLI). Playwright
+  Chromium opens `/render?deck=<id>` (`components/player/RenderStage.tsx`, chrome-free, sets
+  `html[data-render="1"]`, which also hides the Next dev indicator and `.cin__ending` end-cards),
+  calls `window.__morganaRender.renderFrame(T)` (`flushSync(apply)` → image decode → fonts → 2
+  rAFs), screenshots PNG, pipes to system ffmpeg (`FFMPEG_PATH`; H.264 yuv420p CRF 18 + AAC 192k,
+  soundtrack `-ss <from>` + `apad`). Fonts and every `NOTE_GLYPHS` mask are preloaded before
+  `ready`; decode failures are reported once per src, render continues. Exit codes: 0 ok, 1
+  render failure (incl. page `ready:false`, frame timeout `FRAME_TIMEOUT_MS` 60 s, any
+  `pageerror` — fatal on purpose: there's no error boundary, so a crashed root would otherwise
+  encode black frames with exit 0), 2 usage/setup, 130 Ctrl-C (detected via `signal.aborted`,
+  since a terminal Ctrl-C also kills Chromium/ffmpeg). Cleanup kills ffmpeg (SIGKILL — a graceful
+  ffmpeg would finalise the partial file) and unlinks `--out` only if a frame was written.
+  Determinism is gated by `e2e/render-page.spec.ts` (stepped vs jumped frames byte-equal). Width
+  and height must be even; use 16:9 (no letterbox on `/render`). Prefer `npm run build && npm
+  start` for final renders.
 - **`BeatStage` drives text, notes, and objects from one clock.** `CinematicSlide`'s `onTime`
   fires with the exact beat-local `t` it just painted (from the ticker, from `seek()`, or from
   the static-mode settle), and `BeatStage` paints `ObjectStage` and `NoteField` from that same
@@ -192,7 +217,8 @@ Notable in-repo docs:
   optional under `version: 1`; turning "Timed deck" off must *remove* `timing`, never write
   `null` (validation rejects `null`).
 - **The timed Player is `/play?deck=<id>[&t=<seconds>]`** (`components/player/TimedPlayer.tsx`).
-  ONE `BeatStage` stays mounted (memoised per beat) with `autoplay={false}`; a single rAF loop
+  ONE `BeatStage` stays mounted (memoised per beat) with `autoplay={false}`, owned by
+  `useDeckStage` (shared with `/render`); a single rAF loop
   advances deck time `T`, `locate(T)` picks the beat, the `beat` prop swaps on boundaries, and
   the seek for a new beat happens in a `useLayoutEffect` so the first painted frame is already
   at `localT` (child layout effects — `CinematicSlide`'s setup — run before the parent's). Same-
@@ -276,9 +302,9 @@ Notable in-repo docs:
   already-resolved stack in this branch and can produce duplicate layers or a wrong final
   composition. This was flagged and deliberately left unfixed during §7b (not in scope); fix
   it (e.g. suppress `renderAt`'s art dispatch for this one static call) before or alongside the
-  first `keep`/`out`-bearing mid-timeline `art` action. Host-driven mode adds a sibling of this
-  edge: its entry-baseline re-issue (`resolveEntry()` on beat change and backward seek) also
-  hands `keep`/`out` an already-resolved stack, so audit both paths together.
+  first `keep`/`out`-bearing mid-timeline `art` action. (Static mode's explicit `resolveEnd`
+  art is now autoplay-only, and host-driven mode no longer issues art at all — `art-clock.ts`
+  folds `keep`/`out` against the true prior stack — so only the autoplay static path remains.)
 
 When syncing this deep-dive after a Morgana change, remember the split:
 architecture/role/contract facts belong **here**; feature design detail belongs
@@ -372,7 +398,9 @@ missing file), which the `update_meta` description now says.
 ## CI / ops
 
 CI runs in **GitHub Actions** (unit + e2e), keeping the repo free of MM infra
-coupling — mm-jenkins is intentionally *not* used here. No Kuma monitor and no
+coupling — mm-jenkins is intentionally *not* used here. The e2e job `apt-get install`s ffmpeg for
+`e2e/render-cli.spec.ts` (ffprobe-checked MP4), which skips locally without ffmpeg but
+**fails** under `CI`. No Kuma monitor and no
 hosting target yet (`ci_pipeline: none`, `expected_kuma_monitor: none` in
 `mm-meta.yml`) until a deployment is chosen.
 

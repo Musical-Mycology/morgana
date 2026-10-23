@@ -123,6 +123,58 @@ appears on the ruler and the Player scrubber, and **+ Marker** on the ruler drop
 (rename or retime them in Deck settings) to help line scenes up with the music. Uploads are stored
 per deck under `MORGANA_DATA_DIR/media/<deckId>/` and are deleted with the deck.
 
+### Render to MP4
+
+`npm run render` turns a timed deck into an MP4 (H.264 video, AAC soundtrack) by stepping the deck
+clock frame by frame in headless Chromium and piping the frames into ffmpeg. It reads the deck and
+its soundtrack from a **running** Morgana (`npm run dev`, Docker, or the production server), so the
+deck must exist there and its soundtrack must be uploaded. For final renders, use the production
+server (`npm run build && npm start`) rather than `npm run dev`, which compiles pages on demand
+and injects dev-only tooling into the page.
+
+**Prerequisites.** A running Morgana, and `ffmpeg` on your `PATH` (macOS: `brew install ffmpeg`;
+Debian/Ubuntu/WSL: `sudo apt install ffmpeg`). Set `FFMPEG_PATH` to use a binary elsewhere
+(the end-to-end render test also honours `FFPROBE_PATH`). Chromium comes from Playwright (`npx playwright install chromium`).
+
+```bash
+npm run render -- --deck <id> --out talk.mp4
+npm run render -- --deck <id> --out clip.mp4 --from 30 --to 45      # partial render, seconds
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--deck` | required | Deck id. |
+| `--out` | required | Output `.mp4` path (overwritten if it exists). |
+| `--base-url` | `http://localhost:3000` | Where Morgana is running; include any sub-path (e.g. `http://localhost:3000/morgana`). |
+| `--fps` | `30` | Frames per second (greater than 0). |
+| `--width` / `--height` | `1920` / `1080` | Frame size in pixels; both must be even (H.264 yuv420p). Use a 16:9 size: the page fills the viewport without letterboxing, so other aspect ratios stretch the layout. |
+| `--from` | `0` | Start time in seconds. At or past the deck's end is an error. |
+| `--to` | deck end | End time in seconds. Past the deck's end it is clamped, with a warning. |
+
+Each flag may be given once; repeating one is rejected.
+
+Frames are **deterministic**: the frame at time T renders identically however it is reached
+(stepped from 0 or jumped to), so partial renders match the full render. The soundtrack is muxed as
+AAC 192k, offset by `--from` so partial renders stay in sync, and padded with silence to the video
+length. A pinned scene with no beats shows the current art over a dark-brown background, not black.
+An image that fails to load is reported once (`warning: frame i (T=…): image failed to decode: <src>`)
+and the render carries on with whatever the browser shows. A frame that takes longer than 60 s, or an
+error or crash in the render page, stops the render with exit code `1`.
+
+Progress goes to stderr about once a second (`frame i/N · x.x fps · ETA m:ss`); a 2:00 deck at the defaults is
+3,600 frames, so render time depends on how fast your machine screenshots and encodes them. Ctrl-C stops cleanly (closes Chromium and ffmpeg and removes the
+partial output); a second Ctrl-C forces the exit.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Done. |
+| `1` | Render failure, including the render page reporting an error. |
+| `2` | Usage or setup: bad arguments, ffmpeg missing, deck not found, soundtrack missing, or the page never became ready. |
+| `130` | Aborted with Ctrl-C. |
+
+The CLI drives `/render?deck=<id>`, an internal page that exposes the frame-stepping hook; it is
+for the CLI, not for people.
+
 ---
 
 ## Run it

@@ -6,6 +6,7 @@ import type { ArtMode, ArtTransition } from "@/engine/deck/types";
 import { applyArt } from "@/engine/deck/flatten";
 import { isOverlay, type StoryAsset } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
+import { ART_DURATION_MS, type ArtLayerState } from "@/engine/authoring/art-clock";
 
 export interface ArtStageHandle {
   /** Cross-fade the visible stack to exactly `layers` (bottom→top) using `mode`. A no-op when
@@ -16,11 +17,12 @@ export interface ArtStageHandle {
   apply(transition: ArtTransition, durationMs?: number): void;
   /** Snap instantly (reduced motion / jump nav / PDF). */
   snap(layers: StoryAsset[]): void;
+  /** Stateless paint of exactly `layers` (bottom→top by array order; each layer's `z` drives
+   *  stacking) plus the nightlight level `night`. For host-driven / render callers that compute
+   *  the state at any deck time: creates no tweens and sets no CSS transition, so the result is
+   *  the same whether reached by stepping or jumping. */
+  renderState(layers: ArtLayerState[], night: number): void;
 }
-
-const DUR: Record<ArtMode, number> = {
-  cut: 0, fade: 700, crossfade: 900, morph: 800, dissolve: 1100,
-};
 
 interface Props { nightlight: number; reduced?: boolean; transparentBg?: boolean }
 
@@ -41,7 +43,7 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
   function render(targets: StoryAsset[], mode: ArtMode, durationMs?: number) {
     const host = root.current;
     if (!host) return;
-    const d = (durationMs ?? DUR[mode]) / 1000;
+    const d = (durationMs ?? ART_DURATION_MS[mode]) / 1000;
     const existing = Array.from(host.querySelectorAll<HTMLImageElement>(".artstage__layer"));
     const kept: HTMLImageElement[] = [];
     const added: HTMLImageElement[] = [];
@@ -94,14 +96,43 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
 
   useImperativeHandle(ref, () => ({
     show: (layers, mode, durationMs) => {
-      // A host-driven stage (the timed Player) issues its resolved entry stack on EVERY beat
-      // change; playing straight into a beat that merely inherits its art must leave the
-      // in-flight stack (and any crossfade into it) alone.
+      // Re-showing the stack already on screen (an entry art that folds to the stack the beat
+      // inherits) must leave the in-flight stack (and any crossfade into it) alone. art-clock's
+      // artEvents mirrors this by dropping such no-op entry events.
       if (sameStack(layers, current.current)) return;
       render(layers, mode, durationMs);
     },
     apply: (transition, durationMs) => render(applyArt(current.current, transition), transition.mode, durationMs ?? transition.durationMs),
     snap: (layers) => render(layers, "cut"),
+    renderState: (layers, night) => {
+      const host = root.current;
+      if (!host) return;
+      const existing = Array.from(host.querySelectorAll<HTMLImageElement>(".artstage__layer"));
+      const used = new Set<HTMLImageElement>();
+      const els = layers.map((l) => {
+        let el = existing.find((e) => e.dataset.asset === l.asset && !used.has(e));
+        if (el) gsap.killTweensOf(el); // a stale in-flight fade must not remove or re-fade it
+        else {
+          el = document.createElement("img");
+          el.src = assetsRef.current.story(l.asset);
+          el.className = "artstage__layer";
+          el.dataset.asset = l.asset;
+        }
+        used.add(el);
+        if (l.overlay) { el.dataset.overlay = "1"; el.style.mixBlendMode = "screen"; }
+        el.style.opacity = String(l.opacity);
+        el.style.transform = l.scale === 1 ? "none" : `scale(${l.scale})`;
+        el.style.zIndex = String(l.z);
+        return el;
+      });
+      existing.filter((e) => !used.has(e)).forEach((e) => { gsap.killTweensOf(e); e.remove(); });
+      els.forEach((el) => host.appendChild(el)); // appendChild moves: DOM order = array order (z breaks nothing)
+      current.current = layers.filter((l) => l.opacity > 0).map((l) => l.asset);
+      const g = Math.min(1, night);
+      host.style.filter = `saturate(${0.85 + 0.3 * g}) brightness(${0.9 + 0.15 * g})`;
+      const glow = host.querySelector<HTMLElement>(".artstage__glow");
+      if (glow) { glow.style.transition = "none"; glow.style.opacity = String(0.15 + 0.45 * g); }
+    },
   }));
 
   // nightlight: warm glow rises with night; subtle saturation lift on the art.

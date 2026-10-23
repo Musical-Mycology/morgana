@@ -2,3 +2,6 @@
 @import "../engine/engine-tokens.css";
 @import "./mm-tokens.css";
 @import "./editor/theme.css";
+
+/* MP4 render page (/render): `next dev`'s floating dev indicator would appear in every frame. */
+html[data-render="1"] nextjs-portal { display: none !important; }
