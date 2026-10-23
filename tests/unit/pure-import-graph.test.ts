@@ -40,6 +40,7 @@ test.each([
   "engine/authoring/deck-clock.ts",
   "lib/timing/clock-format.ts",
   "engine/authoring/art-clock.ts",
+  "lib/store/media-sniff.ts",
 ])("%s has a DOM-free runtime import graph", (rel) => {
   const offenders = [...runtimeGraph(resolve(ROOT, rel))]
     .filter((f) => DOM_TOKENS.test(readFileSync(f, "utf8")))

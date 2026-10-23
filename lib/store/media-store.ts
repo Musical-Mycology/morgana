@@ -69,11 +69,19 @@ export async function saveMedia(deckId: string, file: { name: string; bytes: Uin
   const path = mediaPath(deckId, id);
   await mkdir(deckMediaDir(deckId), { recursive: true });
   const existing = await readFile(`${path}.json`, "utf8").then((s) => JSON.parse(s) as MediaInfo, () => null);
-  if (existing) return existing;
-  const info: MediaInfo = { id, name: file.name, mime: ALL_TYPES[ext], bytes: file.bytes.byteLength, uploadedAt: new Date().toISOString() };
   // Client-supplied: kept only if sane, and used for lint/display only.
   const d = file.durationSec;
-  if (typeof d === "number" && Number.isFinite(d) && d > 0) info.durationSec = d;
+  const duration = typeof d === "number" && Number.isFinite(d) && d > 0 ? d : undefined;
+  if (existing) {
+    // Dedupe: bytes are already stored. Backfill a duration the first upload lacked.
+    if (existing.durationSec === undefined && duration !== undefined) {
+      existing.durationSec = duration;
+      await writeFile(`${path}.json`, JSON.stringify(existing), "utf8");
+    }
+    return existing;
+  }
+  const info: MediaInfo = { id, name: file.name, mime: ALL_TYPES[ext], bytes: file.bytes.byteLength, uploadedAt: new Date().toISOString() };
+  if (duration !== undefined) info.durationSec = duration;
   await writeFile(path, file.bytes);
   await writeFile(`${path}.json`, JSON.stringify(info), "utf8");
   return info;

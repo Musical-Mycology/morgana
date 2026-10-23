@@ -187,3 +187,14 @@ test("mediaKind maps by mime prefix", () => {
   expect(mediaKind("image/png")).toBe("image");
   expect(mediaKind("text/html")).toBeNull();
 });
+
+test("a dedupe re-upload backfills a missing durationSec but never overwrites an existing one", async () => {
+  const a = await saveMedia("d1", { name: "a.mp4", bytes: fx("clip-h264.mp4") });
+  expect(a.durationSec).toBeUndefined();
+  const b = await saveMedia("d1", { name: "a.mp4", bytes: fx("clip-h264.mp4"), durationSec: 2 });
+  expect(b.id).toBe(a.id);
+  expect(b.durationSec).toBe(2);
+  expect((await listMedia("d1"))[0].durationSec).toBe(2);
+  expect((await saveMedia("d1", { name: "a.mp4", bytes: fx("clip-h264.mp4"), durationSec: 9 })).durationSec).toBe(2);
+  expect((await saveMedia("d1", { name: "a.mp4", bytes: fx("clip-h264.mp4"), durationSec: NaN })).durationSec).toBe(2);
+});
