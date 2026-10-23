@@ -42,13 +42,24 @@ function posInt(flag: string, raw: string): number {
   return n;
 }
 
+function evenDim(flag: string, raw: string): number {
+  const n = posInt(flag, raw);
+  if (n % 2 !== 0) {
+    throw new RenderArgError(`${flag} must be even (H.264 yuv420p needs even dimensions; got "${raw}").`);
+  }
+  return n;
+}
+
 export function parseRenderArgs(argv: string[]): RenderOptions {
   const raw = new Map<string, string>();
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     if (!FLAGS.has(flag)) throw new RenderArgError(`Unknown argument: ${flag}`);
+    if (raw.has(flag)) throw new RenderArgError(`Duplicate argument: ${flag}`);
     const value = argv[i + 1];
-    if (value === undefined) throw new RenderArgError(`${flag} requires a value.`);
+    if (value === undefined || value.startsWith("--")) {
+      throw new RenderArgError(`${flag} requires a value.`);
+    }
     raw.set(flag, value);
     i++;
   }
@@ -59,15 +70,16 @@ export function parseRenderArgs(argv: string[]): RenderOptions {
   if (!out) throw new RenderArgError("Missing required --out.");
 
   const baseUrl = (raw.get("--base-url") ?? "http://localhost:3000").replace(/\/+$/, "");
+  if (!baseUrl) throw new RenderArgError("--base-url must not be empty.");
 
   const fpsRaw = raw.get("--fps");
   const fps = fpsRaw === undefined ? 30 : num("--fps", fpsRaw);
   if (fps <= 0) throw new RenderArgError(`--fps must be greater than 0 (got "${fpsRaw}").`);
 
   const widthRaw = raw.get("--width");
-  const width = widthRaw === undefined ? 1920 : posInt("--width", widthRaw);
+  const width = widthRaw === undefined ? 1920 : evenDim("--width", widthRaw);
   const heightRaw = raw.get("--height");
-  const height = heightRaw === undefined ? 1080 : posInt("--height", heightRaw);
+  const height = heightRaw === undefined ? 1080 : evenDim("--height", heightRaw);
 
   const fromRaw = raw.get("--from");
   const from = fromRaw === undefined ? 0 : num("--from", fromRaw);
@@ -83,7 +95,8 @@ export function parseRenderArgs(argv: string[]): RenderOptions {
 }
 
 /** Deck times to render: T = from + i/fps for i < ceil((to - from) * fps). The 1e-9 guards float
- *  drift (e.g. (0.3 - 0.1) * 10 = 2.0000000000000004) from adding a phantom frame. */
+ *  drift that lands just above an integer (e.g. (0.4 - 0.1) * 10 = 3.0000000000000004) from
+ *  adding a phantom frame. */
 export function frameTimes(from: number, to: number, fps: number): number[] {
   const n = Math.max(0, Math.ceil((to - from) * fps - 1e-9));
   const out: number[] = new Array(n);

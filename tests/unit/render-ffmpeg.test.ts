@@ -31,6 +31,7 @@ describe("resolveBinary", () => {
     expect(resolveBinary("ffmpeg", {})).toBe("ffmpeg");
     expect(resolveBinary("ffprobe", { FFPROBE_PATH: "/opt/fp" })).toBe("/opt/fp");
     expect(resolveBinary("ffprobe", {})).toBe("ffprobe");
+    expect(resolveBinary("ffmpeg", { FFMPEG_PATH: "" })).toBe("ffmpeg");
   });
 });
 
