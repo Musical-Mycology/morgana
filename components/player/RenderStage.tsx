@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useLayoutEffect } from "react";
+import { flushSync } from "react-dom";
 import type { DeckDoc } from "@/engine/deck-doc";
 import { useDeckStage } from "./DeckStage";
 
@@ -23,12 +24,18 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
     return () => { delete document.documentElement.dataset.render; };
   }, []);
   useEffect(() => {
+    if (!(layout.total > 0)) {
+      window.__morganaRender = { ready: false, error: "deck has no duration" };
+      return () => { delete window.__morganaRender; };
+    }
     window.__morganaRender = {
       ready: true,
       total: layout.total,
       async renderFrame(T: number) {
-        apply(T);
-        await nextFrame();                                   // React commits a beat swap; layout effect seeks
+        // flushSync commits a beat swap (and its layout-effect seek) before we query images, so the
+        // query always sees the NEW beat's <img>s rather than racing React's scheduler.
+        flushSync(() => apply(T));
+        await nextFrame();
         const imgs = Array.from(document.querySelectorAll<HTMLImageElement>("[data-render-root] img"));
         await Promise.all(imgs.map((img) => img.decode().catch(() => { /* broken image: render what the browser shows */ })));
         await document.fonts.ready;

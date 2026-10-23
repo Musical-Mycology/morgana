@@ -50,3 +50,9 @@ test("html[data-render=1] while mounted, removed on unmount; global removed too"
   expect(document.documentElement.dataset.render).toBeUndefined();
   expect(window.__morganaRender).toBeUndefined();
 });
+
+test("a deck with no duration publishes ready:false instead of a renderer", () => {
+  const empty: DeckDoc = { version: 1, meta: { id: "e", title: "E" }, scenes: [] };
+  render(<RenderStage doc={empty} />);
+  expect(window.__morganaRender).toEqual({ ready: false, error: "deck has no duration" });
+});

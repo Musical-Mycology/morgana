@@ -9,12 +9,13 @@ export default function RenderPage() {
   const [state, setState] = useState<DeckDoc | "loading" | "error">("loading");
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("deck") ?? "demo";
+    const fail = (error: string) => { window.__morganaRender = { ready: false, error }; setState("error"); };
+    if (!id) { fail("missing deck id"); return; }
     loadDeck(id)
       .then(setState)
       .catch((e) => {
         console.error("failed to load deck", e);
-        window.__morganaRender = { ready: false, error: e instanceof Error ? e.message : String(e) };
-        setState("error");
+        fail(e instanceof Error ? e.message : String(e));
       });
   }, []);
   if (state === "loading") return <div style={{ position: "fixed", inset: 0, background: "#000" }} />;
