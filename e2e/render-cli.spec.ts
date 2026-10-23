@@ -22,6 +22,8 @@ test.afterEach(async ({ request }) => {
 });
 
 test("runRender writes an H.264 + AAC MP4 of the deck's length", async ({ request, baseURL }) => {
+  // CI installs ffmpeg, so a missing binary there is a broken job, not a reason to skip silently.
+  if (process.env.CI) expect(hasFfmpeg, `ffmpeg/ffprobe not found (${ffmpeg}, ${ffprobe}) — the CI e2e job must install them`).toBe(true);
   test.skip(!hasFfmpeg, "ffmpeg not installed — the CI job installs it");
   test.setTimeout(120_000);
 
