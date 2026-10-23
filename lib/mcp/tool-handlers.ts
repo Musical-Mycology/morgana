@@ -1,6 +1,6 @@
 import { loadDeck, saveDeck, listDecks } from "@/lib/store/deck-store";
 import { validateDeckDoc, type DeckDoc, type DeckMarker } from "@/engine/deck-doc";
-import { listMedia, type MediaInfo } from "@/lib/store/media-store";
+import { listMedia, mediaKind, type MediaInfo, type MediaKind } from "@/lib/store/media-store";
 import {
   insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy,
   appendScene, deleteSceneAt, deleteSceneAtIndex, moveSceneBy, appendBeatToScene, setSceneDuration,
@@ -70,7 +70,7 @@ async function mutate(deckId: string, f: (doc: DeckDoc) => DeckDoc): Promise<Dec
   return next;
 }
 
-export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc | { decks: Awaited<ReturnType<typeof listDecks>> } | DeckTiming | { media: MediaInfo[] }> {
+export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc | { decks: Awaited<ReturnType<typeof listDecks>> } | DeckTiming | { media: Array<MediaInfo & { kind: MediaKind | null }> }> {
   const a = args(rawArgs);
 
   if (name === "list_decks") return { decks: await listDecks() };
@@ -162,7 +162,7 @@ export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc 
       };
     }
     case "list_media":
-      return { media: await listMedia(deckId) };
+      return { media: (await listMedia(deckId)).map((m) => ({ ...m, kind: mediaKind(m.mime) })) };
     case "set_soundtrack": {
       const mediaId = a.media_id;
       if (mediaId !== null && typeof mediaId !== "string") throw new ToolCallError('"media_id" must be a string or null');

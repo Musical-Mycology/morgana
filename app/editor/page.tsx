@@ -54,6 +54,7 @@ export default function Editor() {
   const sound = useSoundtrack(deckId, soundtrackMedia);
   const lintCtx = useMemo(() => ({
     mediaIds: deckMedia.media?.map((m) => m.id),
+    media: deckMedia.media ?? undefined,
     soundtrackSec: sound.status === "ready" ? sound.track.duration : undefined,
   }), [deckMedia.media, sound]);
   const issues = useLint(lintCtx);

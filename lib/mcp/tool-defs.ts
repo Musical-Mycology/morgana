@@ -107,7 +107,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "update_action",
-    description: "Set a single field on an existing action, addressed by a dot-path (e.g. \"value\", \"pos.x\", \"art.mode\"). Use read_deck first to see current fields, or convert_action_kind/insert_action_after to see a kind's default field set.",
+    description: "Set a single field on an existing action, addressed by a dot-path (e.g. \"value\", \"pos.x\", \"art.mode\"). Art layers (`art.to`/`keep`/`out`) and a media tile's `src` accept `media:<id>` refs from list_media; set video clip options with `art.clips` (keyed by ref) or the tile's `clip` (`{ in, loop }`). Use read_deck first to see current fields, or convert_action_kind/insert_action_after to see a kind's default field set.",
     inputSchema: schema({
       ...DECK_ID, ...BEAT_INDEX, ...ACTION_INDEX,
       path: { type: "string", description: "Dot-path into the action, e.g. \"value\" or \"pos.x\"." },
@@ -138,7 +138,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "list_media",
-    description: "Read-only. Lists the files in this deck's media store (id, original name, mime type, size in bytes). Media is uploaded by the user in the editor (Deck settings → Soundtrack); it cannot be uploaded over MCP.",
+    description: "Read-only. Lists the files in this deck's media store (id, original name, mime type, kind: video/image/audio, size in bytes, uploadedAt, and durationSec when known). Media is uploaded by the user in the editor, or via POST /api/decks/<id>/media (multipart `file`, optional `durationSec`); it cannot be uploaded over MCP. Images and video are used as `media:<id>` refs: as art `to`/`keep`/`out` layers and as a media tile's `src`. Clip options (video only): `art.clips[\"media:<id>\"] = { in?: seconds, loop?: boolean }` on the art transition, or `clip` on the media tile.",
     inputSchema: schema({ ...DECK_ID }, ["deck_id"]),
   },
   {
