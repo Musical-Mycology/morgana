@@ -5,7 +5,7 @@ import type { ArtMode, ArtTransition } from "@/engine/deck/types";
 import type { DeckDoc } from "@/engine/deck-doc";
 import type { StoryAsset } from "@/engine/deck/story-assets";
 import { isOverlay } from "@/engine/deck/story-assets";
-import { applyArt } from "@/engine/deck/flatten";
+import { applyArt, flattenStory } from "@/engine/deck/flatten";
 import { deckLayout } from "./deck-clock";
 import { beatTimeline } from "./beat-clock";
 
@@ -54,6 +54,46 @@ export function artEvents(doc: DeckDoc): ArtEvent[] {
     }
   }
   return out;
+}
+
+export interface NightEvent { start: number; duration: number; to: number }  // seconds
+export interface NightTimeline { initial: number; events: NightEvent[] }
+
+/** Nightlight changes in deck order: a beat entry whose flattened nightlight differs from the
+ *  current value (over NIGHT_ENTRY_MS), and each reached `nightlight` action (over its durationMs). */
+export function nightEvents(doc: DeckDoc): NightTimeline {
+  const slides = flattenStory(doc.scenes);
+  const initial = slides[0]?.nightlight ?? 0;
+  const events: NightEvent[] = [];
+  let current = initial;
+  for (const s of deckLayout(doc).scenes) {
+    const scene = doc.scenes[s.sceneIdx];
+    const reached = (localStart: number) => !s.pinned || localStart < s.length;
+    for (const b of s.beats) {
+      if (!reached(b.start)) continue;
+      const beatStart = s.start + b.start;
+      const entry = slides[b.flatIdx]?.nightlight ?? current;
+      if (entry !== current) { events.push({ start: beatStart, duration: NIGHT_ENTRY_MS / 1000, to: entry }); current = entry; }
+      for (const w of beatTimeline(scene.beats[b.beatIdx].timeline)) {
+        if (w.action.kind !== "nightlight" || !reached(b.start + w.start)) continue;
+        events.push({ start: beatStart + w.start, duration: (w.action.durationMs ?? NIGHT_ENTRY_MS) / 1000, to: w.action.to });
+        current = w.action.to;
+      }
+    }
+  }
+  return { initial, events };
+}
+
+/** The nightlight level at deck time T: each event is linear from the value it started at. */
+export function nightAt(tl: NightTimeline, T: number): number {
+  let v = tl.initial;
+  for (let i = 0; i < tl.events.length && tl.events[i].start <= T; i++) {
+    const e = tl.events[i];
+    const until = i + 1 < tl.events.length && tl.events[i + 1].start <= T ? tl.events[i + 1].start : T;
+    const p = e.duration <= 0 ? 1 : clamp01((until - e.start) / e.duration);
+    v = v + (e.to - v) * p;
+  }
+  return v;
 }
 
 /** The art layer stack at deck time T, with crossfade opacities. Paint by `z` (array order only
