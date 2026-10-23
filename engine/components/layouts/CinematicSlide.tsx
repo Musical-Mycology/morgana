@@ -1019,6 +1019,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
           to   { opacity: 1; transform: translateX(-50%); }
         }
         @media (prefers-reduced-motion: reduce) { .cin__ending { animation: none; } }
+        /* MP4 render page: frames are a pure function of deck time, so no wall-clock entrance animation. */
+        html[data-render="1"] .cin__ending { animation: none; }
         /* Primary Vision-link pills (solid brand ink). */
         .cin__cta { pointer-events: auto; cursor: pointer; text-decoration: none; white-space: nowrap;
           font-family: var(--font-display); font-size: clamp(1rem, 1.8cqw, 1.4rem); letter-spacing: 0.03em;
