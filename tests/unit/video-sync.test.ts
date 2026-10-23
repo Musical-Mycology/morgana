@@ -269,7 +269,6 @@ describe("seek mode", () => {
 
   test("a synchronously dispatched seeked during the write is not dropped", async () => {
     const f = fake();
-    f.el.addEventListener("seeked", () => f.fireFrame());
     // dispatch seeked from inside the currentTime setter
     const desc = Object.getOwnPropertyDescriptor(f.el, "currentTime")!;
     Object.defineProperty(f.el, "currentTime", {
@@ -281,7 +280,10 @@ describe("seek mode", () => {
       },
     });
     syncVideo(f.el, () => 2, "seek");
-    expect(await pendingVideoSeeks()).toEqual([]);
+    const p = pendingVideoSeeks();
+    f.fireFrame(); // after syncVideo's seeked listener ran: resolves without any timer
+    expect(await settled(p)).toBe(true);
+    expect(await p).toEqual([]);
   });
 
   test("releaseVideo resolves a pending seek on a removed element", async () => {
@@ -407,16 +409,23 @@ describe("play mode", () => {
     expect(f.writes).toEqual([0.1]);
   });
 
-  test("non-loop clip that ended while the deck trails is held, not replayed", () => {
+  test("non-loop clip that ended while the deck is near the end is held, not replayed", () => {
     const f = fake({ paused: false, ended: true, currentTime: 5 });
-    syncVideo(f.el, () => 3, "play");
+    syncVideo(f.el, () => 4.95, "play");
     expect(f.pause).toHaveBeenCalled();
     expect(f.play).not.toHaveBeenCalled();
     expect(f.writes).toEqual([]);
     const g = fake({ paused: true, ended: true, currentTime: 5 });
-    syncVideo(g.el, () => 3, "play");
+    syncVideo(g.el, () => 4.95, "play");
     expect(g.play).not.toHaveBeenCalled();
     expect(g.writes).toEqual([]);
+  });
+
+  test("non-loop clip that ended but the deck rewound: re-seeks and plays", () => {
+    const f = fake({ paused: true, ended: true, currentTime: 5 });
+    syncVideo(f.el, () => 1, "play");
+    expect(f.writes).toEqual([1]);
+    expect(f.play).toHaveBeenCalled();
   });
 
   test("held at end: pauses, does not loop", () => {

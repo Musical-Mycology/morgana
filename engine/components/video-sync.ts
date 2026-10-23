@@ -164,15 +164,16 @@ export function syncVideo(
   }
   // play mode: never registers a pending promise
   if (el.readyState < 1) return; // metadata not here yet; the next paint retries
-  // A non-looping clip that reached its end stays on its last frame, never replayed.
-  if (!opts?.loop && el.ended) {
-    if (!el.paused) el.pause();
-    return;
-  }
   // A seek is in flight: currentTime reports its target, so re-targeting would abort it every paint.
   if (el.seeking) return;
   const d = el.duration;
   const t = clipT(d);
+  // A non-looping clip that reached its end stays on its last frame while the deck is also at the end.
+  // `ended` only clears on a seek, so if the deck moved back (scrub / restart) fall through and re-seek.
+  if (!opts?.loop && el.ended && t >= d - DRIFT_SEC) {
+    if (!el.paused) el.pause();
+    return;
+  }
   if (!opts?.loop && Number.isFinite(d) && t >= d - 2 * HOLD_EPSILON) {
     // clamped at the end: hold the last frame, don't loop
     if (Math.abs(el.currentTime - t) > SEEK_EPS) el.currentTime = t;
