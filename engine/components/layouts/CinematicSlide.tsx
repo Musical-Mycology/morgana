@@ -696,7 +696,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         continue;
       }
       if (f.action.kind === "media" || f.action.kind === "media_move" || f.action.kind === "media_out") {
-        mediaFold.push({ action: f.action, p: f.p });
+        mediaFold.push({ action: f.action, p: f.p, start: f.start });
         continue;
       }
       if (f.action.kind === "art") {

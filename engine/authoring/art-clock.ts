@@ -1,7 +1,8 @@
 /** Art + nightlight as pure functions of deck time (timed-video sub-project 3). Pure: no DOM,
  *  GSAP or React — enforced by tests/unit/pure-import-graph.test.ts. GSAP is only the parity
  *  reference in tests: these curves must match what ArtStage's tweens produce. */
-import type { ArtAsset, ArtMode, ArtTransition } from "@/engine/deck/types";
+import type { ArtAsset, ArtMode, ArtTransition, ClipOpts } from "@/engine/deck/types";
+import type { MediaRef } from "@/engine/deck/media-ref";
 import type { DeckDoc } from "@/engine/deck-doc";
 import { isOverlay } from "@/engine/deck/story-assets";
 import { applyArt, flattenStory } from "@/engine/deck/flatten";
@@ -18,10 +19,16 @@ export function power2InOut(p: number): number { return p < 0.5 ? 4 * p * p * p 
 /** GSAP back.out(2): overshoots past 1 before settling. */
 export function backOut2(p: number): number { const q = p - 1; return 1 + 3 * q * q * q + 2 * q * q; }
 
-export interface ArtEvent { start: number; duration: number; mode: ArtMode; to: ArtAsset[] }  // seconds
+export interface ArtEvent { start: number; duration: number; mode: ArtMode; to: ArtAsset[]; clips?: Record<MediaRef, ClipOpts> }  // seconds
 /** `z` is authoritative for stacking; array order only breaks ties. Incoming/kept layers take z from
  *  the target stack order; outgoing layers keep the z they had (GSAP parity). */
-export interface ArtLayerState { asset: ArtAsset; opacity: number; scale: number; z: number; overlay: boolean }
+export interface ArtLayerState {
+  asset: ArtAsset; opacity: number; scale: number; z: number; overlay: boolean;
+  /** Deck time (s) the layer entered; kept/outgoing/re-added-while-fading layers keep it. Clip time derives from it. */
+  since: number;
+  /** Clip options of the transition that brought the layer in (media refs only). */
+  clip?: ClipOpts;
+}
 
 const seconds = (art: ArtTransition) => (art.durationMs ?? ART_DURATION_MS[art.mode]) / 1000;
 
@@ -37,7 +44,7 @@ export function artEvents(doc: DeckDoc): ArtEvent[] {
     // still-running fade continues. Mid-beat art actions always emit.
     if (entry && next.length === stack.length && next.every((a, i) => a === stack[i])) return;
     stack = next;
-    out.push({ start, duration: art.mode === "cut" ? 0 : seconds(art), mode: art.mode, to: [...stack] });
+    out.push({ start, duration: art.mode === "cut" ? 0 : seconds(art), mode: art.mode, to: [...stack], clips: art.clips });
   };
   for (const s of deckLayout(doc).scenes) {
     const scene = doc.scenes[s.sceneIdx];
@@ -116,23 +123,31 @@ function entering(f: FadeIn | undefined, overlay: boolean, at: number): { opacit
 export function artAt(events: ArtEvent[], T: number): ArtLayerState[] {
   let visible: ArtLayerState[] = [];
   let fades = new Map<ArtAsset, FadeIn>(); // the target stack's layers → the fade-in that brought each in
+  let since = new Map<ArtAsset, { at: number; clip?: ClipOpts }>(); // layer → when it entered + its clip options
   for (let i = 0; i < events.length && events[i].start <= T; i++) {
     const e = events[i];
     const until = i + 1 < events.length && events[i + 1].start <= T ? events[i + 1].start : T;
     const p = e.duration <= 0 ? 1 : clamp01((until - e.start) / e.duration);
     const prev = new Set(visible.map((l) => l.asset));
     const nextFades = new Map<ArtAsset, FadeIn>();
+    const nextSince = new Map<ArtAsset, { at: number; clip?: ClipOpts }>();
     const incoming: ArtLayerState[] = e.to.map((asset, idx) => {
       const overlay = isOverlay(asset);
       // Kept: its own fade-in (undefined if it was outgoing, or already settled → at rest). New: this event's.
       const f = prev.has(asset) ? fades.get(asset) : { start: e.start, duration: e.duration, morph: e.mode === "morph" };
       if (f) nextFades.set(asset, f);
-      return { asset, z: idx + 1, overlay, ...entering(f, overlay, until) };
+      // Kept, or re-added while still on screen (visible or fading out): continue from its original entry.
+      const s = (prev.has(asset) ? since.get(asset) : undefined) ?? { at: e.start, clip: e.clips?.[asset as MediaRef] };
+      nextSince.set(asset, s);
+      return { asset, z: idx + 1, overlay, ...entering(f, overlay, until), since: s.at, clip: s.clip };
     });
     fades = nextFades;
     const outgoing = p >= 1 ? [] : visible
       .filter((l) => !e.to.includes(l.asset))
       .map((l) => ({ ...l, opacity: l.opacity * (1 - power2InOut(p)) }));
+    // Still-fading outgoing layers keep their entry so a re-add within the fade finds it.
+    for (const l of outgoing) { const old = since.get(l.asset); if (old) nextSince.set(l.asset, old); }
+    since = nextSince;
     visible = [...outgoing, ...incoming];
   }
   return visible;

@@ -17,8 +17,8 @@ function setup() {
 }
 
 const two: ArtLayerState[] = [
-  { asset: "1.01", opacity: 0.4, scale: 1, z: 1, overlay: false },
-  { asset: "MusicScore", opacity: 0.8, scale: 0.95, z: 2, overlay: true },
+  { asset: "1.01", opacity: 0.4, scale: 1, z: 1, overlay: false, since: 0 },
+  { asset: "MusicScore", opacity: 0.8, scale: 0.95, z: 2, overlay: true, since: 0 },
 ];
 
 describe("ArtStage.renderState", () => {
@@ -39,7 +39,7 @@ describe("ArtStage.renderState", () => {
     const { ref, layers } = setup();
     ref.current!.renderState(two, 1);
     const first = layers()[0];
-    ref.current!.renderState([{ asset: "1.01", opacity: 1, scale: 1, z: 1, overlay: false }], 1);
+    ref.current!.renderState([{ asset: "1.01", opacity: 1, scale: 1, z: 1, overlay: false, since: 0 }], 1);
     const els = layers();
     expect(els).toHaveLength(1);
     expect(els[0]).toBe(first);
@@ -49,8 +49,8 @@ describe("ArtStage.renderState", () => {
   it("z is authoritative for stacking while DOM order follows the array", () => {
     const { ref, layers } = setup();
     ref.current!.renderState([
-      { asset: "1.01", opacity: 0.5, scale: 1, z: 3, overlay: false },
-      { asset: "1.02", opacity: 1, scale: 1, z: 1, overlay: false },
+      { asset: "1.01", opacity: 0.5, scale: 1, z: 3, overlay: false, since: 0 },
+      { asset: "1.02", opacity: 1, scale: 1, z: 1, overlay: false, since: 0 },
     ], 0);
     expect(layers().map((e) => [e.dataset.asset, e.style.zIndex])).toEqual([["1.01", "3"], ["1.02", "1"]]);
   });
@@ -81,7 +81,7 @@ describe("ArtStage.renderState — interplay with tweened show()", () => {
   it("kills an in-flight show() tween on a reused layer (advancing GSAP time leaves it put)", () => {
     const { ref, layers } = setup();
     ref.current!.show(["1.01"], "fade"); // a 700 ms opacity 0 → 1 tween
-    ref.current!.renderState([{ asset: "1.01", opacity: 0.5, scale: 1, z: 1, overlay: false }], 0);
+    ref.current!.renderState([{ asset: "1.01", opacity: 0.5, scale: 1, z: 1, overlay: false, since: 0 }], 0);
     const el = layers()[0];
     expect(el.style.opacity).toBe("0.5");
     gsap.globalTimeline.time(gsap.globalTimeline.time() + 5); // far past the fade's end

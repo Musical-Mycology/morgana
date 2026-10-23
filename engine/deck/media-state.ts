@@ -2,10 +2,12 @@
  *  No DOM, no GSAP, no React — this is what makes a media tile scrubbable rather than
  *  wall-clock-animated (design spec §7b §6), and is written to be shareable with §7c's
  *  parity gate later. `tests/unit/pure-import-graph.test.ts`-style purity applies here too. */
-import type { Action } from "@/engine/deck/types";
+import type { Action, ClipOpts } from "@/engine/deck/types";
 
-export interface MediaRenderState { x: number; y: number; scale: number; opacity: number }
-export interface MediaFold { action: Action; p: number }
+/** `since` = beat-local start of the `media` action that showed the tile; `clip` = that action's clip options. */
+export interface MediaRenderState { x: number; y: number; scale: number; opacity: number; since: number; clip?: ClipOpts }
+/** `start` = beat-local start (s) of this action. */
+export interface MediaFold { action: Action; p: number; start: number }
 
 // GSAP's power names are one ahead of their exponent: power1 = quad (^2), power2 = cubic (^3),
 // power3 = quart (^4). engine/components/effects/note-state.ts's powerOut1 being quadratic is
@@ -38,10 +40,10 @@ const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
  *  just one. */
 export function mediaStateAt(entries: MediaFold[], _t: number): Map<string, MediaRenderState> {
   const out = new Map<string, MediaRenderState>();
-  for (const { action: a, p } of entries) {
+  for (const { action: a, p, start } of entries) {
     if (a.kind === "media") {
       const ease = ENTRANCE[a.in ?? "fade"] ?? powerOut2;
-      out.set(a.id, { x: a.pos.x, y: a.pos.y, scale: 1, opacity: ease(p) });
+      out.set(a.id, { x: a.pos.x, y: a.pos.y, scale: 1, opacity: ease(p), since: start, clip: a.clip });
     } else if (a.kind === "media_move") {
       const cur = out.get(a.id);
       if (!cur) continue;
