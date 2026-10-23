@@ -5,8 +5,9 @@ import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import type { ArtAsset, ArtMode, ArtTransition, CinematicSlideSlots, Action, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
 import type { DeckChrome } from "@/engine/deck-doc";
-import type { MediaRef } from "@/engine/deck/media-ref";
-import type { ClipMode } from "@/engine/components/video-sync";
+import { isMediaRef, isVideoRef, type MediaRef } from "@/engine/deck/media-ref";
+import { clipTimeAt } from "@/engine/deck/clip-clock";
+import { createClipVideo, releaseVideo, syncVideo, type ClipMode } from "@/engine/components/video-sync";
 import { renderPanelHTML } from "@/engine/deck/panel";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
@@ -111,7 +112,7 @@ interface Props {
   clipModeRef?: React.RefObject<ClipMode>;
 }
 
-export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true }: Props) {
+export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true, clipModeRef }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
   // The single gsap.ticker listener currently driving playback, or null when paused. play()
@@ -442,11 +443,21 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // (figcaption is absolute, so it never shifts the image off its `pos`). Omit label = no caption.
       const fig = document.createElement("figure");
       fig.className = "cin__media cin__media--photo";
-      const img = document.createElement("img");
-      img.src = a.src;
-      img.alt = a.label ?? "";
-      img.className = `cin__media-img${a.round ? " cin__media-img--round" : ""}`;
-      fig.appendChild(img);
+      // An uploaded media ref resolves through the deck's asset resolver (the one base-path seam);
+      // a video ref becomes a muted clip <video> whose time paintMedia drives from the beat clock.
+      const src = isMediaRef(a.src) ? assets.media(a.src) : a.src;
+      const cls = `cin__media-img${a.round ? " cin__media-img--round" : ""}`;
+      if (isVideoRef(a.src)) {
+        const video = createClipVideo(src);
+        video.className = cls;
+        fig.appendChild(video);
+      } else {
+        const img = document.createElement("img");
+        img.src = src;
+        img.alt = a.label ?? "";
+        img.className = cls;
+        fig.appendChild(img);
+      }
       if (a.label) {
         const cap = document.createElement("figcaption");
         cap.className = "cin__media-cap";
@@ -467,8 +478,20 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return el;
   }
 
+  /** A tile's clip <video>, if it holds one. */
+  function tileVideo(el: HTMLElement): HTMLVideoElement | null {
+    return el.querySelector("video");
+  }
+
+  /** Take a tile off the stage for good, releasing a clip video's decoder first. */
+  function removeTile(el: HTMLElement) {
+    const v = tileVideo(el);
+    if (v) releaseVideo(v);
+    el.remove();
+  }
+
   function clearMedia() {
-    mediaTiles.current.forEach((el) => el.remove());
+    mediaTiles.current.forEach(removeTile);
     mediaTiles.current.clear();
   }
 
@@ -479,10 +502,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  current `media` action's reach (a backward seek past it) and is torn down; an id in
    *  `state` with no DOM tile yet is built via makeMediaEl from its `media` show action, found
    *  by scanning `fold`. Because this is recomputed from scratch on every call (not carried as
-   *  tween state), backward seek falls out for free. */
-  function paintMedia(fold: MediaFold[], state: Map<string, MediaRenderState>) {
+   *  tween state), backward seek falls out for free. A tile holding a clip video is synced to
+   *  its clip time at beat-local `t` (the same `t` the fold ran at; `since` is beat-local too):
+   *  "play" in autoplay, else the host's clip mode (default "seek"). */
+  function paintMedia(fold: MediaFold[], state: Map<string, MediaRenderState>, t: number) {
     for (const [id, el] of mediaTiles.current) {
-      if (!state.has(id)) { el.remove(); mediaTiles.current.delete(id); }
+      if (!state.has(id)) { removeTile(el); mediaTiles.current.delete(id); }
     }
     if (!state.size) return;
     let showActions: Map<string, Extract<Action, { kind: "media" }>> | null = null;
@@ -503,6 +528,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       el.style.top = `${s.y * 100}%`;
       el.style.opacity = String(s.opacity);
       gsap.set(el, { scale: s.scale });
+      const video = tileVideo(el);
+      if (video) {
+        const { since, clip } = s;
+        syncVideo(video, (d) => clipTimeAt(since, t, clip, d), autoplay ? "play" : (clipModeRef?.current ?? "seek"), { loop: clip?.loop });
+      }
     }
   }
 
@@ -803,7 +833,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     if (fadeOutP == null) gsap.set([host, ...lineBoxes.current], { clearProps: "opacity" });
     else gsap.set([host, ...lineBoxes.current], { opacity: 1 - fadeOutP });
     paintCounter(counter, counterValueP, counterEntranceP, counterHideP);
-    paintMedia(mediaFold, mediaStateAt(mediaFold, t));
+    paintMedia(mediaFold, mediaStateAt(mediaFold, t), t);
     setAgainRevealed(revealAgain);
     lastT.current = t;
     // The one clock (design spec §7b Task 10, ambiguity res. #1): every renderAt call notifies
