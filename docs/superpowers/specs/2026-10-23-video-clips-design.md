@@ -47,7 +47,9 @@ VP9 and AV1 and supports `requestVideoFrameCallback`; it does **not** play HEVC.
 | audio (existing types) | mp3: `ID3` or an MPEG frame sync; wav: `RIFF????WAVE`; ogg: `OggS`; flac: `fLaC`; m4a: ISO-BMFF `ftyp`; aac: ADTS sync `FFF` |
 
 The HEVC / unsupported-codec rejection message carries the fix:
-`unsupported video codec (<fourcc>) — convert with: ffmpeg -i "<name>" -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4`.
+`unsupported video codec (<fourcc>) — convert with: ffmpeg -i '<name>' -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4`.
+The name is POSIX single-quoted (a `'` inside it becomes `'\''`), so pasting the command never
+runs shell syntax from an uploaded file name.
 
 This closes the content-sniffing class behind #39 for every consumer (browser, ffmpeg).
 Existing files are not re-checked. SVG stays unsupported (active content).
@@ -120,13 +122,18 @@ export function syncVideo(el: HTMLVideoElement, clipT: number, mode: ClipMode): 
 export function pendingVideoSeeks(): Promise<void>   // resolves when every seek issued by syncVideo has presented a frame
 ```
 
-- `"play"`: if paused, set `currentTime = clipT` and `play()` (muted). If `|currentTime − clipT| >
-  DRIFT_SEC` (0.1), re-seek. Holding past the end: when `clipT` is clamped at the end, pause.
+- `"play"`: if paused, `play()` (muted), seeking first only if `|currentTime − clipT| > DRIFT_SEC`
+  (0.1). If playing and `|currentTime − clipT| > DRIFT_SEC`, re-seek. A play-mode seek aims ahead
+  by the element's last measured seek latency (write → `seeked`, capped at 0.5 s), so on long-GOP
+  footage it lands where the deck will be instead of re-seeking forever. Holding past the end:
+  when `clipT` is clamped at the end, pause.
 - `"seek"`: `pause()`; if `|currentTime − clipT| > 1e-4`, set `currentTime = clipT` and register a
   pending promise that resolves on `seeked` followed by one `requestVideoFrameCallback` (or on
   `error`, recording a failure). If `readyState < 1`, wait for `loadedmetadata` first (the
   duration is needed for hold/loop), then compute and seek.
-- Every video is created `muted`, `playsInline`, `preload="auto"`, with no `autoplay`.
+- Every video is created `muted`, `playsInline`, `preload="auto"`, with no `autoplay`. Where clip
+  playback is off (the editor canvas and library thumbnails, `clipPlayback={false}`) art layers use
+  `preload="metadata"`; the in-point seek still fetches and shows that frame.
 
 **Who passes the mode:** `useDeckStage` owns a `clipMode` ref: `"play"` while TimedPlayer is
 playing, `"seek"` otherwise. RenderStage keeps it at `"seek"` always. It reaches CinematicSlide
@@ -144,8 +151,11 @@ never re-render the memoised `Stage`.
 - **Media tiles** (`CinematicSlide.makeMediaEl` / `paintMedia`): a `src` that is a video ref
   creates a `<video class="cin__media-img">` inside the figure, and an image ref creates an
   `<img>`. On each paint, `syncVideo(el, clipTimeAt(state.since, t, state.clip, el.duration),
-  clipModeRef.current)`. Here `t` is the beat-local time CinematicSlide just painted. In autoplay
-  the mode is `"play"`.
+  clipModeRef.current)`. Here `t` is the beat-local time CinematicSlide just painted — except in a
+  pinned scene's hold, where the beat's `t` is clamped at its end: there the host passes the
+  unclamped elapsed beat time (`transport.seek(t, clipT)`), so tile clips keep running like art
+  layers. In autoplay the mode is `"play"`. A tile whose `media_out` has settled is removed (its
+  video released); a later re-show builds a fresh element.
 - **Leaving the stage:** when a video element is removed from the DOM it is paused, and its
   `src` is cleared so the decoder is released.
 
@@ -245,7 +255,9 @@ timeout covers a seek that never lands.
 - **Seek cost:** each rendered frame seeks every visible clip. H.264 decodes from the previous
   keyframe, so a long GOP (OBS default: 250 frames) makes seeks slow. The README advises
   re-encoding with `-g 30` for faster renders. Correctness is unaffected.
-- **Re-seeking on drift in `/play`** can visibly hitch on slow machines. `DRIFT_SEC` is the knob.
+- **Re-seeking on drift in `/play`** can visibly hitch on slow machines. `DRIFT_SEC` is the knob;
+  the seek-latency lead keeps long-GOP footage from re-seeking in a loop, but each seek is still
+  slow, so re-encoding with a short GOP helps `/play` too.
 - **Many clips at once** (a collage of 6 tiles) means 6 decoders. This is fine in Chromium at
   1080p, but `preload="auto"` on large files uses memory. Tiles not yet shown are not created
   until reached.

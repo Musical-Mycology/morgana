@@ -27,13 +27,13 @@
 - Every upload is content-checked against its extension.
   - Allowed MP4 video sample entries: `avc1`, `avc3`, `vp09`, `av01`.
   - Allowed WebM CodecIDs: `V_VP8`, `V_VP9`, `V_AV1`, found within the first 1 MiB.
-- Unsupported-codec message (exact): `unsupported video codec (<fourcc>) — convert with: ffmpeg -i "<name>" -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4`
+- Unsupported-codec message (exact): `unsupported video codec (<fourcc>) — convert with: ffmpeg -i '<name>' -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4` (`<name>` single-quoted, each `'` escaped as `'\''`)
 - Content mismatch message (exact): `<name> is not a valid <ext> file`
 - Media ref form: `media:<mediaId>` (prefix `MEDIA_REF_PREFIX = "media:"`); video refs end in `.mp4` or `.webm`.
 - `ClipOpts = { in?: number; loop?: boolean }`, in seconds; defaults `in: 0`, no loop.
   - Art clip options come from the transition that brought the layer in.
 - `HOLD_EPSILON = 0.001` s; `DRIFT_SEC = 0.1` s.
-- Clips are always muted, `playsInline`, `preload="auto"`, and never `autoplay`.
+- Clips are always muted, `playsInline`, `preload="auto"` (`"metadata"` where clip playback is off: editor canvas, library thumbnails), and never `autoplay`.
 - `durationSec` in the sidecar is client-supplied. Store it only if finite and > 0. It is for lint and display only.
 - Range support on media GET: single range, `206` + `Content-Range` + `Accept-Ranges: bytes`; unsatisfiable → `416`. Keep `nosniff`, `CSP: sandbox` and the immutable cache headers.
 - The base path is applied only in the asset resolver (`mediaUrl`). Never hand-build `/api/decks/...` URLs in components.
@@ -190,7 +190,7 @@ export function sniffMedia(ext: string, b: Uint8Array): SniffResult {
   - Add `IMAGE_TYPES`, `VIDEO_TYPES`, `ALL_TYPES = { ...AUDIO_TYPES, ...IMAGE_TYPES, ...VIDEO_TYPES }` (not exported) and `mediaKind`.
   - In `saveMedia`, check the extension against `ALL_TYPES`, then the size cap, then `sniffMedia(ext, bytes)`:
     - `mismatch` → `new MediaError(400, \`${file.name} is not a valid ${ext} file\`)`;
-    - `codec` → `new MediaError(400, \`unsupported video codec (${r.fourcc}) — convert with: ffmpeg -i "${file.name}" -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4\`)`.
+    - `codec` → `new MediaError(400, \`unsupported video codec (${r.fourcc}) — convert with: ffmpeg -i ${shellQuote(file.name)} -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4\`)`, where `shellQuote` single-quotes the name (`'` → `'\''`).
   - Sniff before the content hash, and before the dedupe early-return.
   - Store `durationSec` when `typeof d === "number" && Number.isFinite(d) && d > 0`.
   - Use `mime: ALL_TYPES[ext]`.
@@ -675,7 +675,7 @@ Clip value shapes:
 - [ ] **Step 4: e2e** `e2e/media-library.spec.ts` against the default project:
   - Create a deck through the API with one cinematic beat and open it in the editor (copy the setup from `e2e/deck-settings.spec.ts`).
   - Open Deck settings and upload `still.png` and `clip-h264.mp4` through `setInputFiles` on `media-upload`. Both items appear.
-  - Upload `clip-hevc.mp4`. `media-error` contains `unsupported video codec (hvc1)` and `ffmpeg -i`.
+  - Upload `clip-hevc.mp4`. `media-error` contains `unsupported video codec (hvc1)` and `convert with: ffmpeg -i 'clip-hevc.mp4' -c:v libx264`.
   - Add an Art action through the existing timeline UI; copy the pattern from `e2e/timeline-actions.spec.ts`.
   - In the picker, choose the clip, and set In-point 0.5.
   - The editor canvas shows a `video.artstage__layer`. Within 5 s its `currentTime` is ≈ 0.5, because the editor shows the in-point frame.
