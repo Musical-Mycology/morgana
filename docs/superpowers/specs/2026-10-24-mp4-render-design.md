@@ -1,6 +1,6 @@
 # MP4 Render — Design Spec (Timed Video, sub-project 3 of 6)
 
-**Status:** designed, not yet implemented
+**Status:** implemented (sub-project 3)
 **Date:** 2026-10-24
 **Builds on:** [Deck clock + timed Player](2026-10-22-deck-clock-timed-player-design.md) (#36),
 [Soundtrack + deck media store](2026-10-23-soundtrack-design.md) (#37)
