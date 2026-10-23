@@ -289,7 +289,9 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
       <div className="artstage__glow" style={{ opacity: 0.15 + 0.45 * glow }} />
       {/* The camera's world: art layers live here and take the camera transform; the glow above
           and the root's nightlight filter stay fixed. No z-index and, at full frame, no transform,
-          so it forms no stacking context: layers stack against the glow exactly as before. */}
+          so it forms no stacking context: layers stack against the glow exactly as before.
+          It fills the whole ArtStage, while the tile and note worlds use the 16:9 stage box; the
+          two coincide in /play, /render and the editor canvas, which are all 16:9 (accepted). */}
       <div className="artstage__world" ref={world} style={{ position: "absolute", inset: 0, transformOrigin: "0 0" }} />
       <style>{`
         .artstage { position: absolute; inset: 0; overflow: hidden; background: #1a1410; }

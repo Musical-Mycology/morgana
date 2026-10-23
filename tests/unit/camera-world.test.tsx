@@ -1,17 +1,21 @@
 // @vitest-environment jsdom
 // Camera moves, Task 3 (spec §3): world layers take a camera transform; text stays fixed.
 // ArtStage's art layers live in `.artstage__world` (the glow stays on the fixed root); media tiles
-// live in CinematicSlide's `.cin__world` beneath the text stage; BeatStage wraps NoteField and
-// ObjectStage in `.beat__world`. Each layer paints the framing at its own paint time.
+// live in CinematicSlide's `.cin__world`, after the text stage at the same z-index (tiles keep their
+// pre-camera stacking: above notes and the shared text box); BeatStage wraps NoteField and
+// ObjectStage in one `.beat__world` each, carrying the child's old z-index (2 and 6), so stacking is
+// the same with or without a camera transform. Each layer paints the framing at its own paint time.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, waitFor } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, forwardRef, useImperativeHandle } from "react";
 import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { CinematicSlide, type CinematicRuntime, type SlideTransport } from "@/engine/components/layouts/CinematicSlide";
 import { BeatStage } from "@/engine/authoring/BeatStage";
 import { cameraTransform, FULL_FRAME, type CameraEvent } from "@/engine/authoring/camera-clock";
 import type { ArtLayerState } from "@/engine/authoring/art-clock";
 import type { Beat, Framing, Scene } from "@/engine/deck/types";
+import { useDeckStage, type DeckStageHandle } from "@/components/player/DeckStage";
+import type { DeckDoc } from "@/engine/deck-doc";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -106,7 +110,7 @@ describe("CinematicSlide world", () => {
     return { transport, cin, world: cin.querySelector<HTMLElement>(".cin__world")!, stage: cin.querySelector<HTMLElement>(".cin__stage")! };
   }
 
-  it("media tiles are appended to .cin__world; text stays in .cin__stage; the world sits beneath the stage", () => {
+  it("media tiles are appended to .cin__world; text stays in .cin__stage; the world keeps the pre-camera stacking", () => {
     const { transport, cin, world, stage } = mount();
     transport.current!.seek(1.2);
     const tile = cin.querySelector<HTMLElement>(".cin__media")!;
@@ -114,11 +118,13 @@ describe("CinematicSlide world", () => {
     expect(stage.contains(tile)).toBe(false);
     expect(stage.textContent).toContain("Fixed words");
     expect(world.textContent).not.toContain("Fixed words");
-    // DOM order: world before stage; and a lower z-index, so text paints above tiles.
-    expect(world.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(cin.firstElementChild).toBe(world);
-    const z = (el: Element) => Number(getComputedStyle(el).zIndex);
-    expect(z(world)).toBeLessThan(z(stage));
+    // Pre-camera stacking (tiles were appended into the z-2 stage after the text box): the world
+    // follows the stage in DOM order at the same z-index, so tiles paint above the shared text box.
+    expect(stage.compareDocumentPosition(world) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(stage.nextElementSibling).toBe(world);
+    const z = (el: Element) => getComputedStyle(el).zIndex;
+    expect(z(world)).toBe("2");
+    expect(z(stage)).toBe("2");
     expect(getComputedStyle(world).pointerEvents).toBe("none");
   });
 
@@ -153,35 +159,68 @@ describe("CinematicSlide world", () => {
 const scene: Scene = { id: "s", beats: [tileBeat] };
 
 describe("BeatStage world", () => {
-  it("wraps NoteField and ObjectStage in .beat__world; stacking vs the text wrapper is unchanged", () => {
-    const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} autoplay={false} contained />);
-    const world = container.querySelector<HTMLElement>(".beat__world")!;
-    const notes = container.querySelector<HTMLElement>(".notefield")!;
-    const objs = container.querySelector<HTMLElement>(".ed__objstage")!;
-    expect(notes.parentElement).toBe(world);
-    expect(objs.parentElement).toBe(world);
-    expect(notes.compareDocumentPosition(objs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // mount order kept
+  /** Each layer as it participates in the BeatStage root's stacking context: [z-index, tree order].
+   *  A world wrapper carries its own z-index, so its stacking context sits exactly where the
+   *  child's z used to, whether or not a transform is active. */
+  function stacking(container: HTMLElement) {
+    const root = container.querySelector<HTMLElement>("[data-testid=beatstage]")!;
+    const notesW = container.querySelector<HTMLElement>(".notefield")!.parentElement!;
+    const objsW = container.querySelector<HTMLElement>(".ed__objstage")!.parentElement!;
     const cinWrapper = container.querySelector<HTMLElement>(".cin")!.parentElement!;
-    expect(world.compareDocumentPosition(cinWrapper) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(getComputedStyle(notes).zIndex).toBe("2");
-    expect(getComputedStyle(objs).zIndex).toBe("6");
+    const kids = Array.from(root.children);
+    const at = (el: Element) => kids.indexOf(el);
+    return { root, notesW, objsW, cinWrapper, at, z: (el: Element) => getComputedStyle(el).zIndex };
+  }
+  function expectPreCameraStacking(container: HTMLElement) {
+    const { notesW, objsW, cinWrapper, at, z } = stacking(container);
+    // Mount order kept (notes, objects, then the CinematicSlide wrapper): see BeatStage's comment.
+    expect(at(notesW)).toBeGreaterThanOrEqual(0);
+    expect(at(notesW)).toBeLessThan(at(objsW));
+    expect(at(objsW)).toBeLessThan(at(cinWrapper));
+    expect(z(notesW)).toBe("2");
+    expect(z(objsW)).toBe("6");
+    expect(z(container.querySelector(".notefield")!)).toBe("2");
+    expect(z(container.querySelector(".ed__objstage")!)).toBe("6");
+    // The CinematicSlide wrapper is unchanged (no z, no stacking context): its stage and world
+    // stack at z 2 in the root context — above notes (z 2, earlier in tree order), below objects (6).
     expect(cinWrapper.style.zIndex).toBe("");
-    expect(world.style.zIndex).toBe("");
-    expect(getComputedStyle(container.querySelector(".cin__stage")!).zIndex).toBe("2");
-    expect(world.style.transformOrigin).toBe("0 0");
-    expect(world.style.pointerEvents).toBe("none");
+    expect(isFull(cinWrapper.style.transform)).toBe(true);
+    expect(z(container.querySelector(".cin__stage")!)).toBe("2");
+    expect(z(container.querySelector(".cin__world")!)).toBe("2");
+  }
+
+  it("wraps NoteField and ObjectStage in one .beat__world each, carrying their z (2 and 6)", () => {
+    const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} autoplay={false} contained />);
+    const worlds = Array.from(container.querySelectorAll<HTMLElement>(".beat__world"));
+    expect(worlds).toHaveLength(2);
+    const { notesW, objsW } = stacking(container);
+    expect(worlds).toEqual([notesW, objsW]);
+    for (const w of worlds) {
+      expect(w.style.transformOrigin).toBe("0 0");
+      expect(w.style.pointerEvents).toBe("none");
+    }
+    expectPreCameraStacking(container);
   });
 
-  it("the wrapper's transform follows cameraRef on each onTime (and the text never moves)", () => {
+  it("stacking relative to the text wrapper holds with an active camera too", () => {
+    const transport = createRef<SlideTransport>();
+    const cameraRef = { current: { x: 0.25, y: 0.75, zoom: 2 } } as React.RefObject<Framing>;
+    const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} autoplay={false} transport={transport} cameraRef={cameraRef} contained />);
+    transport.current!.seek(0.4);
+    for (const w of container.querySelectorAll<HTMLElement>(".beat__world")) expect(w.style.transform).toBe(cameraTransform(cameraRef.current));
+    expectPreCameraStacking(container);
+  });
+
+  it("the wrappers' transform follows cameraRef on each onTime (and the text never moves)", () => {
     const transport = createRef<SlideTransport>();
     const cameraRef = { current: FULL_FRAME } as React.RefObject<Framing>;
     const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} autoplay={false} transport={transport} cameraRef={cameraRef} contained />);
-    const world = container.querySelector<HTMLElement>(".beat__world")!;
+    const worlds = Array.from(container.querySelectorAll<HTMLElement>(".beat__world"));
     transport.current!.seek(0.2);
-    expect(isFull(world.style.transform)).toBe(true);
+    for (const w of worlds) expect(isFull(w.style.transform)).toBe(true);
     cameraRef.current = { x: 0.25, y: 0.75, zoom: 2 };
     transport.current!.seek(0.4);
-    expect(world.style.transform).toBe(cameraTransform({ x: 0.25, y: 0.75, zoom: 2 }));
+    for (const w of worlds) expect(w.style.transform).toBe(cameraTransform({ x: 0.25, y: 0.75, zoom: 2 }));
     expect(container.querySelector<HTMLElement>(".cin__world")!.style.transform).toBe(cameraTransform({ x: 0.25, y: 0.75, zoom: 2 }));
     expect(isFull(container.querySelector<HTMLElement>(".cin__stage")!.style.transform)).toBe(true);
   });
@@ -191,7 +230,9 @@ describe("BeatStage world", () => {
     const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} autoplay={false} transport={transport} contained />);
     transport.current!.seek(0.8);
     for (const sel of [".beat__world", ".cin__world", ".artstage__world"]) {
-      expect(isFull(container.querySelector<HTMLElement>(sel)!.style.transform)).toBe(true);
+      const els = container.querySelectorAll<HTMLElement>(sel);
+      expect(els.length).toBeGreaterThan(0);
+      for (const el of els) expect(isFull(el.style.transform)).toBe(true);
     }
   });
 
@@ -200,7 +241,24 @@ describe("BeatStage world", () => {
     const { container } = render(<BeatStage sceneId="s" beat={tileBeat} scene={scene} camera={{ events, beatStart: 0 }} contained />);
     await waitFor(() => {
       expect(container.querySelector<HTMLElement>(".cin__world")!.style.transform).toContain("scale(2)");
-      expect(container.querySelector<HTMLElement>(".beat__world")!.style.transform).toContain("scale(2)");
+      for (const w of container.querySelectorAll<HTMLElement>(".beat__world")) expect(w.style.transform).toContain("scale(2)");
     });
+  });
+});
+
+describe("DeckStage frame", () => {
+  const Host = forwardRef<DeckStageHandle, { doc: DeckDoc }>(function Host({ doc }, ref) {
+    const { apply, T, layout, stage } = useDeckStage(doc, 0);
+    useImperativeHandle(ref, () => ({ apply, total: layout.total, current: () => T.current }), [apply, layout.total, T]);
+    return <div data-testid="host" style={{ position: "relative", width: 1920, height: 1080 }}>{stage}</div>;
+  });
+
+  it("the stage wrapper clips, so zoomed world layers never spill outside the frame", () => {
+    const doc: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [scene] };
+    const { getByTestId } = render(<Host ref={createRef<DeckStageHandle>()} doc={doc} />);
+    const wrapper = getByTestId("host").firstElementChild as HTMLElement;
+    expect(wrapper.contains(wrapper.querySelector(".artstage"))).toBe(true);
+    expect(wrapper.contains(wrapper.querySelector("[data-testid=beatstage]"))).toBe(true);
+    expect(wrapper.style.overflow).toBe("hidden");
   });
 });

@@ -98,7 +98,8 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   useLayoutEffect(() => { paintArt(); }, [paintArt]);
 
   const stage = (
-    <div style={{ position: "absolute", inset: 0, background: "var(--color-mm-dark-brown)" }}>
+    // overflow: hidden: zoomed world layers (tiles, notes, objects) never spill outside the frame.
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--color-mm-dark-brown)" }}>
       <ArtStage ref={artRef} nightlight={initialNight} reduced={false} transparentBg />
       {loc && loc.flatIdx != null && <Stage doc={doc} flatIdx={loc.flatIdx} transport={transport} clipModeRef={clipMode} />}
     </div>

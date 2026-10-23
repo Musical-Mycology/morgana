@@ -85,13 +85,14 @@ The "expand container" half of the storyboard is already possible: a media tile 
   - `rotateList`;
   - the ending card and chrome;
   - the nightlight glow. It is a child of the ArtStage root, so it is moved out of the transformed element: the ArtStage root stays fixed, and the art layers live in an inner `.artstage__world` wrapper that takes the transform.
-- **CinematicSlide.** Media tiles move from `.cin__stage` into a new `.cin__world` sibling, which is absolutely positioned, fills the stage, is `pointer-events: none`, and sits **beneath** text in stacking order. `stageParent()` for tiles returns `.cin__world`; text keeps `.cin__stage`.
-- **NoteField and ObjectStage.** BeatStage wraps both in one `.beat__world` container. Their z-indexes (2 and 6) are preserved inside it, so stacking relative to text does not change.
+- **CinematicSlide.** Media tiles move from `.cin__stage` into a new `.cin__world` sibling, which is absolutely positioned, takes the same 16:9 box as the stage, and is `pointer-events: none`. `.cin__world` **follows** `.cin__stage` in DOM order at the **same z-index** (2), so tiles keep their old stacking: above notes and above the shared text box, exactly as before the camera work (Review Focus #4). Tiles attach through `worldParent()` (`.cin__world`); text keeps `.cin__stage`.
+- **NoteField and ObjectStage.** BeatStage wraps each in its own `.beat__world` container, and each wrapper carries its child's z-index (2 for notes, 6 for objects). The wrapper's stacking context therefore sits where the child's z did, so stacking relative to text does not change, with or without an active camera transform. Both wrappers are painted with the same transform.
+- **Clipping.** DeckStage's stage wrapper is `overflow: hidden`, so zoomed world layers never spill outside the frame. The art world fills the whole ArtStage, while the tile and note worlds use the 16:9 stage box; these coincide in `/play`, `/render` and the editor, which are all 16:9.
 - **How the framing reaches the layers:**
   - `useDeckStage` owns `cameraRef: MutableRefObject<Framing>`. `apply(T)` sets `cameraRef.current = cameraAt(events, T)` and paints the ArtStage world wrapper.
   - The ref is passed through the memoised `Stage` → `BeatStage` → `CinematicSlide` as a stable prop, the same pattern as `clipModeRef`. Each layer paints `cameraTransform(cameraRef.current)` in its own paint.
   - Changing the framing never re-renders `Stage`.
-  - CinematicSlide paints `.cin__world` in `renderAt`. BeatStage paints `.beat__world` in its `paint` callback, which `onTime` already fires every frame.
+  - CinematicSlide paints `.cin__world` in `renderAt`. BeatStage paints both `.beat__world` wrappers in its `paint` callback, which `onTime` already fires every frame.
 - **`/render`** inherits all of this through DeckStage, and frames stay deterministic.
 - **Autoplay** (BeatStage without a deck clock):
   - BeatStage accepts an optional `camera?: { events: CameraEvent[]; beatStart: number }`.
@@ -150,7 +151,7 @@ The "expand container" half of the storyboard is already possible: a media tile 
     - omitted `to` fields keep their value.
   - `cameraTransform`, including the `"none"` string at full frame.
   - DeckStage: art world, tiles, notes and objects get the same transform, and text gets none. A framing change does not re-render `Stage`.
-  - CinematicSlide: tiles live in `.cin__world`, which sits under text.
+  - CinematicSlide: tiles live in `.cin__world`, which follows `.cin__stage` at the same z-index (tiles keep their pre-camera stacking).
   - BeatStage autoplay with a `camera` prop.
   - Editor pick: the overlay rectangle size follows zoom; a click sets the clamped x/y in one undo step; Esc cancels.
   - Canvas preview equals `cameraAt`.

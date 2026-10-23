@@ -10,6 +10,9 @@ import { ObjectStage, type ObjectStageHandle } from "@/components/editor/ObjectS
 import type { ClipMode } from "@/engine/components/video-sync";
 import { makeAuthoringRuntime } from "./runtime";
 
+/** A camera world wrapper: fills the stage, transforms about its top-left, display-only. */
+const WORLD_STYLE = { position: "absolute", inset: 0, transformOrigin: "0 0", pointerEvents: "none" } as const;
+
 export function BeatStage({
   sceneId, beat, animate = true, entryLayers = [], endLayers = [], chrome, contained = false,
   scene, beatIndex = 0, transport, autoplay = true, art: withArt = true, clipModeRef, cameraRef, camera,
@@ -43,8 +46,9 @@ export function BeatStage({
   const art = useRef<ArtStageHandle>(null);
   const notes = useRef<NoteFieldHandle>(null);
   const objStage = useRef<ObjectStageHandle>(null);
-  const world = useRef<HTMLDivElement>(null);
-  const lastCamera = useRef("none"); // last transform written to .beat__world ("none" = never written)
+  const notesWorld = useRef<HTMLDivElement>(null);
+  const objectsWorld = useRef<HTMLDivElement>(null);
+  const lastCamera = useRef("none"); // last transform written to the .beat__world pair ("none" = never written)
   const [night, setNight] = useState(beat.nightlight ?? 0);
 
   const runtime = useMemo(
@@ -63,11 +67,14 @@ export function BeatStage({
   // sibling stages FROM that callback (rather than polling, or running a second ticker here) is
   // what keeps notes/objects paused/playing/seeked in lockstep with text, including across a
   // click_gate pause — a second time source is the exact desync this replaces.
-  // The camera rides the same callback: `.beat__world` (and, in autoplay, this stage's own
-  // ArtStage world) paint the framing at this same `t`, written only when it changes.
+  // The camera rides the same callback: both `.beat__world` wrappers (and, in autoplay, this
+  // stage's own ArtStage world) paint the framing at this same `t`, written only when it changes.
   const paint = useCallback((t: number) => {
     const tf = cameraTransform(beatFraming(t, cameraRef, camera));
-    if (tf !== lastCamera.current && world.current) { lastCamera.current = tf; world.current.style.transform = tf; }
+    if (tf !== lastCamera.current) {
+      lastCamera.current = tf;
+      for (const w of [notesWorld.current, objectsWorld.current]) if (w) w.style.transform = tf;
+    }
     art.current?.setCamera(tf);
     if (!scene) return; // ObjectStage/NoteField are only meaningful with a scene to read from
     objStage.current?.renderAt(scene, beatIndex, t);
@@ -77,19 +84,22 @@ export function BeatStage({
   return (
     <div data-testid="beatstage" style={{ position: contained ? "absolute" : "fixed", inset: 0, containerType: "size", background: withArt ? "var(--color-mm-dark-brown)" : "transparent" }}>
       {withArt && <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />}
-      {/* The camera's world for notes + objects. It sets no z-index and, at full frame, no
-          transform, so it forms no stacking context: .notefield (2) and .ed__objstage (6) keep
-          stacking against the text wrapper exactly as before. Display-only (objects here carry no
-          drag handles), so it takes no pointer events. */}
-      <div className="beat__world" ref={world} style={{ position: "absolute", inset: 0, transformOrigin: "0 0", pointerEvents: "none" }}>
+      {/* The camera's world for notes and for objects: one wrapper each, painted with the same
+          transform. Each wrapper carries its child's own z-index (.notefield 2, .ed__objstage 6),
+          so its stacking context sits exactly where the child's z did — notes under the text/tiles,
+          objects above them — whether or not a camera transform is active (a single shared
+          wrapper would flatten both under the text once transformed). Display-only (objects here
+          carry no drag handles), so neither takes pointer events.
+          ObjectStage/NoteField must mount (and attach their imperative refs) BEFORE
+          CinematicSlide's own layout effect runs — that effect can call onTime synchronously
+          (the static-mode end-state path), and React runs sibling layout effects in tree order.
+          Both wrappers sit ahead of the CinematicSlide wrapper for that reason. z-index is
+          explicit on both and the CinematicSlide wrapper below sets none, so this ordering has no
+          effect on paint/stacking — only on effect timing. */}
+      <div className="beat__world" ref={notesWorld} style={{ ...WORLD_STYLE, zIndex: 2 }}>
         <NoteField ref={notes} reduced={false} />
-        {/* ObjectStage/NoteField must mount (and attach their imperative refs) BEFORE
-            CinematicSlide's own layout effect runs — that effect can call onTime synchronously
-            (the static-mode end-state path), and React runs sibling layout effects in tree order.
-            Both sit in this world wrapper, ahead of the CinematicSlide wrapper, for that reason.
-            z-index is explicit on both (.notefield: 2, .ed__objstage: 6) and neither this wrapper
-            nor the CinematicSlide wrapper below sets one, so this ordering has no effect on
-            paint/stacking — only on effect timing. */}
+      </div>
+      <div className="beat__world" ref={objectsWorld} style={{ ...WORLD_STYLE, zIndex: 6 }}>
         {scene && <ObjectStage ref={objStage} scene={scene} active />}
       </div>
       <div style={{ position: "absolute", inset: 0 }}>

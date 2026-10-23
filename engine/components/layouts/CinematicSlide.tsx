@@ -401,8 +401,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return scope.current?.querySelector<HTMLElement>(".cin__stage") ?? scope.current;
   }
 
-  /** The 16:9 world layer media tiles attach to: it takes the camera transform and sits beneath
-   *  the text stage. */
+  /** The 16:9 world layer media tiles attach to: it takes the camera transform and follows the
+   *  text stage at the same z-index (tiles keep their pre-camera stacking above the text box). */
   function worldParent(): HTMLElement | null {
     return world.current ?? scope.current;
   }
@@ -1017,9 +1017,6 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
 
   return (
     <div className={`cin${slots.sceneId === "intro" ? " cin--intro" : ""}`} ref={scope}>
-      {/* The camera's world (media tiles): before the text stage and at a lower z-index, so text
-          always paints above it and never moves. */}
-      <div className="cin__world" ref={world} />
       <div className="cin__stage">
         {slots.sceneId === "intro" && chrome?.splash && (
           <div className="cin__splash">
@@ -1044,6 +1041,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
           </div>
         )}
       </div>
+      {/* The camera's world (media tiles). It follows the text stage at the same z-index, so tiles
+          keep their pre-camera stacking (they were appended into the stage after the text box):
+          above notes and the shared text box. Only the world takes the camera; text never moves. */}
+      <div className="cin__world" ref={world} />
       <style>{`
         .cin { position: relative; width: 100%; height: 100%; }
         /* A fixed 16:9 box matching the letterboxed art rect — the slide canvas that
@@ -1051,8 +1052,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         .cin__stage { position: absolute; inset: 0; margin: auto; z-index: 2; pointer-events: none;
           width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16)); }
         /* The camera's world: the same 16:9 box as .cin__stage (tile positions are normalized
-           against it), beneath the text. It takes the camera transform about its top-left. */
-        .cin__world { position: absolute; inset: 0; margin: auto; z-index: 1; pointer-events: none; transform-origin: 0 0;
+           against it), after it at the same z-index. It takes the camera transform about its top-left. */
+        .cin__world { position: absolute; inset: 0; margin: auto; z-index: 2; pointer-events: none; transform-origin: 0 0;
           width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16)); }
         .cin__text { position: absolute; max-width: 90%; text-align: left; color: var(--color-mm-cream); text-shadow: 0 2px 14px rgba(0,0,0,0.6); }
         /* Intro is bright day — dark ink for legibility on the light ground. */
