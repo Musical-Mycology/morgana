@@ -6,6 +6,9 @@ import { formatClock } from "@/lib/timing/clock-format";
 import { parseInlineLinks } from "@/engine/deck/inline-links";
 import type { Action } from "@/engine/deck/types";
 import { isMediaRef, mediaKind, mediaRefId } from "@/engine/deck/media-ref";
+import { cameraAt, cameraEvents, type CameraEvent } from "@/engine/authoring/camera-clock";
+import { artAt, artEvents } from "@/engine/authoring/art-clock";
+import { beatTimeline } from "@/engine/authoring/beat-clock";
 import { findMediaRefs } from "@/lib/editor/media-refs";
 import type { MediaInfo } from "@/lib/store/media-store";
 
@@ -102,6 +105,55 @@ function timingWarnings(doc: DeckDoc): LintIssue[] {
         message: `${a.kind} is interactive and is ignored in timed playback` });
     }
   })));
+  return out;
+}
+
+/** Merged camera events (as `cameraEvents` folds them) paired with the location of the action that
+ *  decides each one — the last camera action at that start. Walks the doc in parallel with
+ *  cameraEvents' own reach rule; null if the two walks ever disagree. */
+function cameraLocated(doc: DeckDoc): { ev: CameraEvent; at: LintLocation }[] | null {
+  const events = cameraEvents(doc);
+  const out: { ev: CameraEvent; at: LintLocation }[] = [];
+  let k = 0;
+  for (const s of deckLayout(doc).scenes) {
+    const scene = doc.scenes[s.sceneIdx];
+    const reached = (localStart: number) => !s.pinned || localStart < s.length;
+    for (const b of s.beats) {
+      if (!reached(b.start)) continue;
+      const tl = scene.beats[b.beatIdx].timeline;
+      beatTimeline(tl).forEach((w, actionIdx) => {
+        if (w.action.kind !== "camera" || !reached(b.start + w.start)) return;
+        const start = s.start + b.start + w.start;
+        const at: LintLocation = { sceneIdx: s.sceneIdx, beatIdx: b.beatIdx, actionIdx };
+        const prev = out[out.length - 1];
+        if (prev && prev.ev.start === start) prev.at = at;
+        else if (k < events.length) out.push({ ev: events[k++], at });
+      });
+    }
+  }
+  return k === events.length ? out : null;
+}
+
+/** Camera warnings. Runs only on a structurally valid deck. */
+function cameraWarnings(doc: DeckDoc): LintIssue[] {
+  const located = cameraLocated(doc);
+  if (!located || located.length === 0) return [];
+  const events = located.map((l) => l.ev);
+  const art = artEvents(doc);
+  const out: LintIssue[] = [];
+  located.forEach(({ ev, at }, i) => {
+    const prev = i > 0 ? events[i - 1] : undefined;
+    // Same-start actions were merged into one event, so only a strictly earlier finish counts.
+    if (prev && ev.start < prev.start + prev.duration - 1e-9) {
+      out.push({ rule: "camera-overlap", severity: "warning", at, message: "camera move starts before the previous one finishes (interrupts it)" });
+    }
+    const end = ev.start + ev.duration;
+    const z = Math.round(cameraAt(events.slice(0, i + 1), end).zoom * 1e6) / 1e6;
+    if (z > 2 && artAt(art, end).some((l) => !isMediaRef(l.asset))) {
+      out.push({ rule: "camera-zoom-soft", severity: "warning", at,
+        message: `zoom ${z.toFixed(1)}× on built-in panel art will look soft — use higher-resolution art` });
+    }
+  });
   return out;
 }
 
@@ -207,6 +259,7 @@ export function lintDeck(doc: DeckDoc, ctx: LintContext = {}): LintIssue[] {
   // run on a clean one. The try/catch means a validator crash can never blank the panel.
   if (errors.length === 0) {
     warnings.push(...timingWarnings(doc));
+    warnings.push(...cameraWarnings(doc));
     warnings.push(...soundtrackWarnings(doc, ctx));
     warnings.push(...mediaWarnings(doc, ctx));
     try {
