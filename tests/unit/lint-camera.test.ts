@@ -34,7 +34,7 @@ const SOFT = (z: string) => `zoom ${z}Ã— on built-in panel art will look soft â€
 
 test("camera-zoom-soft fires for zoom > 2 over a built-in panel key", () => {
   const d = deck([cam(4, 0), wait(100)], { to: "2.01", mode: "cut" });
-  expect(rule(d, "camera-zoom-soft")).toMatchObject([{ severity: "warning", at: { sceneIdx: 0, beatIdx: 0, actionIdx: 0 }, message: SOFT("4.0") }]);
+  expect(rule(d, "camera-zoom-soft")).toMatchObject([{ severity: "warning", at: { sceneIdx: 0, beatIdx: 0, actionIdx: 0 }, message: SOFT("4.00") }]);
 });
 
 test("camera-zoom-soft: zoom 2, uploaded media, and no art are clean", () => {
@@ -48,7 +48,34 @@ test("camera-zoom-soft uses the zoom the move reaches, and art in play at that t
   const d = deck([cam(4, 500), wait(1000), { kind: "art", art: { to: "2.01", mode: "cut" } }, wait(100)], { to: "media:a.png", mode: "cut" });
   expect(rule(d, "camera-zoom-soft")).toEqual([]);
   const d2 = deck([{ kind: "art", art: { to: "2.01", mode: "cut" } }, cam(4, 500), wait(1000)], { to: "media:a.png", mode: "cut" });
-  expect(rule(d2, "camera-zoom-soft")).toMatchObject([{ message: SOFT("4.0") }]);
+  expect(rule(d2, "camera-zoom-soft")).toMatchObject([{ message: SOFT("4.00") }]);
+});
+
+const camTo = (to: Cam["to"], durationMs: number): Cam => ({ kind: "camera", to, durationMs });
+
+test("camera-zoom-soft warns only on the action that takes the zoom above 2, not on pans held there", () => {
+  const d = deck([cam(4, 0), wait(100), camTo({ x: 0.7 }, 1000), wait(1500), camTo({ y: 0.3 }, 500), wait(600)], { to: "2.01", mode: "cut" });
+  expect(rule(d, "camera-zoom-soft")).toMatchObject([{ at: { actionIdx: 0 }, message: SOFT("4.00") }]);
+});
+
+test("camera-zoom-soft fires again each time the zoom comes back above 2; the label has two decimals", () => {
+  const d = deck([cam(3, 0), wait(100), cam(1.5, 0), wait(100), cam(2.25, 400), wait(500)], { to: "2.01", mode: "cut" });
+  expect(rule(d, "camera-zoom-soft")).toMatchObject([
+    { at: { actionIdx: 0 }, message: SOFT("3.00") },
+    { at: { actionIdx: 4 }, message: SOFT("2.25") },
+  ]);
+});
+
+test("a 0 ms cut and a same-instant move are two events: soft zoom points at the cut, and nothing overlaps", () => {
+  const d = deck([camTo({ zoom: 3, x: 0.3, y: 0.3 }, 0), camTo({ x: 0.7 }, 4000), wait(5000)], { to: "2.01", mode: "cut" });
+  expect(rule(d, "camera-overlap")).toEqual([]);
+  expect(rule(d, "camera-zoom-soft")).toMatchObject([{ at: { actionIdx: 0 }, message: SOFT("3.00") }]);
+});
+
+test("same-start moves still merge for lint: the warning sits on the last action of the fold", () => {
+  const d = deck([cam(4, 500), camTo({ x: 0.8 }, 1000), wait(1500)], { to: "2.01", mode: "cut" });
+  expect(rule(d, "camera-zoom-soft")).toMatchObject([{ at: { actionIdx: 1 }, message: SOFT("4.00") }]);
+  expect(rule(d, "camera-overlap")).toEqual([]);
 });
 
 test("camera rules are skipped on a structurally invalid deck", () => {
