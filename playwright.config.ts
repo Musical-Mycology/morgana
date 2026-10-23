@@ -8,6 +8,7 @@ const dataDir = (name: string) => resolve("./.e2e", name);
 export default defineConfig({
   testDir: "./e2e",
   expect: { timeout: 15_000 },
+  use: { launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] } },
   // CI gets retries against genuine infra hiccups; locally real flakes stay visible.
   retries: process.env.CI ? 2 : 0,
   // NOTE: the build/seed step (scripts/prepare-standalone.sh) runs from the `test:e2e` npm

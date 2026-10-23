@@ -1,5 +1,6 @@
 import { loadDeck, saveDeck, listDecks } from "@/lib/store/deck-store";
-import { validateDeckDoc, type DeckDoc } from "@/engine/deck-doc";
+import { validateDeckDoc, type DeckDoc, type DeckMarker } from "@/engine/deck-doc";
+import { listMedia, type MediaInfo } from "@/lib/store/media-store";
 import {
   insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy,
   appendScene, deleteSceneAt, deleteSceneAtIndex, moveSceneBy, appendBeatToScene, setSceneDuration,
@@ -69,7 +70,7 @@ async function mutate(deckId: string, f: (doc: DeckDoc) => DeckDoc): Promise<Dec
   return next;
 }
 
-export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc | { decks: Awaited<ReturnType<typeof listDecks>> } | DeckTiming> {
+export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc | { decks: Awaited<ReturnType<typeof listDecks>> } | DeckTiming | { media: MediaInfo[] }> {
   const a = args(rawArgs);
 
   if (name === "list_decks") return { decks: await listDecks() };
@@ -159,6 +160,34 @@ export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc 
           beats: s.beats.map((b) => ({ flatIndex: b.flatIdx, id: doc.scenes[s.sceneIdx].beats[b.beatIdx].id, start: b.start, duration: b.duration })),
         })),
       };
+    }
+    case "list_media":
+      return { media: await listMedia(deckId) };
+    case "set_soundtrack": {
+      const mediaId = a.media_id;
+      if (mediaId !== null && typeof mediaId !== "string") throw new ToolCallError('"media_id" must be a string or null');
+      if (mediaId !== null && !(await listMedia(deckId)).some((m) => m.id === mediaId)) {
+        throw new ToolCallError(`media "${mediaId}" is not in this deck's media — upload it in the editor first`);
+      }
+      return mutate(deckId, (doc) => {
+        const meta = { ...doc.meta };
+        if (mediaId === null) delete meta.soundtrack; else meta.soundtrack = { media: mediaId };
+        return { ...doc, meta };
+      });
+    }
+    case "set_markers": {
+      if (!Array.isArray(a.markers)) throw new ToolCallError('"markers" must be an array');
+      // Keep exactly { id, label, t } so stray keys never persist; trim so "   " is rejected as empty.
+      const markers = (a.markers as unknown[]).map((m) => {
+        if (!m || typeof m !== "object") return m;
+        const { id, label, t } = m as Record<string, unknown>;
+        return { id, label: typeof label === "string" ? label.trim() : label, t };
+      }) as DeckMarker[];
+      return mutate(deckId, (doc) => {
+        const meta = { ...doc.meta };
+        if (markers.length === 0) delete meta.markers; else meta.markers = markers;
+        return { ...doc, meta };
+      });
     }
     default:
       throw new ToolCallError(`unknown tool: ${name}`);

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./editor.css";
 import { useEditor } from "@/lib/editor/store";
 import { loadDeck, saveDeck } from "@/lib/api/decks-client";
@@ -15,6 +15,8 @@ import { ExportPanel } from "@/components/editor/ExportPanel";
 import { McpPanel } from "@/components/editor/McpPanel";
 import { LintPanel } from "@/components/editor/LintPanel";
 import { useLint } from "@/lib/editor/use-lint";
+import { DeckMediaContext, useDeckMediaState } from "@/lib/editor/use-deck-media";
+import { releaseSoundtracksExcept, useSoundtrack } from "@/lib/audio/use-soundtrack";
 import { lintCounts } from "@/lib/editor/lint";
 import { primaryPath } from "@/lib/editor/selection";
 import { useExternalChangePoll } from "@/lib/editor/use-external-change-poll";
@@ -45,10 +47,18 @@ export default function Editor() {
   const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
-  const issues = useLint();
-  const counts = lintCounts(issues);
-
   const [deckId, setDeckId] = useState<string | null>(null);
+  const deckMedia = useDeckMediaState(deckId);
+  const soundtrackMedia = doc?.meta.soundtrack?.media;
+  const sound = useSoundtrack(deckId, soundtrackMedia);
+  const lintCtx = useMemo(() => ({
+    mediaIds: deckMedia.media?.map((m) => m.id),
+    soundtrackSec: sound.status === "ready" ? sound.track.duration : undefined,
+  }), [deckMedia.media, sound]);
+  const issues = useLint(lintCtx);
+  const counts = lintCounts(issues);
+  // Replacing or removing the soundtrack frees the old decode (up to ~90 MB each).
+  useEffect(() => { if (deckId) releaseSoundtracksExcept(deckId, soundtrackMedia); }, [deckId, soundtrackMedia]);
   const loadDeckById = useCallback((id: string) => {
     setLoadError(false);
     loadDeck(id).then(load).catch((e) => { console.error("failed to load deck", e); setLoadError(true); });
@@ -121,6 +131,7 @@ export default function Editor() {
   }, [deckId, load, externalChange]);
   return (
     <FlushSaveContext.Provider value={flush}>
+    <DeckMediaContext.Provider value={deckMedia}>
     <div className="ed">
       {externalChange.changed && (
         <div className="ed__pill ed__pill--ghost" data-testid="external-change-banner" style={{ position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 10 }}>
@@ -170,6 +181,7 @@ export default function Editor() {
       <Timeline canvasRef={canvasRef} time={time} />
       {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <Inspector />}
     </div>
+    </DeckMediaContext.Provider>
     </FlushSaveContext.Provider>
   );
 }

@@ -102,9 +102,39 @@ function timingWarnings(doc: DeckDoc): LintIssue[] {
   return out;
 }
 
+/** Facts the editor knows that the document does not: the deck's media ids and the decoded
+ *  soundtrack duration. Each soundtrack rule is skipped when its fact is absent. */
+export interface LintContext { mediaIds?: string[]; soundtrackSec?: number }
+
+/** Soundtrack and marker warnings. Runs only on a structurally valid deck. */
+function soundtrackWarnings(doc: DeckDoc, ctx: LintContext): LintIssue[] {
+  const out: LintIssue[] = [];
+  const total = deckLayout(doc).total;
+  const media = doc.meta.soundtrack?.media;
+  if (media && ctx.mediaIds && !ctx.mediaIds.includes(media)) {
+    out.push({ rule: "soundtrack-missing", severity: "warning", message: "the soundtrack file is missing from this deck's media — upload it again" });
+  }
+  if (media && ctx.soundtrackSec !== undefined) {
+    const diff = ctx.soundtrackSec - total;
+    if (Math.abs(diff) > 0.5) {
+      const head = `track is ${formatClock(ctx.soundtrackSec, { tenths: false })}, deck is ${formatClock(total, { tenths: false })}`;
+      out.push({ rule: "soundtrack-length", severity: "warning",
+        message: diff > 0 ? `${head} — ${diff.toFixed(1)}s of music would play past the last frame`
+                          : `${head} — the video would end ${(-diff).toFixed(1)}s in silence` });
+    }
+  }
+  for (const m of doc.meta.markers ?? []) {
+    if (m.t > total) {
+      out.push({ rule: "marker-out-of-range", severity: "warning",
+        message: `marker "${m.label}" at ${formatClock(m.t, { tenths: false })} is past the end of the deck (${formatClock(total, { tenths: false })})` });
+    }
+  }
+  return out;
+}
+
 /** Every problem in a deck, errors first. An "error" is exactly what makes the server reject
  *  a PUT, so it means "this deck will not save"; a "warning" is advisory only. */
-export function lintDeck(doc: DeckDoc): LintIssue[] {
+export function lintDeck(doc: DeckDoc, ctx: LintContext = {}): LintIssue[] {
   // validateDeckDoc emits deck-meta problems before per-scene ones, which is the right
   // priority already — so errors keep their emission order rather than being sorted.
   const errors: LintIssue[] = validateDeckDoc(doc).errors.map((message) => ({
@@ -123,6 +153,7 @@ export function lintDeck(doc: DeckDoc): LintIssue[] {
   // run on a clean one. The try/catch means a validator crash can never blank the panel.
   if (errors.length === 0) {
     warnings.push(...timingWarnings(doc));
+    warnings.push(...soundtrackWarnings(doc, ctx));
     try {
       for (const message of validateDeck(flattenStory(doc.scenes))) {
         const at = locateSlide(doc, message);

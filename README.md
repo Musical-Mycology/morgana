@@ -115,6 +115,14 @@ The Player lives at `/play?deck=<id>[&t=<seconds>]` — one continuous clock acr
 counting up against the target. Keys: **Space** play/pause · **←/→** ±1s (**Shift** ±5s) ·
 **Home** back to 0:00 · **F** fullscreen · **H** hide/show the HUD.
 
+**Soundtrack.** A timed deck can carry one pre-mixed audio track: **Deck settings → Soundtrack →
+Upload audio** (MP3/M4A/WAV recommended; max 200 MB by default, set `MORGANA_MEDIA_MAX_MB` to
+change). It plays in sync with the deck clock from wherever you start (a deep link, **Play from
+here**, or any seek restarts it at that point), drives the Player's clock, and **M** mutes it. Its waveform
+appears on the ruler and the Player scrubber, and **+ Marker** on the ruler drops cue markers
+(rename or retime them in Deck settings) to help line scenes up with the music. Uploads are stored
+per deck under `MORGANA_DATA_DIR/media/<deckId>/` and are deleted with the deck.
+
 ---
 
 ## Run it
@@ -190,11 +198,12 @@ One JSON document per deck on the data volume:
 ```
 <MORGANA_DATA_DIR>/
   decks/      <id>.deck.json     # one file per deck (gitignored; never committed)
+  media/      <deckId>/          # a deck's soundtrack audio + sidecar metadata (deleted with the deck)
   mcp-token.json                 # bearer token for the MCP server (gitignored; never committed)
 ```
 
-> The design also reserves an `assets/` directory for future local-asset support, but asset
-> upload/serving is **not implemented yet** — only `decks/` is used today.
+> Soundtrack uploads live under `media/<deckId>/`; general image/font asset management is not
+> implemented yet.
 
 The deck API is filesystem-backed ([`lib/store/deck-store.ts`](lib/store/deck-store.ts)):
 
@@ -206,10 +215,15 @@ The deck API is filesystem-backed ([`lib/store/deck-store.ts`](lib/store/deck-st
 | `PUT /api/decks/[id]` | Save a deck (validated; autosave uses this). |
 | `DELETE /api/decks/[id]` | Delete a deck. |
 | `GET /api/decks/[id]/meta` | Deck file's on-disk `mtimeMs` (used to detect external changes). |
+| `GET /api/decks/[id]/media` | List the deck's uploaded media: `{ media: [{ id, name, mime, bytes, uploadedAt }] }`. |
+| `POST /api/decks/[id]/media` | Upload a soundtrack (multipart field `file`); returns `{ id, name, mime, bytes }`. |
+| `GET /api/decks/[id]/media/[mediaId]` | Serve an uploaded audio file. |
+| `DELETE /api/decks/[id]/media/[mediaId]` | Delete an uploaded file (204; 404 for a malformed id or deck). Does not clear `meta.soundtrack`. |
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `MORGANA_DATA_DIR` | `/data` (production), `./data` (dev) | Directory holding `decks/<id>.deck.json`. Resolved to an absolute path; use a writable path in production. |
+| `MORGANA_MEDIA_MAX_MB` | `200` | Maximum size of a soundtrack upload, in MB (enforced while streaming). |
 | `MORGANA_BASE_PATH` | _(unset)_ | **Build-time only.** Serve Morgana under a sub-path, e.g. `/morgana`. Next.js bakes this into the build, so it must be passed as a Docker `--build-arg` (or set before `npm run build`) — setting it at container runtime has no effect. |
 | `PORT` | `3000` | Server port. |
 
@@ -247,6 +261,7 @@ Tool surface: `list_decks`, `read_deck`, beat operations (`insert_beat_after`, `
 `update_meta`) — see [`lib/mcp/tool-defs.ts`](lib/mcp/tool-defs.ts) for the exact schemas.
 Timed (video) decks: `set_scene_duration` pins a scene's length, `read_deck_timing` reports the
 computed layout and overruns, and `update_meta` with path `timing.targetSec` sets the target length.
+Soundtrack: `list_media` lists the deck's uploaded files, `set_soundtrack` picks one (uploads happen in the editor), and `set_markers` replaces the deck's cue markers.
 
 `move_beat_by` moves a beat one position in filmstrip order. Within a scene it swaps with
 the neighbouring beat; at a scene edge it moves the beat into the adjacent scene. It is only

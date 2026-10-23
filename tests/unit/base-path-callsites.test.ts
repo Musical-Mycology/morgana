@@ -84,6 +84,9 @@ const ALLOWED_RAW_URL_LITERAL: Record<string, string> = {
     "browser) — not a URL, so basePath is meaningless here.",
   "lib/store/mcp-auth.ts":
     "Same \"/data\" filesystem default as lib/store/deck-store.ts.",
+  "lib/api/media-client.ts":
+    "mediaPath is deliberately unprefixed: its consumer loadSoundtrack " +
+    "(lib/audio/soundtrack.ts) applies withBasePath itself; DOM consumers must use mediaUrl.",
 };
 
 test("every returned or branched app-absolute URL literal is routed through withBasePath() or is explicitly allowlisted", () => {

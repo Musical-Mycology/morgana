@@ -64,3 +64,18 @@ test("read_deck_timing explains that content shorter than a pinned length holds"
   const tool = TOOL_DEFS.find((t) => t.name === "read_deck_timing")!;
   expect(tool.description).toMatch(/holds? (its|the) last frame until the boundary/);
 });
+
+test("includes the soundtrack tools with descriptions that state the contract", () => {
+  const byName = Object.fromEntries(TOOL_DEFS.map((t) => [t.name, t]));
+  expect(byName.list_media).toBeDefined();
+  expect(byName.set_soundtrack.description).toMatch(/upload.*editor/i);
+  expect(byName.set_soundtrack.description).toMatch(/0:00/);
+  expect(byName.set_markers.description).toMatch(/replaces/i);
+});
+
+test("set_soundtrack does not promise exported video yet; update_meta points soundtrack edits at set_soundtrack", () => {
+  const byName = Object.fromEntries(TOOL_DEFS.map((t) => [t.name, t]));
+  expect(byName.set_soundtrack.description).toContain("in the timed Player (and in the MP4 export once that lands)");
+  expect(byName.set_soundtrack.description).not.toMatch(/in exported video/);
+  expect(byName.update_meta.description).toMatch(/soundtrack.*skips the media-list check.*use set_soundtrack/i);
+});
