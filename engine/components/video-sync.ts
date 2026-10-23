@@ -41,6 +41,36 @@ function hasLoaded(el: HTMLVideoElement): boolean {
 }
 const failed: string[] = [];
 
+/** Upper bound on the play-mode seek lead: a pathological seek cannot fling the clip far ahead. */
+export const MAX_SEEK_LEAD_SEC = 0.5;
+interface PlaySeek { writtenAt?: number; latency: number }
+/** Play mode, per element: when the last play-mode write happened and how long the latest one took
+ *  to reach `seeked`. On long-GOP footage a seek decodes from the previous keyframe, so it lands
+ *  well behind a deck clock that kept moving; without a lead, drift correction re-seeks forever. */
+const playSeeks = new WeakMap<HTMLVideoElement, PlaySeek>();
+function playSeekOf(el: HTMLVideoElement): PlaySeek {
+  let ps = playSeeks.get(el);
+  if (!ps) {
+    const rec: PlaySeek = { latency: 0 };
+    el.addEventListener("seeked", () => {
+      if (rec.writtenAt === undefined) return; // not a play-mode seek (seek mode measures nothing)
+      rec.latency = Math.max(0, (performance.now() - rec.writtenAt) / 1000);
+      rec.writtenAt = undefined;
+    });
+    playSeeks.set(el, (ps = rec));
+  }
+  return ps;
+}
+/** A play-mode currentTime write, aimed ahead of the deck by the element's last measured seek
+ *  latency (bounded) so the clip lands where the deck will be. Never leads past a non-looping
+ *  clip's last frame, nor across a looping clip's wrap. */
+function playSeek(el: HTMLVideoElement, t: number, d: number): void {
+  const ps = playSeekOf(el);
+  const ahead = t + Math.min(ps.latency, MAX_SEEK_LEAD_SEC);
+  ps.writtenAt = performance.now(); // first: the write may dispatch `seeked` synchronously
+  el.currentTime = Number.isFinite(d) && ahead >= d - 2 * HOLD_EPSILON ? t : ahead;
+}
+
 export function createClipVideo(src: string): HTMLVideoElement {
   const el = document.createElement("video");
   el.muted = true;
@@ -209,10 +239,11 @@ export function syncVideo(
     if (Math.abs(el.currentTime - t) > SEEK_EPS) el.currentTime = t;
     if (!el.paused) el.pause();
   } else if (el.paused) {
-    el.currentTime = t;
+    // Already close (e.g. a seek-mode frame just put it there): a write would only re-seek.
+    if (Math.abs(el.currentTime - t) > DRIFT_SEC) playSeek(el, t, d);
     el.play().catch(() => {});
   } else if (Math.abs(el.currentTime - t) > DRIFT_SEC) {
-    el.currentTime = t; // for a looping clip the wrap shows up here as drift
+    playSeek(el, t, d); // for a looping clip the wrap shows up here as drift
   }
 }
 

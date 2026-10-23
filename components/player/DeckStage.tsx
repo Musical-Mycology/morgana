@@ -12,6 +12,15 @@ import type { ClipMode } from "@/engine/components/video-sync";
 /** The imperative face of a deck stage (the render page drives frames through it). */
 export interface DeckStageHandle { apply(T: number): void; total: number; current(): number }
 
+/** The current beat's UNCLAMPED elapsed time at deck time T (T − scene start − beat start). It
+ *  equals `loc.localT` while the beat plays; in a pinned scene's hold, where locate() clamps
+ *  localT at the beat's end, it keeps running, so media tile clips keep playing like art layers. */
+function beatClipClock(layout: DeckLayout, loc: Located, T: number): number {
+  const scene = layout.scenes[loc.sceneIdx];
+  const beat = loc.beatIdx != null ? scene?.beats[loc.beatIdx] : undefined;
+  return scene && beat ? T - scene.start - beat.start : loc.localT;
+}
+
 /** One mounted BeatStage for the whole deck. Memoised on the beat so the per-frame clock
  *  re-render never re-renders the stage; only a beat change does. Its own ArtStage is not
  *  mounted (`art={false}`): the deck stage owns the one ArtStage. */
@@ -70,7 +79,7 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
     const prev = locRef.current;
     locRef.current = next;
     if (next?.flatIdx !== prev?.flatIdx || next?.phase !== prev?.phase || next?.sceneIdx !== prev?.sceneIdx) setLoc(next);
-    else if (next && next.flatIdx != null) transport.current?.seek(next.localT);
+    else if (next && next.flatIdx != null) transport.current?.seek(next.localT, beatClipClock(layout, next, T.current));
     setDisplayT(T.current);
     paintArt();
   }, [layout, paintArt]);
@@ -78,8 +87,11 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   // Children's layout effects (CinematicSlide's beat setup) run before this one, so the seek
   // lands on the freshly-mounted beat before the browser paints.
   useLayoutEffect(() => {
-    if (loc && loc.flatIdx != null) transport.current?.seek(locRef.current?.localT ?? loc.localT);
-  }, [loc]);
+    if (loc && loc.flatIdx != null) {
+      const cur = locRef.current ?? loc;
+      transport.current?.seek(cur.localT, beatClipClock(layout, cur, T.current));
+    }
+  }, [loc, layout]);
 
   // Mount (and a new doc): paint art + nightlight at the current T before the first frame shows.
   useLayoutEffect(() => { paintArt(); }, [paintArt]);

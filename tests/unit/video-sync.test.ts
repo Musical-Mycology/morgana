@@ -547,6 +547,75 @@ describe("play mode", () => {
   });
 });
 
+// Final review I2: on long-GOP footage a play-mode seek takes long enough that the deck has moved
+// on by the time it lands, so drift correction re-seeked forever. The write is skipped when a paused
+// element is already close, and later seeks lead the deck clock by the measured seek latency.
+describe("play mode — seek latency convergence", () => {
+  test("paused and within DRIFT_SEC: no currentTime write, just play()", () => {
+    const f = fake({ paused: true, currentTime: 2 });
+    syncVideo(f.el, () => 2 + DRIFT_SEC / 2, "play");
+    expect(f.writes).toEqual([]);
+    expect(f.play).toHaveBeenCalled();
+  });
+
+  /** Drive syncVideo once per 1/60 s frame against a deck clock that starts at `start`; every
+   *  currentTime write takes `latency` s of wall time to land (`seeking` until then, then `seeked`).
+   *  While not seeking, a playing element advances in real time. */
+  function simulate(latency: number | ((n: number) => number), seconds: number, start = 2) {
+    let now = 1000; // ms
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const f = fake({ paused: true, currentTime: 0, duration: 10 });
+    let deck = start;
+    let seekDoneAt: number | null = null;
+    let seen = 0;
+    const dt = 1 / 60;
+    for (let i = 0; i < seconds * 60; i++) {
+      syncVideo(f.el, () => deck, "play");
+      if (f.writes.length > seen) {
+        const L = typeof latency === "number" ? latency : latency(seen);
+        seen = f.writes.length;
+        f.s.seeking = true;
+        seekDoneAt = now + L * 1000;
+      }
+      now += dt * 1000;
+      deck += dt;
+      if (seekDoneAt !== null && now >= seekDoneAt) {
+        f.s.seeking = false;
+        seekDoneAt = null;
+        f.el.dispatchEvent(new Event("seeked"));
+      } else if (!f.s.seeking && !f.s.paused) {
+        f.s.currentTime += dt;
+      }
+    }
+    return { f, drift: deck - f.s.currentTime };
+  }
+
+  test("a 0.35 s seek latency converges after the second seek instead of re-seeking forever", () => {
+    const { f, drift } = simulate(0.35, 3);
+    expect(f.writes.length).toBeLessThanOrEqual(2);
+    expect(Math.abs(drift)).toBeLessThanOrEqual(DRIFT_SEC);
+  });
+
+  test("the lead is bounded at 0.5 s however slow a seek was", () => {
+    const { f } = simulate((n) => (n === 0 ? 5 : 0.05), 6.5);
+    // first seek lands at 2, ~5 s behind; the next one leads by at most 0.5 s (not 5 s)
+    expect(f.writes[1] - (2 + 5)).toBeLessThanOrEqual(0.5 + 0.05);
+    expect(f.writes[1] - (2 + 5)).toBeGreaterThan(0.4);
+  });
+
+  test("the lead never pushes a non-looping clip past its last frame", () => {
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const f = fake({ paused: false, currentTime: 1, duration: 5 });
+    syncVideo(f.el, () => 2, "play"); // first seek: no latency known yet
+    expect(f.writes).toEqual([2]);
+    now += 400;
+    f.el.dispatchEvent(new Event("seeked"));
+    syncVideo(f.el, () => 4.8, "play"); // 4.8 + 0.4 would pass the 5 s end
+    expect(f.writes[1]).toBeLessThanOrEqual(5 - HOLD_EPSILON);
+  });
+});
+
 describe("element lifecycle", () => {
   test("createClipVideo flags", () => {
     const el = createClipVideo("/x.mp4");

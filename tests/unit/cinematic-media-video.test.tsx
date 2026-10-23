@@ -32,7 +32,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-const tile = { kind: "media", id: "t", src: "media:c.mp4", pos: { x: 0.5, y: 0.5 }, clip: { in: 1 } } as const;
+const tile = { kind: "media", id: "t", src: "media:cccccccccccccccc.mp4", pos: { x: 0.5, y: 0.5 }, clip: { in: 1 } } as const;
 const beat: Beat = { id: "b", timeline: [tile, { kind: "wait", ms: 3000 }] };
 // Variant: the media action starts at 0.5 s, so seeking to 0 is before it.
 const lateBeat: Beat = { id: "late", timeline: [{ kind: "wait", ms: 500 }, tile, { kind: "wait", ms: 3000 }] };
@@ -57,7 +57,7 @@ describe("CinematicSlide media tiles — clips and uploaded images", () => {
     expect(v).not.toBeNull();
     expect(v.muted).toBe(true);
     expect(v.autoplay).toBe(false);
-    expect(v.getAttribute("src")).toBe(mediaUrl("d1", "c.mp4"));
+    expect(v.getAttribute("src")).toBe(mediaUrl("d1", "cccccccccccccccc.mp4"));
     expect(v.classList.contains("cin__media-img")).toBe(true);
     expect(v.currentTime).toBe(3);
     expect(play).not.toHaveBeenCalled();
@@ -92,12 +92,12 @@ describe("CinematicSlide media tiles — clips and uploaded images", () => {
   });
 
   it("an image ref tile is an <img> resolved through assets.media", () => {
-    const b: Beat = { id: "img", timeline: [{ ...tile, src: "media:p.png", clip: undefined }, { kind: "wait", ms: 1000 }] };
+    const b: Beat = { id: "img", timeline: [{ ...tile, src: "media:dddddddddddddddd.png", clip: undefined }, { kind: "wait", ms: 1000 }] };
     const { transport, container } = setup(b);
     act(() => { transport.current!.seek(1); });
     const img = container.querySelector<HTMLImageElement>(".cin__media img.cin__media-img")!;
     expect(img).not.toBeNull();
-    expect(img.getAttribute("src")).toBe(mediaUrl("d1", "p.png"));
+    expect(img.getAttribute("src")).toBe(mediaUrl("d1", "dddddddddddddddd.png"));
     expect(container.querySelector(".cin__media video")).toBeNull();
   });
 
@@ -132,7 +132,7 @@ const Harness = forwardRef<{ apply: (T: number) => void }, { doc: DeckDoc }>(fun
 describe("Review Focus #2 — same clip as art layer and tile", () => {
   it("gives two independent video elements, each at its own clip time", () => {
     const doc: DeckDoc = { version: 1, meta: { id: "v", title: "V" }, scenes: [{ id: "s", beats: [
-      { id: "a", art: { to: "media:c.mp4", mode: "cut" }, timeline: [tile, { kind: "wait", ms: 3000 }] },
+      { id: "a", art: { to: "media:cccccccccccccccc.mp4", mode: "cut" }, timeline: [tile, { kind: "wait", ms: 3000 }] },
     ] }] };
     const h = createRef<{ apply: (T: number) => void }>();
     const { container } = render(<DeckAssetsProvider deckId="d1"><Harness ref={h} doc={doc} /></DeckAssetsProvider>);
@@ -142,8 +142,8 @@ describe("Review Focus #2 — same clip as art layer and tile", () => {
     expect(art).not.toBeNull();
     expect(tileV).not.toBeNull();
     expect(art).not.toBe(tileV);
-    expect(art.getAttribute("src")).toBe(mediaUrl("d1", "c.mp4"));
-    expect(tileV.getAttribute("src")).toBe(mediaUrl("d1", "c.mp4"));
+    expect(art.getAttribute("src")).toBe(mediaUrl("d1", "cccccccccccccccc.mp4"));
+    expect(tileV.getAttribute("src")).toBe(mediaUrl("d1", "cccccccccccccccc.mp4"));
     expect(art.currentTime).toBe(2); // art: in 0, shown from T=0
     expect(tileV.currentTime).toBe(3); // tile: in 1, shown from beat-local 0
   });
@@ -152,22 +152,49 @@ describe("Review Focus #2 — same clip as art layer and tile", () => {
 // --- Review round 1 -------------------------------------------------------------------------
 
 describe("review round 1 — tile clip fixes", () => {
-  it("a settled media_out tile is paused and no longer synced (no seek, no play)", () => {
+  it("a settled media_out tile is removed and its video released (final review I3)", () => {
     const b: Beat = { id: "out", timeline: [tile, { kind: "wait", ms: 1000 }, { kind: "media_out", id: "t" }, { kind: "wait", ms: 1000 }] };
     const { transport, clipModeRef, video } = setup(b);
     act(() => { transport.current!.seek(1); });
     const v = video()!;
     expect(v.currentTime).toBe(2);
-    vi.mocked(syncVideo).mockClear();
-    act(() => { transport.current!.seek(3); }); // media_out (1.6 + 0.5) settled: opacity 0
+    act(() => { transport.current!.seek(1.9); }); // media_out (1.6 + 0.5) in flight: still on stage
     expect(video()).toBe(v);
-    expect((v.closest(".cin__media") as HTMLElement).style.opacity).toBe("0");
-    expect(v.currentTime).toBe(2);
+    vi.mocked(syncVideo).mockClear();
+    act(() => { transport.current!.seek(3); }); // settled
+    expect(video()).toBeNull();
+    expect(v.isConnected).toBe(false);
+    expect(releaseVideo).toHaveBeenCalledWith(v);
     expect(vi.mocked(syncVideo).mock.calls.map((c) => c[0])).not.toContain(v);
     clipModeRef.current = "play";
     act(() => { transport.current!.seek(3.2); });
-    expect(v.currentTime).toBe(2);
+    expect(video()).toBeNull();
     expect(play).not.toHaveBeenCalled();
+  });
+
+  it("a re-show after a settled media_out builds a fresh element, stepped or jumped (final review I3)", () => {
+    const b: Beat = { id: "reshow", timeline: [
+      tile, { kind: "wait", ms: 1000 }, { kind: "media_out", id: "t" }, { kind: "wait", ms: 1000 },
+      { ...tile, clip: { in: 0 } }, { kind: "wait", ms: 1000 },
+    ] };
+    // stepped: through the show, the settled out, and the re-show (at 3.1)
+    const stepped = setup(b);
+    act(() => { stepped.transport.current!.seek(1); });
+    const first = stepped.video()!;
+    act(() => { stepped.transport.current!.seek(3); });
+    expect(stepped.video()).toBeNull();
+    act(() => { stepped.transport.current!.seek(3.5); });
+    const again = stepped.video()!;
+    expect(again).not.toBeNull();
+    expect(again).not.toBe(first);
+    expect(again.currentTime).toBeCloseTo(0.4); // in 0 + (3.5 - 3.1)
+    expect(stepped.container.querySelectorAll(".cin__media")).toHaveLength(1);
+    stepped.unmount();
+    // jumped: straight to the re-show
+    const jumped = setup(b);
+    act(() => { jumped.transport.current!.seek(3.5); });
+    expect(jumped.video()!.currentTime).toBeCloseTo(0.4);
+    expect(jumped.container.querySelectorAll(".cin__media")).toHaveLength(1);
   });
 
   it("a video tile at entrance p=0 is painted at MIN_VIDEO_OPACITY and synced (its first visible frame is never stale)", () => {
@@ -181,20 +208,21 @@ describe("review round 1 — tile clip fixes", () => {
   });
 
   it("an image tile at entrance p=0 is still painted at 0", () => {
-    const b: Beat = { id: "imgLate", timeline: [{ kind: "wait", ms: 500 }, { ...tile, src: "media:p.png", clip: undefined }, { kind: "wait", ms: 1000 }] };
+    const b: Beat = { id: "imgLate", timeline: [{ kind: "wait", ms: 500 }, { ...tile, src: "media:dddddddddddddddd.png", clip: undefined }, { kind: "wait", ms: 1000 }] };
     const { transport, container } = setup(b);
     act(() => { transport.current!.seek(0.5); });
     expect(container.querySelector<HTMLElement>(".cin__media")!.style.opacity).toBe("0");
   });
 
-  it("a settled media_out without an id also skips the tile (painted 0, not synced)", () => {
+  it("a settled media_out without an id also removes the tile", () => {
     const b: Beat = { id: "outAll", timeline: [tile, { kind: "wait", ms: 1000 }, { kind: "media_out" }, { kind: "wait", ms: 1000 }] };
     const { transport, video } = setup(b);
     act(() => { transport.current!.seek(1); });
     const v = video()!;
     vi.mocked(syncVideo).mockClear();
     act(() => { transport.current!.seek(3); });
-    expect((v.closest(".cin__media") as HTMLElement).style.opacity).toBe("0");
+    expect(video()).toBeNull();
+    expect(releaseVideo).toHaveBeenCalledWith(v);
     expect(vi.mocked(syncVideo).mock.calls.map((c) => c[0])).not.toContain(v);
   });
 
@@ -275,21 +303,21 @@ describe("review round 1 — tile clip fixes", () => {
 
   it("re-showing a tile id with a different src rebuilds it: image → clip and clip → image", () => {
     const b: Beat = { id: "swap", timeline: [
-      { ...tile, src: "media:p.png", clip: undefined }, { kind: "wait", ms: 1000 },
+      { ...tile, src: "media:dddddddddddddddd.png", clip: undefined }, { kind: "wait", ms: 1000 },
       { ...tile, clip: { in: 0 } }, { kind: "wait", ms: 1000 },
     ] };
     const { transport, container } = setup(b);
     const img = () => container.querySelector<HTMLImageElement>(".cin__media img");
     act(() => { transport.current!.seek(1); });
-    expect(img()!.getAttribute("src")).toBe(mediaUrl("d1", "p.png"));
+    expect(img()!.getAttribute("src")).toBe(mediaUrl("d1", "dddddddddddddddd.png"));
     act(() => { transport.current!.seek(2.5); }); // second show at 1.6
     const v = container.querySelector<HTMLVideoElement>(".cin__media video")!;
-    expect(v.getAttribute("src")).toBe(mediaUrl("d1", "c.mp4"));
+    expect(v.getAttribute("src")).toBe(mediaUrl("d1", "cccccccccccccccc.mp4"));
     expect(img()).toBeNull();
     expect(v.currentTime).toBeCloseTo(0.9);
     expect(container.querySelectorAll(".cin__media")).toHaveLength(1);
     act(() => { transport.current!.seek(1); }); // back before the second show
-    expect(img()!.getAttribute("src")).toBe(mediaUrl("d1", "p.png"));
+    expect(img()!.getAttribute("src")).toBe(mediaUrl("d1", "dddddddddddddddd.png"));
     expect(container.querySelector(".cin__media video")).toBeNull();
     expect(releaseVideo).toHaveBeenCalledWith(v);
   });
@@ -330,5 +358,39 @@ describe("Review Focus #2 — deck offset", () => {
     const v = container.querySelector<HTMLVideoElement>(".cin__media video")!;
     expect(v).not.toBeNull();
     expect(v.currentTime).toBe(3); // in 1 + beat-local 2
+  });
+});
+
+// Final review I1: in a pinned scene's hold, locate() clamps the beat's localT at its end, so the
+// tile clip would freeze (render) or stutter (/play). Tiles take an unclamped beat-local clip clock.
+describe("final review I1 — tile clips keep running through a pinned scene's hold", () => {
+  const heldDoc = (clip: { in?: number; loop?: boolean }): DeckDoc => ({ version: 1, meta: { id: "v", title: "V" }, scenes: [
+    { id: "s", durationSec: 9, beats: [{ id: "b", timeline: [{ ...tile, clip }, { kind: "wait", ms: 3000 }] }] },
+  ] });
+
+  it("advances the tile's clip time across the hold (the beat ends at 3.6 s)", () => {
+    const h = createRef<{ apply: (T: number) => void }>();
+    const { container } = render(<DeckAssetsProvider deckId="d1"><Harness ref={h} doc={heldDoc({ in: 1 })} /></DeckAssetsProvider>);
+    const v = () => container.querySelector<HTMLVideoElement>(".cin__media video")!;
+    act(() => { h.current!.apply(2); });
+    expect(v().currentTime).toBe(3); // play phase: in 1 + 2
+    act(() => { h.current!.apply(5); }); // hold (beat content ended at 3.6)
+    expect(v().currentTime).toBe(6); // in 1 + 5, not frozen at 4.6
+    act(() => { h.current!.apply(7); });
+    expect(v().currentTime).toBe(8);
+  });
+
+  it("a frame inside the hold reached by jumping equals the same frame reached by stepping", () => {
+    const doc = heldDoc({ in: 1, loop: true });
+    const jumped = createRef<{ apply: (T: number) => void }>();
+    const a = render(<DeckAssetsProvider deckId="d1"><Harness ref={jumped} doc={doc} /></DeckAssetsProvider>);
+    act(() => { jumped.current!.apply(8.5); });
+    const jumpT = a.container.querySelector<HTMLVideoElement>(".cin__media video")!.currentTime;
+    a.unmount();
+    const stepped = createRef<{ apply: (T: number) => void }>();
+    const b = render(<DeckAssetsProvider deckId="d1"><Harness ref={stepped} doc={doc} /></DeckAssetsProvider>);
+    for (let T = 0; T <= 8.5; T += 0.5) act(() => { stepped.current!.apply(T); });
+    expect(b.container.querySelector<HTMLVideoElement>(".cin__media video")!.currentTime).toBeCloseTo(jumpT);
+    expect(jumpT).toBeCloseTo(1 + ((8.5) % 9)); // loop: in 1 + 8.5 within [1, 10)
   });
 });

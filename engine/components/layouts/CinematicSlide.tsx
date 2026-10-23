@@ -78,7 +78,10 @@ export interface CinematicRuntime {
  *  beat. `duration()` is always `beatDuration(beat.timeline)` — the pure beat-clock reading,
  *  never a GSAP timeline's own `.duration()`. */
 export interface SlideTransport {
-  seek(t: number): void;
+  /** `clipT` (optional): the UNCLAMPED elapsed beat-local time, used only as media tiles' clip
+   *  clock. A host past the beat's end (a pinned scene's hold, where `t` stays at duration())
+   *  passes it so tile clips keep running like art layers do. Defaults to the clamped `t`. */
+  seek(t: number, clipT?: number): void;
   play(): void;
   pause(): void;
   duration(): number;
@@ -532,12 +535,15 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  `state` with no DOM tile yet is built via makeMediaEl from its `media` show action, found
    *  by scanning `fold`. Because this is recomputed from scratch on every call (not carried as
    *  tween state), backward seek falls out for free. A tile holding a clip video is synced to
-   *  its clip time at beat-local `t` (the same `t` the fold ran at; `since` is beat-local too):
-   *  "play" in autoplay, "seek" in static mode, else the host's clip mode (default "seek"). A
-   *  video tile is painted at no less than MIN_VIDEO_OPACITY and kept synced through its
-   *  entrance (p=0 included), so it stays composited and its first visible frame is the seeked
-   *  one. Only a tile whose reached media_out has settled is painted at 0, paused and not synced. */
-  function paintMedia(fold: MediaFold[], state: Map<string, MediaRenderState>, t: number) {
+   *  its clip time at the beat-local `clipT` (the fold's `t`, or the host's unclamped beat clock
+   *  past the beat's end; `since` is beat-local too): "play" in autoplay, "seek" in static mode,
+   *  else the host's clip mode (default "seek"). A video tile is painted at no less than
+   *  MIN_VIDEO_OPACITY and kept synced through its entrance (p=0 included), so it stays
+   *  composited and its first visible frame is the seeked one. A tile whose reached media_out
+   *  has settled is fully hidden, so it is removed (its video released); a later re-show of the
+   *  same id builds a fresh element — the same path whether the frame was stepped to or jumped
+   *  to, so a re-shown clip's first frame never depends on how the render got there. */
+  function paintMedia(fold: MediaFold[], state: Map<string, MediaRenderState>, clipT: number) {
     for (const [id, el] of mediaTiles.current) {
       if (!state.has(id)) { removeTile(el); mediaTiles.current.delete(id); }
     }
@@ -558,6 +564,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     for (const [id, s] of state) {
       const a = showActions.get(id);
       let el = mediaTiles.current.get(id);
+      if (settledOut.has(id)) {
+        if (el) { removeTile(el); mediaTiles.current.delete(id); }
+        continue;
+      }
       // Re-shown with a different src (image ↔ clip, another clip): the old element is the wrong media.
       if (el && a && el.dataset.mediaSrc !== (a.src ?? "")) {
         removeTile(el);
@@ -574,15 +584,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       el.style.top = `${s.y * 100}%`;
       gsap.set(el, { scale: s.scale });
       const video = tileVideo(el);
-      const out = settledOut.has(id);
-      el.style.opacity = String(video && !out ? Math.max(s.opacity, MIN_VIDEO_OPACITY) : s.opacity);
+      el.style.opacity = String(video ? Math.max(s.opacity, MIN_VIDEO_OPACITY) : s.opacity);
       if (video) {
         const { since, clip } = s;
         if (autoplay && !staticRef.current) syncTileLoop(video, clip);
         else stopTileLoop(video);
-        // Faded out: undrawn, so not synced. A re-show of the same id after this may show one stale frame (rare).
-        if (out) { if (!video.paused) video.pause(); continue; }
-        syncVideo(video, (d) => clipTimeAt(since, t, clip, d), mode, { loop: clip?.loop });
+        syncVideo(video, (d) => clipTimeAt(since, clipT, clip, d), mode, { loop: clip?.loop });
       }
     }
   }
@@ -656,7 +663,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   /** Paint the beat's visual state at beat-local time `t` — text, clear/fade_out, counter,
    *  media, art, nightlight, and rotateList actions all render from here now (Tasks 5-8). PAUSED
    *  timelines only; renderAt is the sole thing that ever advances them (design spec §7b §4.2). */
-  function renderAt(t: number) {
+  function renderAt(t: number, clipT: number = t) {
     const host = scope.current?.querySelector<HTMLElement>(".cin__text");
     if (!host) return;
     // Backward seek: rebuild from the last destructive boundary at or before t. Deletion
@@ -884,7 +891,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     if (fadeOutP == null) gsap.set([host, ...lineBoxes.current], { clearProps: "opacity" });
     else gsap.set([host, ...lineBoxes.current], { opacity: 1 - fadeOutP });
     paintCounter(counter, counterValueP, counterEntranceP, counterHideP);
-    paintMedia(mediaFold, mediaStateAt(mediaFold, t), t);
+    paintMedia(mediaFold, mediaStateAt(mediaFold, t), clipT);
     setAgainRevealed(revealAgain);
     lastT.current = t;
     // The one clock (design spec §7b Task 10, ambiguity res. #1): every renderAt call notifies
@@ -915,9 +922,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  never recomputes it, so a seek across a gate boundary while the ticker is still live gets
    *  silently undone by the very next real-time frame (Task 10 review). Callers must never need
    *  to remember to pause() before seek() themselves. */
-  function seek(to: number) {
+  function seek(to: number, clipT?: number) {
     pause();
-    renderAt(Math.max(0, Math.min(duration(), to)));
+    const t = Math.max(0, Math.min(duration(), to));
+    renderAt(t, clipT !== undefined && Number.isFinite(clipT) ? Math.max(t, clipT) : t);
   }
 
   /** Stop the ticker driving playback, if any. Idempotent — safe to call when already paused. */
