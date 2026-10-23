@@ -1,7 +1,16 @@
 import type { Action, TextIn } from "@/engine/deck/types";
 
-export type FieldType = "text" | "textarea" | "number" | "select" | "range" | "checkbox" | "objectRef";
-export interface Field { key: string; label: string; type: FieldType; options?: { value: string; label: string }[]; min?: number; max?: number; step?: number; }
+export type FieldType = "text" | "textarea" | "number" | "select" | "range" | "checkbox" | "objectRef" | "asset";
+export type AssetAccept = "panel" | "overlay" | "image" | "video";
+export interface Field {
+  key: string; label: string; type: FieldType; options?: { value: string; label: string }[]; min?: number; max?: number; step?: number;
+  /** asset: an ordered list (art `to`) rather than a single value (tile `src`). */
+  multiple?: boolean;
+  /** asset: which kinds the picker offers. */
+  accept?: AssetAccept[];
+  /** asset: dot-path of the clip options written alongside (art `Record<MediaRef, ClipOpts>`, tile `ClipOpts`). */
+  clipKey?: string;
+}
 export interface EffectDescriptor { kind: string; label: string; icon: string; schema: Field[]; seekable: boolean; defaults(): Action; }
 
 const opts = (...vs: string[]) => vs.map((v) => ({ value: v, label: v }));
@@ -22,7 +31,7 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
   wait: { kind: "wait", label: "Wait", icon: "ti-clock", seekable: true, schema: [{ key: "ms", label: "Milliseconds", type: "number", min: 0, step: 50 }],
     defaults: () => ({ kind: "wait", ms: 500 }) },
   art: { kind: "art", label: "Art", icon: "ti-photo", seekable: true, schema: [
-    { key: "art.to", label: "Panel(s)", type: "text" },
+    { key: "art.to", label: "Panel(s)", type: "asset", multiple: true, accept: ["panel", "overlay", "image", "video"], clipKey: "art.clips" },
     { key: "art.mode", label: "Transition", type: "select", options: ART_MODES.map((v) => ({ value: v, label: v })) },
     { key: "art.durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
   ], defaults: () => ({ kind: "art", art: { to: "1.01", mode: "fade" } }) },
@@ -81,7 +90,7 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
   ], defaults: () => ({ kind: "counter_add", delta: 1, durationMs: 800 }) },
   media: { kind: "media", label: "Media tile", icon: "ti-photo", seekable: true, schema: [
     { key: "id", label: "Tile id", type: "text" },
-    { key: "src", label: "Source", type: "text" },
+    { key: "src", label: "Source", type: "asset", accept: ["image", "video"], clipKey: "clip" },
     { key: "label", label: "Placeholder label", type: "text" },
     { key: "width", label: "Width (0–1)", type: "range", min: 0.05, max: 0.6, step: 0.01 },
     { key: "in", label: "Reveal", type: "select", options: MEDIA_INS.map((v) => ({ value: v, label: v })) },

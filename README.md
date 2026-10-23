@@ -123,6 +123,56 @@ appears on the ruler and the Player scrubber, and **+ Marker** on the ruler drop
 (rename or retime them in Deck settings) to help line scenes up with the music. Uploads are stored
 per deck under `MORGANA_DATA_DIR/media/<deckId>/` and are deleted with the deck.
 
+### Images and video clips
+
+A timed deck can use uploaded images and video clips as art panels and as media tiles.
+
+**Formats.** Images: PNG, JPG/JPEG, WebP, GIF. Video: MP4 and WebM. Audio is unchanged (see
+Soundtrack). Uploads are content-checked: the bytes must be what the extension claims. In an MP4,
+every video track must be H.264 (`avc1`/`avc3`), VP9 or AV1; normal audio, timecode and metadata
+tracks are allowed. HEVC and other codecs are rejected with a ready-made fix, e.g.
+`ffmpeg -i 'in.mov' -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4` (the file name is
+single-quoted, so the command is safe to paste whatever the name contains). That command also drops
+camera telemetry tracks (GoPro, DJI) and the audio. The size limit is the same as for the
+soundtrack (`MORGANA_MEDIA_MAX_MB`, 200 MB by default).
+
+**Using media.** Every upload gets an id, and you refer to it as `media:<id>`. A ref works as an
+art panel (`art.to`, `art.keep`, `art.out`) and as the `src` of a media tile; an image shows as a
+still, a video plays as a clip. Clip options are per use, with `{ in, loop }`: `art.clips[ref]`
+for art, and the tile's `clip` for a tile. `in` is the in-point in seconds (the clip starts there),
+and `loop` repeats the clip. Without `loop`, a clip holds its last frame. A clip's options come
+from the transition that brought it in, and the clip starts playing at that moment, so it follows
+the deck clock: scrub or seek the deck and the clip lands on the matching frame.
+
+**Audio.** Clips are always muted. Put game audio in the soundtrack mix.
+
+**In the editor.** **Deck settings → Media library** uploads by button or drag-and-drop, lists the
+deck's media, copies a ref, and deletes media after checking where it is still referenced. The art
+**Panel(s)** field and the tile **Source** field use an asset picker: **Browse** lists the built-in
+panels (art only) and this deck's images and clips, and you can also type a key or a `media:` ref.
+The picker does not upload; add uploads in Deck settings first. A chosen clip gets **In-point (s)**
+and **Loop** controls. The editor canvas shows a clip's in-point frame, paused. Media
+tiles are not drawn on the editor canvas while you scrub; they appear in `/play`, `/render` and
+autoplay.
+
+**In `/play` and the MP4 render.** Clips follow the deck clock. `/play` plays them natively and
+re-syncs any drift greater than 0.1 s, aiming each re-sync ahead by how long the last seek took
+(at most 0.5 s). The render seeks every clip to its exact frame for every frame, so it is
+frame-accurate; a clip that is not visible still decodes. While a pinned scene holds after its
+beats end, its clips (art layers and tiles alike) keep running on the deck clock. A media file that is
+missing or fails to decode produces a warning (`warning: frame i (T=…): media failed to decode:
+<src>`) and the render carries on.
+
+**Seek tip.** Long-GOP recordings (the OBS default, 250 frames between keyframes) are slow to
+seek: every seek decodes from the previous keyframe. That slows the render, which seeks every frame,
+and it makes `/play` hitch whenever it has to re-sync a clip (starting playback mid-clip, scrubbing,
+a loop wrap). Re-encode them with a short keyframe interval first for a faster render and smoother
+`/play`:
+
+```bash
+ffmpeg -i in.mp4 -c:v libx264 -crf 18 -g 30 -pix_fmt yuv420p -an out.mp4
+```
+
 ### Render to MP4
 
 `npm run render` turns a timed deck into an MP4 (H.264 video, AAC soundtrack) by stepping the deck
@@ -157,7 +207,7 @@ Frames are **deterministic**: the frame at time T renders identically however it
 (stepped from 0 or jumped to), so partial renders match the full render. The soundtrack is muxed as
 AAC 192k, offset by `--from` so partial renders stay in sync, and padded with silence to the video
 length. A pinned scene with no beats shows the current art over a dark-brown background, not black.
-An image that fails to load is reported once (`warning: frame i (T=…): image failed to decode: <src>`)
+An image or clip that fails to load is reported once (`warning: frame i (T=…): media failed to decode: <src>`)
 and the render carries on with whatever the browser shows. A frame that takes longer than 60 s, or an
 error or crash in the render page, stops the render with exit code `1`.
 

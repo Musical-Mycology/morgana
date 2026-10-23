@@ -195,6 +195,16 @@ test("read_deck_timing returns layout, target, and overruns", async () => {
   expect(r.scenes[0]).toMatchObject({ id: "s", overrunSec: 0.5, beats: [{ id: "a" }] });
 });
 
+test("list_media entries carry kind and stored durationSec", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  const audio = await saveMedia("demo", { name: "mix.mp3", bytes: new TextEncoder().encode("ID3x"), durationSec: 12.5 });
+  const png = await saveMedia("demo", { name: "p.png", bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]) });
+  const { media } = (await callTool("list_media", { deck_id: "demo" })) as { media: Array<{ id: string; kind: string | null; durationSec?: number }> };
+  expect(media.find((m) => m.id === audio.id)).toMatchObject({ kind: "audio", durationSec: 12.5 });
+  expect(media.find((m) => m.id === png.id)).toMatchObject({ kind: "image" });
+  expect(media.find((m) => m.id === png.id)?.durationSec).toBeUndefined();
+});
+
 test("update_meta with path timing and value null makes the deck untimed", async () => {
   await timedFixture();
   await callTool("update_meta", { deck_id: "demo", path: "timing", value: null });
@@ -203,8 +213,8 @@ test("update_meta with path timing and value null makes the deck untimed", async
 
 test("list_media, set_soundtrack and set_markers", async () => {
   await createDeck({ id: "demo", title: "Demo" });
-  const info = await saveMedia("demo", { name: "mix.mp3", bytes: new TextEncoder().encode("x") });
-  expect(await callTool("list_media", { deck_id: "demo" })).toEqual({ media: [info] });
+  const info = await saveMedia("demo", { name: "mix.mp3", bytes: new TextEncoder().encode("ID3x") });
+  expect(await callTool("list_media", { deck_id: "demo" })).toEqual({ media: [{ ...info, kind: "audio" }] });
   await callTool("set_soundtrack", { deck_id: "demo", media_id: info.id });
   expect((await loadDeck("demo")).meta.soundtrack).toEqual({ media: info.id });
   await expect(callTool("set_soundtrack", { deck_id: "demo", media_id: "ffffffffffffffff.mp3" })).rejects.toThrow(/not in this deck's media/);
@@ -215,6 +225,14 @@ test("list_media, set_soundtrack and set_markers", async () => {
   await expect(callTool("set_markers", { deck_id: "demo", markers: [{ id: "m1", label: "", t: 1 }] })).rejects.toThrow(/label/);
   await callTool("set_markers", { deck_id: "demo", markers: [] });
   expect((await loadDeck("demo")).meta.markers).toBeUndefined();
+});
+
+test("set_soundtrack rejects media that is not audio (final review M2)", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  const png = await saveMedia("demo", { name: "p.png", bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]) });
+  await expect(callTool("set_soundtrack", { deck_id: "demo", media_id: png.id }))
+    .rejects.toThrow(`media "${png.id}" is an image, not audio — the soundtrack must be an audio file`);
+  expect((await loadDeck("demo")).meta.soundtrack).toBeUndefined();
 });
 
 test("set_markers persists only { id, label, t } and trims labels (whitespace-only is rejected)", async () => {

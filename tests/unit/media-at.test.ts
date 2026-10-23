@@ -14,12 +14,12 @@ const show: Extract<Action, { kind: "media" }> = { kind: "media", id: "m", pos: 
 const move: Extract<Action, { kind: "media_move" }> = { kind: "media_move", id: "m", to: { x: 0.8, y: 0.3 }, durationMs: 1000 };
 
 test("a shown tile fades in over its duration", () => {
-  expect(mediaStateAt([{ action: show, p: 0 }], 0).get("m")!.opacity).toBeCloseTo(0);
-  expect(mediaStateAt([{ action: show, p: 1 }], 0).get("m")!.opacity).toBeCloseTo(1);
+  expect(mediaStateAt([{ action: show, p: 0, start: 0 }], 0).get("m")!.opacity).toBeCloseTo(0);
+  expect(mediaStateAt([{ action: show, p: 1, start: 0 }], 0).get("m")!.opacity).toBeCloseTo(1);
 });
 
 test("media_move interpolates position at local progress", () => {
-  const s = mediaStateAt([{ action: show, p: 1 }, { action: move, p: 0.5 }], 0).get("m")!;
+  const s = mediaStateAt([{ action: show, p: 1, start: 0 }, { action: move, p: 0.5, start: 0 }], 0).get("m")!;
   expect(s.x).toBeGreaterThan(0.2);
   expect(s.x).toBeLessThan(0.8);
 });
@@ -28,13 +28,13 @@ test("media_move interpolates position at local progress", () => {
 // An ease-out curve would put the midpoint well past halfway, so this pins the shape,
 // not just the endpoints, and would catch the power2/power3 off-by-one in GSAP's naming.
 test("media_move's ease is symmetric in-out, matching playback", () => {
-  const s = mediaStateAt([{ action: show, p: 1 }, { action: move, p: 0.5 }], 0).get("m")!;
+  const s = mediaStateAt([{ action: show, p: 1, start: 0 }, { action: move, p: 0.5, start: 0 }], 0).get("m")!;
   expect(s.x).toBeCloseTo(0.5, 4);
 });
 
 test("media_out drives opacity to zero", () => {
   const out: Extract<Action, { kind: "media_out" }> = { kind: "media_out", id: "m" };
-  expect(mediaStateAt([{ action: show, p: 1 }, { action: out, p: 1 }], 0).get("m")!.opacity).toBeCloseTo(0);
+  expect(mediaStateAt([{ action: show, p: 1, start: 0 }, { action: out, p: 1, start: 0 }], 0).get("m")!.opacity).toBeCloseTo(0);
 });
 
 // outMedia's real gsap call is a bare `gsap.to(el, { opacity: 0, duration })` with no explicit
@@ -44,7 +44,7 @@ test("media_out drives opacity to zero", () => {
 // p=0.5 should be 1 - 0.75 = 0.25 — well below the 0.5 a linear ramp would give at the midpoint.
 test("media_out's fade follows power1.out (quadratic), not a linear ramp", () => {
   const out: Extract<Action, { kind: "media_out" }> = { kind: "media_out", id: "m" };
-  const s = mediaStateAt([{ action: show, p: 1 }, { action: out, p: 0.5 }], 0).get("m")!;
+  const s = mediaStateAt([{ action: show, p: 1, start: 0 }, { action: out, p: 0.5, start: 0 }], 0).get("m")!;
   expect(s.opacity).toBeCloseTo(0.25, 4);
   expect(s.opacity).not.toBeCloseTo(0.5, 1); // rules out the old linear (1 - p) shape
 });
@@ -61,16 +61,31 @@ test("media_move chains off the running position: two consecutive moves compose"
   const move1: Extract<Action, { kind: "media_move" }> = { kind: "media_move", id: "m2", to: { x: 1, y: 0 }, durationMs: 1000 };
   const move2: Extract<Action, { kind: "media_move" }> = { kind: "media_move", id: "m2", to: { x: 1, y: 1 }, durationMs: 1000 };
 
-  const afterFirst = mediaStateAt([{ action: show2, p: 1 }, { action: move1, p: 1 }], 0).get("m2")!;
+  const afterFirst = mediaStateAt([{ action: show2, p: 1, start: 0 }, { action: move1, p: 1, start: 0 }], 0).get("m2")!;
   expect(afterFirst.x).toBeCloseTo(1);
 
   // move2 only moves y (0 -> 1); x must STAY at 1 throughout. A "wrong origin" bug (chaining
   // off the original pos, x=0) would instead interpolate x partway back toward 0.
   const midSecond = mediaStateAt(
-    [{ action: show2, p: 1 }, { action: move1, p: 1 }, { action: move2, p: 0.5 }], 0,
+    [{ action: show2, p: 1, start: 0 }, { action: move1, p: 1, start: 0 }, { action: move2, p: 0.5, start: 0 }], 0,
   ).get("m2")!;
   expect(midSecond.x).toBeCloseTo(1);
   expect(midSecond.y).toBeCloseTo(0.5);
+});
+
+test("tiles carry since (beat-local start of the show action) and clip options, through move and out", () => {
+  const clipShow: Extract<Action, { kind: "media" }> = { kind: "media", id: "t", pos: { x: 0, y: 0 }, src: "media:c.mp4", clip: { in: 1 } };
+  const mv: Extract<Action, { kind: "media_move" }> = { kind: "media_move", id: "t", to: { x: 1, y: 1 }, durationMs: 1000 };
+  const out: Extract<Action, { kind: "media_out" }> = { kind: "media_out", id: "t" };
+  const shown = mediaStateAt([{ action: clipShow, p: 1, start: 0.5 }], 2).get("t")!;
+  expect(shown.since).toBe(0.5);
+  expect(shown.clip).toEqual({ in: 1 });
+  const moved = mediaStateAt([{ action: clipShow, p: 1, start: 0.5 }, { action: mv, p: 0.5, start: 1.5 }], 2).get("t")!;
+  expect(moved.since).toBe(0.5);
+  expect(moved.clip).toEqual({ in: 1 });
+  const gone = mediaStateAt([{ action: clipShow, p: 1, start: 0.5 }, { action: out, p: 1, start: 2 }], 3).get("t")!;
+  expect(gone.since).toBe(0.5);
+  expect(gone.clip).toEqual({ in: 1 });
 });
 
 // --- renderAt integration: media is fold-derived state, not a wall-clock tween -------------

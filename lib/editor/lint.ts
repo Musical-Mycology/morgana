@@ -5,6 +5,9 @@ import { deckLayout, sceneOverrun } from "@/engine/authoring/deck-clock";
 import { formatClock } from "@/lib/timing/clock-format";
 import { parseInlineLinks } from "@/engine/deck/inline-links";
 import type { Action } from "@/engine/deck/types";
+import { isMediaRef, mediaKind, mediaRefId } from "@/engine/deck/media-ref";
+import { findMediaRefs } from "@/lib/editor/media-refs";
+import type { MediaInfo } from "@/lib/store/media-store";
 
 export type LintSeverity = "error" | "warning";
 export interface LintLocation { sceneIdx: number; beatIdx?: number; actionIdx?: number }
@@ -104,7 +107,58 @@ function timingWarnings(doc: DeckDoc): LintIssue[] {
 
 /** Facts the editor knows that the document does not: the deck's media ids and the decoded
  *  soundtrack duration. Each soundtrack rule is skipped when its fact is absent. */
-export interface LintContext { mediaIds?: string[]; soundtrackSec?: number }
+export interface LintContext { mediaIds?: string[]; soundtrackSec?: number; media?: MediaInfo[] }
+
+/** Media-ref warnings (art layers, media tiles, clip options). Skipped without `ctx.media`. */
+function mediaWarnings(doc: DeckDoc, ctx: LintContext): LintIssue[] {
+  const media = ctx.media;
+  if (!media) return [];
+  const byId = new Map(media.map((m) => [m.id, m]));
+  const out: LintIssue[] = [];
+  const seen = new Set<string>();
+  const loc = (u: { sceneIdx: number; beatIdx: number; actionIdx?: number }): LintLocation =>
+    u.actionIdx === undefined ? { sceneIdx: u.sceneIdx, beatIdx: u.beatIdx } : { sceneIdx: u.sceneIdx, beatIdx: u.beatIdx, actionIdx: u.actionIdx };
+  for (const u of findMediaRefs(doc)) {
+    const id = mediaRefId(u.ref);
+    const at = loc(u);
+    const key = `${u.sceneIdx}.${u.beatIdx}.${u.actionIdx ?? ""}.${u.ref}`;
+    const m = byId.get(id);
+    if (!seen.has(key)) {
+      if (!m) {
+        seen.add(key);
+        out.push({ rule: "media-missing", severity: "warning", at, message: `media "${id}" is not in this deck's media — upload it again` });
+        continue;
+      }
+      const kind = mediaKind(m.mime);
+      if (kind !== "image" && kind !== "video") {
+        seen.add(key);
+        out.push({ rule: "media-kind", severity: "warning", at, message: `media "${id}" is ${kind ?? m.mime} — art and tiles take images or video` });
+        continue;
+      }
+    } else continue;
+    // Clip in-point past the end of a known-duration video.
+    const beat = doc.scenes[u.sceneIdx].beats[u.beatIdx];
+    const a = u.actionIdx === undefined ? undefined : beat.timeline[u.actionIdx];
+    const art = u.actionIdx === undefined ? beat.art : a?.kind === "art" ? a.art : undefined;
+    const inSec = u.where === "clip-opts" ? art?.clips?.[u.ref]?.in : u.where === "tile" && a?.kind === "media" ? a.clip?.in : undefined;
+    if (typeof inSec === "number" && m.durationSec !== undefined && inSec >= m.durationSec) {
+      out.push({ rule: "clip-in-past-end", severity: "warning", at,
+        message: `clip in-point ${inSec}s is at or past the clip's end (${m.durationSec}s)` });
+    }
+  }
+  // A non-media key in clip options does nothing — flag it.
+  doc.scenes.forEach((s, sceneIdx) => s.beats.forEach((b, beatIdx) => {
+    const check = (t: { clips?: Record<string, unknown> } | undefined, actionIdx?: number) => {
+      for (const k of Object.keys(t?.clips ?? {})) {
+        if (!isMediaRef(k)) out.push({ rule: "media-kind", severity: "warning", at: loc({ sceneIdx, beatIdx, actionIdx }),
+          message: `clip options key "${k}" is not a media: ref` });
+      }
+    };
+    check(b.art);
+    b.timeline.forEach((a, actionIdx) => { if (a.kind === "art") check(a.art, actionIdx); });
+  }));
+  return out;
+}
 
 /** Soundtrack and marker warnings. Runs only on a structurally valid deck. */
 function soundtrackWarnings(doc: DeckDoc, ctx: LintContext): LintIssue[] {
@@ -154,6 +208,7 @@ export function lintDeck(doc: DeckDoc, ctx: LintContext = {}): LintIssue[] {
   if (errors.length === 0) {
     warnings.push(...timingWarnings(doc));
     warnings.push(...soundtrackWarnings(doc, ctx));
+    warnings.push(...mediaWarnings(doc, ctx));
     try {
       for (const message of validateDeck(flattenStory(doc.scenes))) {
         const at = locateSlide(doc, message);

@@ -44,13 +44,15 @@ export async function POST(req: Request, { params }: Ctx) {
   const buffered = new Uint8Array(total);
   let off = 0;
   for (const c of chunks) { buffered.set(c, off); off += c.byteLength; }
-  let file: FormDataEntryValue | null;
+  let form: FormData;
   try {
-    file = (await new Response(buffered, { headers: { "content-type": req.headers.get("content-type") ?? "" } }).formData()).get("file");
+    form = await new Response(buffered, { headers: { "content-type": req.headers.get("content-type") ?? "" } }).formData();
   } catch { return Response.json({ error: "expected multipart form data" }, { status: 400 }); }
+  const file = form.get("file");
   if (!(file instanceof File)) return Response.json({ error: "missing \"file\" field" }, { status: 400 });
   try {
-    const info = await saveMedia(id, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
+    const durationSec = Number(form.get("durationSec"));
+    const info = await saveMedia(id, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), durationSec });
     return Response.json(info, { status: 201 });
   } catch (e) { return fail(e); }
 }

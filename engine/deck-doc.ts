@@ -1,4 +1,5 @@
 import type { Scene, SceneObject, SlideTreatment } from "@/engine/deck/types";
+import { MEDIA_ID_PATTERN } from "@/engine/deck/media-ref";
 
 /** Optional host-app chrome, defaulted to none so decks render generic. */
 export interface DeckChrome {
@@ -10,8 +11,9 @@ export interface DeckChrome {
   wordmark?: string;
 }
 
-/** Same pattern as lib/store/media-store.ts MEDIA_ID_RE (kept local: the format must not import fs code). */
-export const MEDIA_ID_PATTERN = /^[0-9a-f]{16}\.[a-z0-9]{1,5}$/;
+/** Same pattern as lib/store/media-store.ts MEDIA_ID_RE; defined in the pure media-ref module (the
+ *  format must not import fs code). */
+export { MEDIA_ID_PATTERN };
 
 /** A deck-time cue point shown on the ruler and Player scrubber. */
 export interface DeckMarker { id: string; label: string; t: number }

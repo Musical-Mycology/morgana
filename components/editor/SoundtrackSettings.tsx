@@ -5,6 +5,7 @@ import { uploadMedia } from "@/lib/api/media-client";
 import { DeckMediaContext } from "@/lib/editor/use-deck-media";
 import { useSoundtrack } from "@/lib/audio/use-soundtrack";
 import { loadSoundtrack, type Soundtrack } from "@/lib/audio/soundtrack";
+import { mediaKind } from "@/engine/deck/media-ref";
 import { formatClock } from "@/lib/timing/clock-format";
 
 /** Deck settings → Soundtrack: one pre-mixed track (spec §5). Remove drops the reference only —
@@ -19,6 +20,7 @@ export function SoundtrackSettings({ loadTrack = loadSoundtrack }: { loadTrack?:
   const mediaId = doc?.meta.soundtrack?.media;
   const sound = useSoundtrack(doc?.meta.id ?? null, mediaId, loadTrack);
   if (!doc) return null;
+  const audio = (media ?? []).filter((m) => mediaKind(m.mime) === "audio");
   const name = media?.find((m) => m.id === mediaId)?.name ?? mediaId;
 
   const onFile = async (file: File | undefined) => {
@@ -51,6 +53,14 @@ export function SoundtrackSettings({ loadTrack = loadSoundtrack }: { loadTrack?:
           <button className="ed__pill ed__pill--ghost" data-testid="soundtrack-replace" disabled={busy} onClick={() => input.current?.click()}>Replace</button>
           <button className="ed__pill ed__pill--ghost" data-testid="soundtrack-remove" disabled={busy} onClick={() => updateMeta("soundtrack", undefined)}>Remove</button>
         </div>
+      )}
+      {audio.length > 0 && (
+        <select data-testid="soundtrack-pick" aria-label="Choose uploaded audio" value="" disabled={busy}
+          style={{ display: "block", marginTop: 6, fontSize: 11, maxWidth: "100%" }}
+          onChange={(e) => { if (e.target.value && e.target.value !== mediaId) updateMeta("soundtrack", { media: e.target.value }); }}>
+          <option value="">Use uploaded audio…</option>
+          {audio.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
       )}
       {busy && <div style={{ fontSize: 11, opacity: 0.7 }}>Uploading…</div>}
       {error && <div data-testid="soundtrack-error" style={{ fontSize: 11, color: "#e0614f" }}>{error}</div>}

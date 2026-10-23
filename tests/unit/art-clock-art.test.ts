@@ -22,7 +22,7 @@ test("events: entry art at the beat's deck start, mid-beat art at its window sta
 test("fade-in follows power2.inOut and settles", () => {
   const ev = artEvents(D);
   expect(op(artAt(ev, 0.35), "1.01")).toBeCloseTo(power2InOut(0.5), 6);
-  expect(artAt(ev, 1.5)).toEqual([{ asset: "1.01", opacity: 1, scale: 1, z: 1, overlay: false }]);
+  expect(artAt(ev, 1.5)).toMatchObject([{ asset: "1.01", opacity: 1, scale: 1, z: 1, overlay: false }]);
 });
 
 test("crossfade: incoming rises, outgoing falls from its opacity at the event start, dropped when done", () => {
@@ -54,7 +54,7 @@ test("overlay enters with back.out(2) scale 0.9→1 and clamped opacity", () => 
 
 test("cut is instant; morph enters from scale 1.04", () => {
   const Dc = doc([{ id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [{ kind: "wait", ms: 500 }] }] }]);
-  expect(artAt(artEvents(Dc), 0)).toEqual([{ asset: "1.01", opacity: 1, scale: 1, z: 1, overlay: false }]);
+  expect(artAt(artEvents(Dc), 0)).toMatchObject([{ asset: "1.01", opacity: 1, scale: 1, z: 1, overlay: false }]);
   const Dm = doc([{ id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "morph" }, timeline: [{ kind: "wait", ms: 2000 }] }] }]);
   const q = power2InOut(0.5);
   expect(artAt(artEvents(Dm), 0.4)[0].scale).toBeCloseTo(1.04 + (1 - 1.04) * q, 6);
@@ -101,7 +101,7 @@ test("durationMs overrides the mode default on a non-cut mode", () => {
   const Dd = doc([{ id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "fade", durationMs: 200 }, timeline: [{ kind: "wait", ms: 1000 }] }] }]);
   const ev = artEvents(Dd);
   expect(ev[0].duration).toBeCloseTo(0.2, 9);
-  expect(artAt(ev, 0.2)).toEqual([{ asset: "1.01", opacity: 1, scale: 1, z: 1, overlay: false }]);
+  expect(artAt(ev, 0.2)).toMatchObject([{ asset: "1.01", opacity: 1, scale: 1, z: 1, overlay: false }]);
   expect(op(artAt(ev, 0.1), "1.01")).toBeCloseTo(power2InOut(0.5), 6);
 });
 
@@ -184,5 +184,46 @@ describe("kept layers continue an in-flight fade-in", () => {
     const l = artAt(artEvents(Dov), 0.35).find((x) => x.asset === "MusicScore")!;
     expect(l.scale).toBeCloseTo(0.9 + 0.1 * backOut2(0.5), 6);
     expect(l.opacity).toBeCloseTo(Math.min(1, backOut2(0.5)), 6);
+  });
+});
+
+describe("layers carry since + clip options", () => {
+  const A = "media:a.mp4" as const, B = "media:b.webm" as const;
+  const clipDoc = doc([{ id: "s", beats: [{ id: "a",
+    art: { to: A, mode: "crossfade", clips: { [A]: { in: 2, loop: true } } },
+    timeline: [
+      { kind: "wait", ms: 3000 }, { kind: "art", art: { to: B, mode: "crossfade", keep: [A] } },
+      { kind: "wait", ms: 2000 }, { kind: "art", art: { to: "1.01", mode: "crossfade" } },
+      { kind: "wait", ms: 5000 },
+    ] }] }]);
+  const get = (st: ReturnType<typeof artAt>, a: string) => st.find((l) => l.asset === a)!;
+
+  test("a new layer takes the event start and the event's clip options", () => {
+    expect(get(artAt(artEvents(clipDoc), 1), A)).toMatchObject({ since: 0, clip: { in: 2, loop: true } });
+  });
+  test("a kept layer keeps since; a new one has no clip", () => {
+    const st = artAt(artEvents(clipDoc), 3.5);
+    expect(get(st, A)).toMatchObject({ since: 0, clip: { in: 2, loop: true } });
+    expect(get(st, B).since).toBe(3);
+    expect(get(st, B).clip).toBeUndefined();
+  });
+  test("outgoing layers keep since while they fade", () => {
+    const st = artAt(artEvents(clipDoc), 5.2);
+    expect(get(st, A).since).toBe(0);
+    expect(get(st, B).since).toBe(3);
+    expect(get(st, "1.01").since).toBe(5);
+  });
+  test("once everything else has faded only the new layer is left", () => {
+    expect(artAt(artEvents(clipDoc), 10)).toMatchObject([{ asset: "1.01", since: 5 }]);
+  });
+  test("a layer re-added while still fading out keeps its original since", () => {
+    const D = doc([{ id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
+      { kind: "wait", ms: 1000 }, { kind: "art", art: { to: "1.02", mode: "crossfade" } },
+      { kind: "wait", ms: 300 }, { kind: "art", art: { to: "1.01", mode: "crossfade" } },
+      { kind: "wait", ms: 3000 },
+    ] }] }]);
+    const st = artAt(artEvents(D), 1.5);
+    expect(get(st, "1.01").since).toBe(0);
+    expect(get(st, "1.02").since).toBe(1);
   });
 });

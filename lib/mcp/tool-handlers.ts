@@ -1,6 +1,6 @@
 import { loadDeck, saveDeck, listDecks } from "@/lib/store/deck-store";
 import { validateDeckDoc, type DeckDoc, type DeckMarker } from "@/engine/deck-doc";
-import { listMedia, type MediaInfo } from "@/lib/store/media-store";
+import { listMedia, mediaKind, type MediaInfo, type MediaKind } from "@/lib/store/media-store";
 import {
   insertBeatAfter, duplicateBeatAt, deleteBeatAt, moveBeatBy,
   appendScene, deleteSceneAt, deleteSceneAtIndex, moveSceneBy, appendBeatToScene, setSceneDuration,
@@ -70,7 +70,7 @@ async function mutate(deckId: string, f: (doc: DeckDoc) => DeckDoc): Promise<Dec
   return next;
 }
 
-export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc | { decks: Awaited<ReturnType<typeof listDecks>> } | DeckTiming | { media: MediaInfo[] }> {
+export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc | { decks: Awaited<ReturnType<typeof listDecks>> } | DeckTiming | { media: Array<MediaInfo & { kind: MediaKind | null }> }> {
   const a = args(rawArgs);
 
   if (name === "list_decks") return { decks: await listDecks() };
@@ -162,12 +162,17 @@ export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc 
       };
     }
     case "list_media":
-      return { media: await listMedia(deckId) };
+      return { media: (await listMedia(deckId)).map((m) => ({ ...m, kind: mediaKind(m.mime) })) };
     case "set_soundtrack": {
       const mediaId = a.media_id;
       if (mediaId !== null && typeof mediaId !== "string") throw new ToolCallError('"media_id" must be a string or null');
-      if (mediaId !== null && !(await listMedia(deckId)).some((m) => m.id === mediaId)) {
-        throw new ToolCallError(`media "${mediaId}" is not in this deck's media — upload it in the editor first`);
+      if (mediaId !== null) {
+        const found = (await listMedia(deckId)).find((m) => m.id === mediaId);
+        if (!found) throw new ToolCallError(`media "${mediaId}" is not in this deck's media — upload it in the editor first`);
+        const kind = mediaKind(found.mime);
+        if (kind !== "audio") {
+          throw new ToolCallError(`media "${mediaId}" is ${kind === "image" ? "an image" : kind === "video" ? "a video" : `"${found.mime}"`}, not audio — the soundtrack must be an audio file`);
+        }
       }
       return mutate(deckId, (doc) => {
         const meta = { ...doc.meta };

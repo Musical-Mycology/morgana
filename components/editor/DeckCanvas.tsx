@@ -31,7 +31,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     const beatIndex = loc ? loc.beatIdx : 0;
     const dur = () => (flat ? beatDuration(flat.beat.timeline) : 0);
     const draw = () => {
-      if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight });
+      if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight, entryArt: flat.beat.art });
       if (scene) objStage.current?.renderAt(scene, beatIndex, t.current);
       if (scene) notes.current?.renderAt(scene, beatIndex, t.current);
     };
@@ -57,7 +57,9 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
 
     return (
       <div ref={host} className="ed__canvas-host" style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", maxHeight: "100%", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
-        <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />
+        {/* clipPlayback off: the editor paints through seek.ts (no deck clock), so a clip shows its
+            in-point frame, paused (spec §4 "Editor canvas", §6). */}
+        <ArtStage ref={art} nightlight={night} reduced={false} transparentBg clipPlayback={false} />
         <NoteField ref={notes} reduced={false} />
         {/* CinematicSlide's own `.cin` rule (position:relative) + `.cin__stage` (z-index:2) never apply here —
             CinematicSlide isn't mounted on this route, so this wrapper is otherwise static and paints BELOW

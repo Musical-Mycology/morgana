@@ -40,9 +40,26 @@ test.each([
   "engine/authoring/deck-clock.ts",
   "lib/timing/clock-format.ts",
   "engine/authoring/art-clock.ts",
+  "lib/store/media-sniff.ts",
+  "engine/deck/media-ref.ts",
+  "engine/deck/clip-clock.ts",
+  "engine/deck/media-state.ts",
 ])("%s has a DOM-free runtime import graph", (rel) => {
   const offenders = [...runtimeGraph(resolve(ROOT, rel))]
     .filter((f) => DOM_TOKENS.test(readFileSync(f, "utf8")))
+    .map((f) => f.replace(ROOT + "/", ""));
+  expect(offenders).toEqual([]);
+});
+
+// Browser-reachable modules (the "use client" editor page imports them). A runtime edge to a Node
+// builtin or to the fs-backed stores breaks the Next client bundle, which vitest (Node) cannot see.
+const NODE_IMPORT = /^\s*import\s+(?!type\s)[\s\S]*?from\s+["'](?:node:[^"']+|fs|fs\/promises|path|crypto)["']/m;
+test.each([
+  "lib/editor/lint.ts",
+  "lib/editor/media-refs.ts",
+])("%s has a browser-safe runtime import graph (no Node builtins)", (rel) => {
+  const offenders = [...runtimeGraph(resolve(ROOT, rel))]
+    .filter((f) => NODE_IMPORT.test(readFileSync(f, "utf8")))
     .map((f) => f.replace(ROOT + "/", ""));
   expect(offenders).toEqual([]);
 });

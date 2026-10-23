@@ -15,7 +15,7 @@ const AUDIO_STALL_MS = 500;
 
 export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; initialT?: number; loadTrack?: (url: string) => Promise<Soundtrack> }) {
   // The picture (beat + art + nightlight) as a function of deck time; its `apply` is the only writer of T.
-  const { apply, T, displayT, loc, layout, stage } = useDeckStage(doc, initialT);
+  const { apply, T, displayT, loc, layout, stage, clipMode } = useDeckStage(doc, initialT);
   const target = doc.meta.timing?.targetSec;
   const [playing, setPlaying] = useState(false);
   const [hudVisible, setHudVisible] = useState(true);
@@ -59,6 +59,13 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
     audioClock.current.lastT = null;
     if (playing) track.play(T.current); else track.pause();
   }, [playing, track]);
+  // Clips follow `playing` too: native playback while playing, exact seeks when paused. Repaint
+  // once at the current T so on-screen clips switch now (start, or pause on their frame) rather
+  // than on the next frame — when paused there is no next frame.
+  useEffect(() => {
+    clipMode.current = playing ? "play" : "seek";
+    apply(T.current);
+  }, [playing, apply, clipMode, T]);
 
   // The one clock: a single rAF loop while playing. While the soundtrack plays, ITS clock is
   // the deck clock; otherwise (no track, decode failed, past its end, stalled) the timer is.
@@ -179,11 +186,12 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
               onMouseDown={(e) => e.preventDefault()} onClick={() => setMuted((v) => !v)}>{muted ? "🔇" : "🔊"}</button>
           )}
           <div className="play__bar">
-            {/* Scrub and marker click pause first (the audio stops with them), then jump. */}
+            {/* Scrub and marker click pause first (the audio stops with them), then jump — in seek
+                mode already, so clips don't play for the one frame before the `playing` effect. */}
             <TimeBar layout={layout} sceneIds={doc.scenes.map((s) => s.id)} value={displayT} targetSec={target}
-              onScrub={(to) => { setPlaying(false); apply(to); }} testId="play-scrub"
+              onScrub={(to) => { setPlaying(false); clipMode.current = "seek"; apply(to); }} testId="play-scrub"
               peaks={track?.peaks} peaksDuration={track?.duration} markers={doc.meta.markers}
-              onMarkerClick={(t) => { setPlaying(false); apply(t); }} />
+              onMarkerClick={(t) => { setPlaying(false); clipMode.current = "seek"; apply(t); }} />
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDeck } from "@/lib/store/deck-store";
@@ -13,17 +13,18 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); delete process.
 
 const deckCtx = (id: string) => ({ params: Promise.resolve({ id }) });
 const fileCtx = (id: string, mediaId: string) => ({ params: Promise.resolve({ id, mediaId }) });
-const upload = (deck: string, name: string, body: string, type = "audio/mpeg") => {
+const upload = (deck: string, name: string, body: BlobPart, type = "audio/mpeg", fields: Record<string, string> = {}) => {
   const fd = new FormData();
   fd.append("file", new File([body], name, { type }));
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
   return uploadPOST(new Request(`http://t/api/decks/${deck}/media`, { method: "POST", body: fd }), deckCtx(deck));
 };
 
 test("upload → list → fetch bytes → delete", async () => {
-  const res = await upload("d1", "mix.mp3", "abc");
+  const res = await upload("d1", "mix.mp3", "ID3abc");
   expect(res.status).toBe(201);
   const info = await res.json();
-  expect(info).toMatchObject({ name: "mix.mp3", mime: "audio/mpeg", bytes: 3 });
+  expect(info).toMatchObject({ name: "mix.mp3", mime: "audio/mpeg", bytes: 6 });
   expect((await (await listGET(new Request("http://t"), deckCtx("d1"))).json()).media.map((m: { id: string }) => m.id)).toEqual([info.id]);
   const file = await fileGET(new Request("http://t"), fileCtx("d1", info.id));
   expect(file.status).toBe(200);
@@ -32,13 +33,13 @@ test("upload → list → fetch bytes → delete", async () => {
   expect(file.headers.get("Content-Disposition")).toBeNull();
   expect(file.headers.get("X-Content-Type-Options")).toBe("nosniff");
   expect(file.headers.get("Content-Security-Policy")).toBe("sandbox");
-  expect(await file.text()).toBe("abc");
+  expect(await file.text()).toBe("ID3abc");
   expect((await fileDELETE(new Request("http://t", { method: "DELETE" }), fileCtx("d1", info.id))).status).toBe(204);
   expect((await fileGET(new Request("http://t"), fileCtx("d1", info.id))).status).toBe(404);
 });
 
 test("served Content-Type comes from the extension, not the client", async () => {
-  const info = await (await upload("d1", "a.wav", "x", "text/html")).json();
+  const info = await (await upload("d1", "a.wav", "RIFF\0\0\0\0WAVE", "text/html")).json();
   expect((await fileGET(new Request("http://t"), fileCtx("d1", info.id))).headers.get("Content-Type")).toBe("audio/wav");
 });
 
@@ -48,6 +49,25 @@ test("400 unsupported type, 400 missing file, 404 unknown deck, 413 too large", 
   expect((await upload("nope", "a.mp3", "x")).status).toBe(404);
   process.env.MORGANA_MEDIA_MAX_MB = "0.000001";
   expect((await upload("d1", "a.mp3", "too big")).status).toBe(413);
+});
+
+test("a disguised playlist posing as mp4 is a 400 and nothing is stored", async () => {
+  const res = await upload("d1", "evil.mp4", "#EXTM3U\n#EXTINF:1,\nfile:///etc/hostname\n", "video/mp4");
+  expect(res.status).toBe(400);
+  expect((await res.json()).error).toBe("evil.mp4 is not a valid mp4 file");
+  expect((await (await listGET(new Request("http://t"), deckCtx("d1"))).json()).media).toEqual([]);
+});
+
+test("a video upload stores the form's durationSec; junk durations are dropped", async () => {
+  const clip = new Uint8Array(readFileSync(join(__dirname, "../../e2e/fixtures/media/clip-h264.mp4")));
+  const good = await (await upload("d1", "c.mp4", clip, "video/mp4", { durationSec: "2" })).json();
+  expect(good).toMatchObject({ mime: "video/mp4", durationSec: 2 });
+  expect((await (await fileGET(new Request("http://t"), fileCtx("d1", good.id))).arrayBuffer()).byteLength).toBe(clip.byteLength);
+  // A different clip: identical bytes would dedupe to the sidecar above.
+  const webm = new Uint8Array(readFileSync(join(__dirname, "../../e2e/fixtures/media/clip-vp9.webm")));
+  const junk = await (await upload("d1", "d.webm", webm, "video/webm", { durationSec: "NaN" })).json();
+  expect(junk).toMatchObject({ mime: "video/webm" });
+  expect("durationSec" in junk).toBe(false);
 });
 
 test("an oversized chunked body (no content-length) is a 413, cut off while reading", async () => {
@@ -75,7 +95,7 @@ test("a lying/huge content-length is a 413 without parsing the body", async () =
 
 test("a normal upload under the cap is still a 201", async () => {
   process.env.MORGANA_MEDIA_MAX_MB = "1";
-  expect((await upload("d1", "ok.mp3", "abc")).status).toBe(201);
+  expect((await upload("d1", "ok.mp3", "ID3abc")).status).toBe(201);
 });
 
 describe("a crafted media id never reaches a file outside media/<deck>/", () => {

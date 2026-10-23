@@ -7,5 +7,5 @@ import { lintDeck, type LintContext, type LintIssue } from "./lint";
  *  `ctx` carries what the doc alone can't know (the deck's media ids, the decoded soundtrack length). */
 export function useLint(ctx?: LintContext): LintIssue[] {
   const doc = useEditor((s) => s.doc);
-  return useMemo(() => (doc ? lintDeck(doc, ctx) : []), [doc, ctx?.mediaIds, ctx?.soundtrackSec]); // eslint-disable-line react-hooks/exhaustive-deps
+  return useMemo(() => (doc ? lintDeck(doc, ctx) : []), [doc, ctx?.mediaIds, ctx?.soundtrackSec, ctx?.media]); // eslint-disable-line react-hooks/exhaustive-deps
 }

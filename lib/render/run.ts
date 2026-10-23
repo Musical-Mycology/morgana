@@ -307,8 +307,8 @@ async function renderSteps(opts: RenderOptions, deps: RenderDeps, s: Session): P
     } catch (e) {
       throw new Error(`render failed at frame ${i} (T=${fmtT(T)}): ${e instanceof Error ? e.message : String(e)}`);
     }
-    // Spec §3/§5: a broken image is tolerated (the frame shows what the browser shows), warned once.
-    for (const src of failed) deps.log(`warning: frame ${i} (T=${fmtT(T)}): image failed to decode: ${src}`);
+    // Spec §3/§5 (+ clips §4): broken media is tolerated (the frame shows what the browser shows), warned once.
+    for (const src of failed) deps.log(`warning: frame ${i} (T=${fmtT(T)}): media failed to decode: ${src}`);
     s.wroteFrame = true;
     if (!proc.stdin.write(png)) {
       await Promise.race([new Promise<void>((r) => proc.stdin.once("drain", r)), ffmpegDied]);

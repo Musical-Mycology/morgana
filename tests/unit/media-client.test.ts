@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { listMedia, mediaPath, mediaUrl, uploadMedia } from "@/lib/api/media-client";
+import { deleteMedia, listMedia, mediaPath, mediaUrl, uploadMedia } from "@/lib/api/media-client";
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -34,4 +34,25 @@ test("uploadMedia posts multipart and surfaces the server's error message", asyn
 test("listMedia unwraps the media array", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ media: [{ id: "m" }] })));
   expect(await listMedia("d1")).toEqual([{ id: "m" }]);
+});
+
+test("uploadMedia sends durationSec only when finite and positive", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("{}", { status: 201 }));
+  await uploadMedia("d1", new File(["a"], "a.mp4"), 2.5);
+  await uploadMedia("d1", new File(["a"], "a.mp4"), 0);
+  await uploadMedia("d1", new File(["a"], "a.mp4"));
+  const dur = (i: number) => ((fetchMock.mock.calls[i][1] as RequestInit).body as FormData).get("durationSec");
+  expect(dur(0)).toBe("2.5");
+  expect(dur(1)).toBeNull();
+  expect(dur(2)).toBeNull();
+});
+
+test("deleteMedia DELETEs the media path and surfaces the server error", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
+  await deleteMedia("d1", "0123456789abcdef.png");
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/decks/d1/media/0123456789abcdef.png");
+  expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  await expect(deleteMedia("d1", "0123456789abcdef.png")).rejects.toThrow("not found");
 });

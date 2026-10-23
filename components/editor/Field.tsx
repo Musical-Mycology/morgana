@@ -1,5 +1,6 @@
 "use client";
 import type { Field as FieldSpec } from "@/lib/editor/registry";
+import { AssetPicker } from "./AssetPicker";
 
 const base: React.CSSProperties = {
   background: "var(--ed-bg-2)",
@@ -12,7 +13,25 @@ const base: React.CSSProperties = {
   width: "100%",
 };
 
-export function Field({ spec, value, onChange }: { spec: FieldSpec; value: unknown; onChange: (v: unknown) => void }) {
+export interface FieldExtra { clips?: unknown; onClipsChange?(v: unknown): void }
+
+export function Field({ spec, value, onChange, extra }: { spec: FieldSpec; value: unknown; onChange: (v: unknown) => void; extra?: FieldExtra }) {
+  if (spec.type === "asset") {
+    // A div, not a <label>: the picker holds several buttons/inputs and a label would forward clicks to the first.
+    return (
+      <div data-testid={`field-${spec.key}`} style={{ marginBottom: 10 }}>
+        <span style={{ display: "block", fontSize: 11, color: "var(--ed-fg-muted)", marginBottom: 4 }}>{spec.label}</span>
+        <AssetPicker
+          value={typeof value === "string" || Array.isArray(value) ? (value as string | string[]) : undefined}
+          multiple={spec.multiple}
+          accept={spec.accept ?? []}
+          clips={extra?.clips}
+          onChange={onChange}
+          onClipsChange={extra?.onClipsChange}
+        />
+      </div>
+    );
+  }
   return (
     <label style={{ display: "block", marginBottom: 10 }}>
       <span style={{ display: "block", fontSize: 11, color: "var(--ed-fg-muted)", marginBottom: 4 }}>{spec.label}</span>

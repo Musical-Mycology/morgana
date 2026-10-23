@@ -99,7 +99,8 @@ Notable in-repo docs:
   clock + timed Player — **landed**; (2) soundtrack + deck media store — **landed** (spec
   `docs/superpowers/specs/2026-10-23-soundtrack-design.md`); (3) frame-stepped MP4 render —
   **landed** (spec `docs/superpowers/specs/2026-10-24-mp4-render-design.md`); (4) video
-  clips; (5) camera moves; (6) credits + text particles. Each later sub-project gets its own
+  clips + image uploads — **landed** (spec `docs/superpowers/specs/2026-10-23-video-clips-design.md`);
+  (5) camera moves; (6) credits + text particles. Each later sub-project gets its own
   spec → plan.
   **Gotcha, now RESOLVED (§7b, 2026-07-28) — `CinematicSlide`'s GSAP master used to be a
   callback scheduler with time spacers, not a seekable representation**: effects were
@@ -201,6 +202,35 @@ Notable in-repo docs:
   Determinism is gated by `e2e/render-page.spec.ts` (stepped vs jumped frames byte-equal). Width
   and height must be even; use 16:9 (no letterbox on `/render`). Prefer `npm run build && npm
   start` for final renders.
+- **Video clips + uploaded images (sub-project 4).** `media:<mediaId>` refs
+  (`engine/deck/media-ref.ts`, pure; `MEDIA_ID_PATTERN` gates resolution) work as art panels
+  (`art.to/keep/out`, `ArtAsset = StoryAsset | MediaRef`) and as media-tile `src`. Clip options
+  `{in, loop}` are per use (`art.clips[ref]`, tile `clip`) and come from the transition that
+  **brought the layer in** — the same rule in `artAt`, the editor's `seek.ts` clip fold, ArtStage
+  autoplay and lint. Clip time is pure (`engine/deck/clip-clock.ts` `clipTimeAt(since, T, opts,
+  duration)`; holds the last frame unless `loop`). Art `since` is **deck** time; tile `since` is
+  **beat-local**, paired with an unclamped beat clock (`transport.seek(t, clipT)`) so tiles keep
+  playing through a pinned scene's hold. All clips are muted.
+  **`engine/components/video-sync.ts` is the one place video time is applied:** `"play"` mode
+  (`/play`) plays natively, re-seeks only past `DRIFT_SEC` 0.1 s and leads seeks by the measured
+  per-element latency (≤0.5 s) — without that, long-GOP footage (OBS default) re-seeks forever;
+  `"seek"` mode (scrub, `/render`) seeks exactly and registers a pending record that
+  `renderFrame` awaits via `pendingVideoSeeks()`. **Determinism gotchas, all load-bearing:**
+  Chromium does not present frames for opacity-0 videos (rVFC never fires) and can screenshot a
+  stale frame when a video goes 0 → visible+seeked, so video layers/tiles never paint below
+  `MIN_VIDEO_OPACITY` (1/1024, invisible); a fresh element waits `loadeddata` + one presented
+  frame before its first seek (else the preroll frame can win); a 250 ms present fallback and a
+  10 s per-record watchdog guarantee a frame never hangs (failures are reported, render
+  continues). `DeckStage` owns a `clipMode` ref (TimedPlayer flips play/seek; scrub sets seek
+  first) — never state, so the memoised `Stage` never re-renders. The editor canvas
+  (`clipPlayback={false}`) shows the in-point frame paused and does not draw tiles under scrub.
+  Editor UI: Deck settings media library (upload/drag-drop, copy ref, delete with
+  `findMediaRefs` reference check) and an asset picker (`Field` type `"asset"`) with In-point/Loop.
+  Lint: `media-missing`, `media-kind`, `clip-in-past-end`. **Client-safety gotcha:** never
+  runtime-import `@/lib/store/*` from client code (it pulls `node:fs` into the editor bundle and
+  only `next build` notices) — `pure-import-graph.test.ts` now also flags node builtins for
+  `lint.ts`/`media-refs.ts`; shared helpers (`mediaKind`, `MEDIA_ID_PATTERN`) live in
+  `engine/deck/media-ref.ts`.
 - **`BeatStage` drives text, notes, and objects from one clock.** `CinematicSlide`'s `onTime`
   fires with the exact beat-local `t` it just painted (from the ticker, from `seek()`, or from
   the static-mode settle), and `BeatStage` paints `ObjectStage` and `NoteField` from that same
@@ -270,7 +300,7 @@ Notable in-repo docs:
     (top-level `use` in `playwright.config.ts`); `e2e/audio-clock.spec.ts` is the gate that the
     Web Audio clock advances in the test browser at all.
 - **The deck media store** (`lib/store/media-store.ts`, routes `app/api/decks/[id]/media/…`)
-  is generic — audio today, images/video later. Files live at
+  holds audio, images (png/jpg/webp/gif) and video (mp4/webm). Files live at
   `MORGANA_DATA_DIR/media/<deckId>/<mediaId>` + a `<mediaId>.json` sidecar; ids are content
   hashes (`/^[0-9a-f]{16}\.[a-z0-9]{1,5}$/`, same bytes → same id). Every path passes the id
   regex AND a `resolve`/`startsWith(dir + sep)` containment check; `deleteDeckMedia`'s recursive
@@ -281,6 +311,14 @@ Notable in-repo docs:
   security review). Routes are unauthenticated like the deck routes (self-hosted model; a hosted
   instance is gated at the proxy). Delete removes the sidecar before the bytes (an orphan
   sidecar would make a re-upload skip rewriting the bytes).
+  **Every upload is content-sniffed** (`lib/store/media-sniff.ts`, pure, fail-closed) before
+  hashing: magic bytes per extension; MP4 walks every `trak`'s `stsd` lazily with caps (10k top /
+  1k per container / 64 entries — a tiny-box file once cost 2.6 GB heap) against one allowlist
+  (video avc1/avc3/vp09/av01, normal audio, benign tmcd/mebx/text…); anything else → 400 with a
+  shell-quoted ffmpeg re-encode command. WebM: EBML + CodecID in the first 1 MiB. HEVC (iPhone) is
+  rejected because Playwright's Chromium can't decode it. GET serves single byte ranges (206/416,
+  streamed via `statMedia` + `createReadStream`) — required for `<video>` seeking. Sidecar carries
+  client-reported `durationSec` (lint/display only).
   **Base-path gotcha:** `mediaPath()` is deliberately unprefixed because `loadSoundtrack`
   applies `withBasePath` itself; DOM consumers must use `mediaUrl()`. It carries an explicit,
   reasoned entry in `base-path-callsites.test.ts`'s allowlist — don't reshape code to dodge that

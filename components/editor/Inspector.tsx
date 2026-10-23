@@ -79,7 +79,12 @@ export function Inspector() {
         const spec = f.type === "objectRef"
           ? { ...f, options: objectRefOptions(doc?.scenes.find((sc) => sc.id === sceneId)) }
           : f;
-        return <Field key={f.key} spec={spec} value={getPath(action, f.key)} onChange={(v) => updateAction(selected, selectedAction!, f.key, v)} />;
+        // Clip options are written whole at clipKey (art.clips is keyed by media refs, whose ids contain a ".").
+        const clipKey = f.type === "asset" ? f.clipKey : undefined;
+        const extra = clipKey
+          ? { clips: getPath(action, clipKey), onClipsChange: (v: unknown) => updateAction(selected, selectedAction!, clipKey, v) }
+          : undefined;
+        return <Field key={f.key} spec={spec} value={getPath(action, f.key)} onChange={(v) => updateAction(selected, selectedAction!, f.key, v)} extra={extra} />;
       })}
     </div>
   );

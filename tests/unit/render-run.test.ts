@@ -418,14 +418,14 @@ describe("runRender — failures clean up", () => {
 });
 
 describe("runRender — final-review hardening", () => {
-  test("image decode failures reported by the page are warned once each, with the frame and T; the render continues", async () => {
+  test("media decode failures reported by the page are warned once each, with the frame and T; the render continues", async () => {
     const s = setup({ render: readyRender(0.3, (T) => (T === 0 ? ["/a.png"] : T === 0.1 ? ["/b.jpg", "/c.png"] : [])) });
     const res = await runRender(OPTS, s.deps);
     expect(res.frames).toBe(3);
     expect(s.logs.filter((l) => l.startsWith("warning"))).toEqual([
-      "warning: frame 0 (T=0s): image failed to decode: /a.png",
-      "warning: frame 1 (T=0.1s): image failed to decode: /b.jpg",
-      "warning: frame 1 (T=0.1s): image failed to decode: /c.png",
+      "warning: frame 0 (T=0s): media failed to decode: /a.png",
+      "warning: frame 1 (T=0.1s): media failed to decode: /b.jpg",
+      "warning: frame 1 (T=0.1s): media failed to decode: /c.png",
     ]);
     expect(s.ff.writes).toHaveLength(3);
   });

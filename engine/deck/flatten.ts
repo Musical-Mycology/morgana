@@ -1,5 +1,4 @@
-import type { Deck, Scene, ArtTransition, SlideTreatment, SlideTheme } from "./types";
-import type { StoryAsset } from "./story-assets";
+import type { Deck, Scene, ArtAsset, ArtTransition, SlideTreatment, SlideTheme } from "./types";
 
 /** Full night for warm, full day for cover/paper. */
 export function treatmentNightlight(t: SlideTreatment): number {
@@ -30,7 +29,7 @@ export function flattenStory(scenes: Scene[]): Deck {
   return slides;
 }
 
-function asArray(to: StoryAsset | StoryAsset[]): StoryAsset[] {
+function asArray(to: ArtAsset | ArtAsset[]): ArtAsset[] {
   return Array.isArray(to) ? to : [to];
 }
 
@@ -41,7 +40,7 @@ function asArray(to: StoryAsset | StoryAsset[]): StoryAsset[] {
  * - keep given       → survivors = existing ∩ keep; then append `to`
  * - out given        → survivors = all existing;     then append `to`, remove `out`
  */
-export function applyArt(layers: StoryAsset[], art: ArtTransition): StoryAsset[] {
+export function applyArt(layers: ArtAsset[], art: ArtTransition): ArtAsset[] {
   const added = asArray(art.to);
   if (!art.keep && !art.out) return [...added];
   let survivors = art.keep ? layers.filter((l) => art.keep!.includes(l)) : [...layers];
@@ -52,7 +51,7 @@ export function applyArt(layers: StoryAsset[], art: ArtTransition): StoryAsset[]
 }
 
 /** Fold every art op of one beat (entry, then its timeline art actions). */
-function foldBeat(layers: StoryAsset[], slide: Deck[number], phase: "entry" | "end"): StoryAsset[] {
+function foldBeat(layers: ArtAsset[], slide: Deck[number], phase: "entry" | "end"): ArtAsset[] {
   if (slide.layout !== "cinematic") return layers;
   const { beat } = slide.slots;
   let out = beat.art ? applyArt(layers, beat.art) : layers;
@@ -61,8 +60,8 @@ function foldBeat(layers: StoryAsset[], slide: Deck[number], phase: "entry" | "e
 }
 
 /** Settled visible layers AFTER beat `index` fully plays (entry + its mid art ops). */
-export function resolveBeatArt(deck: Deck, index: number): { layers: StoryAsset[] } {
-  let layers: StoryAsset[] = [];
+export function resolveBeatArt(deck: Deck, index: number): { layers: ArtAsset[] } {
+  let layers: ArtAsset[] = [];
   for (let i = 0; i <= index && i < deck.length; i++) {
     layers = foldBeat(layers, deck[i], "end");
   }
@@ -70,8 +69,8 @@ export function resolveBeatArt(deck: Deck, index: number): { layers: StoryAsset[
 }
 
 /** Visible layers at beat `index` ENTRY (beats 0..index-1 full, beat index's entry op only). */
-export function resolveEntryArt(deck: Deck, index: number): { layers: StoryAsset[] } {
-  let layers: StoryAsset[] = [];
+export function resolveEntryArt(deck: Deck, index: number): { layers: ArtAsset[] } {
+  let layers: ArtAsset[] = [];
   for (let i = 0; i < index && i < deck.length; i++) layers = foldBeat(layers, deck[i], "end");
   if (index < deck.length) layers = foldBeat(layers, deck[index], "entry");
   return { layers };

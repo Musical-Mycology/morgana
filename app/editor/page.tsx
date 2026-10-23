@@ -17,6 +17,7 @@ import { LintPanel } from "@/components/editor/LintPanel";
 import { useLint } from "@/lib/editor/use-lint";
 import { DeckMediaContext, useDeckMediaState } from "@/lib/editor/use-deck-media";
 import { releaseSoundtracksExcept, useSoundtrack } from "@/lib/audio/use-soundtrack";
+import { DeckAssetsProvider } from "@/engine/asset-resolver-react";
 import { lintCounts } from "@/lib/editor/lint";
 import { primaryPath } from "@/lib/editor/selection";
 import { useExternalChangePoll } from "@/lib/editor/use-external-change-poll";
@@ -53,6 +54,7 @@ export default function Editor() {
   const sound = useSoundtrack(deckId, soundtrackMedia);
   const lintCtx = useMemo(() => ({
     mediaIds: deckMedia.media?.map((m) => m.id),
+    media: deckMedia.media ?? undefined,
     soundtrackSec: sound.status === "ready" ? sound.track.duration : undefined,
   }), [deckMedia.media, sound]);
   const issues = useLint(lintCtx);
@@ -174,12 +176,14 @@ export default function Editor() {
         <div className="ed__leftdock-layers"><LayersPanel /></div>
       </div>
       <div className="ed__canvas" style={{ position: "relative" }}>
-        {placeholder
-          ? <CanvasPlaceholderCard kind={placeholder} deckId={deckId} onRetry={() => deckId && loadDeckById(deckId)} />
-          : <><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} />{beatEmpty && <EmptyBeatHint />}</>}
+        <DeckAssetsProvider deckId={deckId}>
+          {placeholder
+            ? <CanvasPlaceholderCard kind={placeholder} deckId={deckId} onRetry={() => deckId && loadDeckById(deckId)} />
+            : <><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} />{beatEmpty && <EmptyBeatHint />}</>}
+        </DeckAssetsProvider>
       </div>
       <Timeline canvasRef={canvasRef} time={time} />
-      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <Inspector />}
+      {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <DeckAssetsProvider deckId={deckId}><Inspector /></DeckAssetsProvider>}
     </div>
     </DeckMediaContext.Provider>
     </FlushSaveContext.Provider>
