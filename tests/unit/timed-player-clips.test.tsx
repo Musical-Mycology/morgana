@@ -9,7 +9,7 @@ import type { DeckDoc } from "@/engine/deck-doc";
 let play: ReturnType<typeof vi.spyOn>;
 let pause: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
-  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(1);
+  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(2); // a decoded frame: seeks apply at once (a fresh element defers to its preroll frame)
   vi.spyOn(HTMLMediaElement.prototype, "duration", "get").mockReturnValue(10);
   play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
   pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});

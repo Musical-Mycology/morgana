@@ -123,7 +123,7 @@ const ClipHost = forwardRef<DeckStageHandle & { clipMode: React.MutableRefObject
 const V = doc([{ id: "s", beats: [{ id: "a", art: { to: "media:a.mp4", mode: "cut" }, timeline: [{ kind: "wait", ms: 3000 }] }] }]);
 
 function setupClip(d: DeckDoc = V) {
-  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(1);
+  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(2); // a decoded frame: seeks apply at once (a fresh element defers to its preroll frame)
   vi.spyOn(HTMLMediaElement.prototype, "duration", "get").mockReturnValue(10);
   const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});

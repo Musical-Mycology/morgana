@@ -12,7 +12,7 @@ vi.mock("@/engine/components/video-sync", async (orig) => {
   const m = await orig<typeof import("@/engine/components/video-sync")>();
   return { ...m, syncVideo: vi.fn(m.syncVideo), releaseVideo: vi.fn(m.releaseVideo) };
 });
-import { releaseVideo, syncVideo } from "@/engine/components/video-sync";
+import { MIN_VIDEO_OPACITY, releaseVideo, syncVideo } from "@/engine/components/video-sync";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.mocked(syncVideo).mockClear(); vi.mocked(releaseVideo).mockClear(); });
 
@@ -107,9 +107,9 @@ describe("ArtStage.renderState — interplay with tweened show()", () => {
 });
 
 describe("ArtStage.renderState — media refs", () => {
-  /** jsdom media: metadata "loaded" (readyState 1, 10 s long); play/pause/load are not implemented. */
+  /** jsdom media: a decoded frame (readyState 2, 10 s long); play/pause/load are not implemented. */
   function stubMedia() {
-    vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(1);
+    vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(2); // a decoded frame: seeks apply at once (a fresh element defers to its preroll frame)
     vi.spyOn(HTMLMediaElement.prototype, "duration", "get").mockReturnValue(10);
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
     vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -180,6 +180,19 @@ describe("ArtStage.renderState — media refs", () => {
     expect(v.isConnected).toBe(false);
     expect(releaseVideo).toHaveBeenCalledWith(v);
     expect(v.hasAttribute("src")).toBe(false);
+  });
+
+  it("a video layer at opacity 0 is painted at MIN_VIDEO_OPACITY (stays composited) and still synced; an image layer stays at 0", () => {
+    stubMedia();
+    const { ref, root } = setupDeck();
+    expect(MIN_VIDEO_OPACITY).toBe(1 / 1024);
+    ref.current!.renderState([{ ...vid, opacity: 0 }, { ...vid, asset: "media:p.png", opacity: 0 }, { ...vid, asset: "1.01", opacity: 0 }], 0, 2, "seek");
+    const v = root.querySelector<HTMLVideoElement>("video.artstage__layer")!;
+    expect(Number(v.style.opacity)).toBe(1 / 1024);
+    expect(syncVideo).toHaveBeenCalledTimes(1);
+    for (const img of root.querySelectorAll<HTMLImageElement>("img.artstage__layer")) expect(img.style.opacity).toBe("0");
+    ref.current!.renderState([{ ...vid, opacity: 0.5 }], 0, 3, "seek");
+    expect(v.style.opacity).toBe("0.5"); // above the floor: painted as-is
   });
 
   it("an image media ref becomes an <img> with the assets.media src (no video sync)", () => {

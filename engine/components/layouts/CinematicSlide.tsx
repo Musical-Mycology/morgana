@@ -7,7 +7,7 @@ import type { ArtAsset, ArtMode, ArtTransition, CinematicSlideSlots, Action, Cli
 import type { DeckChrome } from "@/engine/deck-doc";
 import { isMediaRef, isVideoRef, type MediaRef } from "@/engine/deck/media-ref";
 import { clipTimeAt } from "@/engine/deck/clip-clock";
-import { createClipVideo, releaseVideo, syncVideo, type ClipMode } from "@/engine/components/video-sync";
+import { createClipVideo, MIN_VIDEO_OPACITY, releaseVideo, syncVideo, type ClipMode } from "@/engine/components/video-sync";
 import { renderPanelHTML } from "@/engine/deck/panel";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
@@ -534,8 +534,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  tween state), backward seek falls out for free. A tile holding a clip video is synced to
    *  its clip time at beat-local `t` (the same `t` the fold ran at; `since` is beat-local too):
    *  "play" in autoplay, "seek" in static mode, else the host's clip mode (default "seek"). A
-   *  fully transparent tile (entrance p=0, settled media_out) is paused and not synced: an
-   *  opacity-0 video never presents a frame, so a seek there would only wait out the fallback. */
+   *  video tile is painted at no less than MIN_VIDEO_OPACITY and kept synced through its
+   *  entrance (p=0 included), so it stays composited and its first visible frame is the seeked
+   *  one. Only a tile whose reached media_out has settled is painted at 0, paused and not synced. */
   function paintMedia(fold: MediaFold[], state: Map<string, MediaRenderState>, t: number) {
     for (const [id, el] of mediaTiles.current) {
       if (!state.has(id)) { removeTile(el); mediaTiles.current.delete(id); }
@@ -543,7 +544,16 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     if (!state.size) return;
     // The latest reached `media` (show) action per tile id — the one mediaStateAt's state reflects.
     const showActions = new Map<string, Extract<Action, { kind: "media" }>>();
-    for (const { action } of fold) if (action.kind === "media") showActions.set(action.id, action);
+    // Tiles whose latest reached media_out (by id, or id-less = every tile shown so far) has settled.
+    const settledOut = new Set<string>();
+    for (const { action, p } of fold) {
+      if (action.kind === "media") { showActions.set(action.id, action); settledOut.delete(action.id); }
+      else if (action.kind === "media_out") {
+        for (const id of action.id ? [action.id] : [...showActions.keys()]) {
+          if (p >= 1) settledOut.add(id); else settledOut.delete(id);
+        }
+      }
+    }
     const mode: ClipMode = staticRef.current ? "seek" : autoplay ? "play" : (clipModeRef?.current ?? "seek");
     for (const [id, s] of state) {
       const a = showActions.get(id);
@@ -562,14 +572,16 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       }
       el.style.left = `${s.x * 100}%`;
       el.style.top = `${s.y * 100}%`;
-      el.style.opacity = String(s.opacity);
       gsap.set(el, { scale: s.scale });
       const video = tileVideo(el);
+      const out = settledOut.has(id);
+      el.style.opacity = String(video && !out ? Math.max(s.opacity, MIN_VIDEO_OPACITY) : s.opacity);
       if (video) {
         const { since, clip } = s;
         if (autoplay && !staticRef.current) syncTileLoop(video, clip);
         else stopTileLoop(video);
-        if (s.opacity === 0) { if (!video.paused) video.pause(); continue; }
+        // Faded out: undrawn, so not synced. A re-show of the same id after this may show one stale frame (rare).
+        if (out) { if (!video.paused) video.pause(); continue; }
         syncVideo(video, (d) => clipTimeAt(since, t, clip, d), mode, { loop: clip?.loop });
       }
     }

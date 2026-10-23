@@ -24,7 +24,7 @@ interface Fake {
   writes: number[];
   play: ReturnType<typeof vi.fn>;
   pause: ReturnType<typeof vi.fn>;
-  fireFrame: () => void;
+  fireFrame: (meta?: Partial<VideoFrameCallbackMetadata>) => void;
 }
 
 const made: HTMLVideoElement[] = [];
@@ -32,10 +32,10 @@ const made: HTMLVideoElement[] = [];
 function fake(init: Partial<Fake["s"]> = {}, opts: { rvfc?: boolean } = {}): Fake {
   const el = document.createElement("video");
   el.src = "http://localhost/clip.mp4";
-  const s = { currentTime: 0, paused: true, readyState: 1, duration: 5, seeking: false, ended: false, error: null as unknown, ...init };
+  const s = { currentTime: 0, paused: true, readyState: 2, duration: 5, seeking: false, ended: false, error: null as unknown, ...init };
   made.push(el);
   const writes: number[] = [];
-  const frames: Array<() => void> = [];
+  const frames: Array<(now: number, meta?: Partial<VideoFrameCallbackMetadata>) => void> = [];
   const play = vi.fn(() => {
     s.paused = false;
     return Promise.resolve();
@@ -59,10 +59,10 @@ function fake(init: Partial<Fake["s"]> = {}, opts: { rvfc?: boolean } = {}): Fak
   if (opts.rvfc !== false) {
     Object.defineProperty(el, "requestVideoFrameCallback", {
       configurable: true,
-      value: (cb: () => void) => frames.push(cb),
+      value: (cb: (now: number, meta?: Partial<VideoFrameCallbackMetadata>) => void) => frames.push(cb),
     });
   }
-  return { el, s, writes, play, pause, fireFrame: () => frames.splice(0).forEach((f) => f()) };
+  return { el, s, writes, play, pause, fireFrame: (meta) => frames.splice(0).forEach((f) => f(0, meta)) };
 }
 
 async function settled(p: Promise<unknown>): Promise<boolean> {
@@ -105,7 +105,7 @@ describe("seek mode", () => {
     expect(await pendingVideoSeeks()).toEqual([]);
   });
 
-  test("metadata not ready: waits for loadedmetadata, then seeks with the known duration", async () => {
+  test("metadata not ready: waits for loadedmetadata, then the first frame, then seeks with the known duration", async () => {
     const f = fake({ readyState: 0, duration: NaN });
     const clipT = vi.fn((d: number) => (d === 5 ? 2 : -1));
     syncVideo(f.el, clipT, "seek");
@@ -115,12 +115,67 @@ describe("seek mode", () => {
     f.s.readyState = 1;
     f.s.duration = 5;
     f.el.dispatchEvent(new Event("loadedmetadata"));
+    expect(f.writes).toEqual([]); // fresh: no seek may race the preroll frame
+    f.s.readyState = 2;
+    f.el.dispatchEvent(new Event("loadeddata"));
+    expect(f.writes).toEqual([]);
+    f.fireFrame(); // the preroll frame presented
     expect(clipT).toHaveBeenCalledWith(5);
     expect(f.writes).toEqual([2]);
     expect(await settled(p)).toBe(false);
     f.el.dispatchEvent(new Event("seeked"));
     f.fireFrame();
     expect(await p).toEqual([]);
+  });
+
+  test("fresh element (metadata only, readyState 1): the seek waits for loadeddata + the preroll frame", async () => {
+    const f = fake({ readyState: 1 });
+    syncVideo(f.el, () => 2, "seek");
+    expect(f.writes).toEqual([]);
+    const p = pendingVideoSeeks();
+    f.fireFrame(); // a frame callback before loadeddata does not count
+    expect(f.writes).toEqual([]);
+    f.s.readyState = 2;
+    f.el.dispatchEvent(new Event("loadeddata"));
+    expect(f.writes).toEqual([]);
+    f.fireFrame();
+    expect(f.writes).toEqual([2]);
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    expect(await p).toEqual([]);
+  });
+
+  test("fresh element: a re-target before the first frame lands is applied once, with the latest target", async () => {
+    const f = fake({ readyState: 1 });
+    syncVideo(f.el, () => 2, "seek");
+    syncVideo(f.el, () => 3, "seek");
+    expect(f.writes).toEqual([]);
+    const p = pendingVideoSeeks();
+    f.s.readyState = 2;
+    f.el.dispatchEvent(new Event("loadeddata"));
+    syncVideo(f.el, () => 4, "seek"); // during preroll
+    expect(f.writes).toEqual([]);
+    f.fireFrame();
+    expect(f.writes).toEqual([4]);
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    expect(await p).toEqual([]);
+  });
+
+  test("fresh element whose preroll frame never reports (no rVFC): seeks after the presentation fallback", async () => {
+    vi.useFakeTimers();
+    const f = fake({ readyState: 1 });
+    syncVideo(f.el, () => 2, "seek");
+    f.s.readyState = 2;
+    f.el.dispatchEvent(new Event("loadeddata"));
+    vi.advanceTimersByTime(PRESENT_FALLBACK_MS - 1);
+    expect(f.writes).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(f.writes).toEqual([2]);
+    f.el.dispatchEvent(new Event("seeked"));
+    f.fireFrame();
+    vi.useRealTimers();
+    expect(await pendingVideoSeeks()).toEqual([]);
   });
 
   test("already at target but only metadata (readyState 1): waits for loadeddata", async () => {

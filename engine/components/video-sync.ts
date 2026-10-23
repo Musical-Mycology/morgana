@@ -13,8 +13,12 @@ const SEEK_EPS = 1e-4;
 export const PRESENT_FALLBACK_MS = 250;
 /** A pending record that has not settled by now is reported failed so the render continues. */
 export const PENDING_WATCHDOG_MS = 10_000;
+/** Floor opacity for a deck-time video layer/tile. At opacity 0 Chromium stops drawing the video's
+ *  surface, and a frame seeked while it was undrawn can reach the screen stale (seen as the previous
+ *  frame in the first visible render frame). 1/1024 keeps it drawn yet rounds to 0 at 8 bits. */
+export const MIN_VIDEO_OPACITY = 1 / 1024;
 
-type Stage = "meta" | "seeking" | "presenting" | "loading";
+type Stage = "meta" | "loading" | "preroll" | "seeking" | "presenting";
 interface SeekRec {
   clipT: (duration: number) => number;
   stage: Stage;
@@ -48,7 +52,8 @@ function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, ex
   if (existing) {
     // Re-seek while pending: one record per element, latest target wins.
     existing.clipT = clipT;
-    if (existing.stage !== "meta") existing.apply();
+    // Before the first frame has landed (meta/loading/preroll) the latest target is applied later.
+    if (existing.stage === "seeking" || existing.stage === "presenting") existing.apply();
     return;
   }
   if (el.error) {
@@ -116,13 +121,27 @@ function seekExact(el: HTMLVideoElement, clipT: (duration: number) => number, ex
   };
   function onMeta() {
     if (rec.stage !== "meta") return;
+    // A fresh element (no decoded frame yet) is not seeked until its first frame has been decoded
+    // and presented: a seek issued now races that preroll frame, and Chromium can then leave the
+    // preroll frame on screen even though rVFC reports the seeked one (a one-frame stale render).
+    if (el.readyState < 2 && !el.seeking) { rec.stage = "loading"; return; }
     if (rec.apply()) return;
     if (el.seeking) rec.stage = "seeking";
-    else if (el.readyState >= 2) rec.finish();
-    else rec.stage = "loading"; // no seek needed, but wait for a decoded frame
+    else rec.finish();
   }
   function onLoaded() {
-    if (rec.stage === "loading") rec.finish();
+    if (rec.stage !== "loading") return;
+    if (Math.abs(el.currentTime - rec.clipT(el.duration)) <= SEEK_EPS) { rec.finish(); return; } // the first frame is the target
+    rec.stage = "preroll";
+    const g = rec.gen;
+    const landed = () => {
+      if (rec.gen !== g || rec.stage !== "preroll") return;
+      clearPresent();
+      if (!rec.apply()) rec.finish();
+    };
+    presentTimer = setTimeout(landed, PRESENT_FALLBACK_MS);
+    if (typeof el.requestVideoFrameCallback === "function") el.requestVideoFrameCallback(landed);
+    else rafId = requestAnimationFrame(landed);
   }
   function onSeeked() {
     if (rec.stage !== "seeking" || el.seeking) return; // el.seeking: a newer seek is still in flight

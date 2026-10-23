@@ -16,18 +16,19 @@ import { deckLayout, deckTimeOf } from "@/engine/authoring/deck-clock";
 
 vi.mock("@/engine/components/video-sync", async (orig) => {
   const m = await orig<typeof import("@/engine/components/video-sync")>();
-  return { ...m, releaseVideo: vi.fn(m.releaseVideo) };
+  return { ...m, releaseVideo: vi.fn(m.releaseVideo), syncVideo: vi.fn(m.syncVideo) };
 });
-import { releaseVideo, type ClipMode } from "@/engine/components/video-sync";
+import { MIN_VIDEO_OPACITY, releaseVideo, syncVideo, type ClipMode } from "@/engine/components/video-sync";
 
 let play: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
-  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(1);
+  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(2); // a decoded frame: seeks apply at once (a fresh element defers to its preroll frame)
   vi.spyOn(HTMLMediaElement.prototype, "duration", "get").mockReturnValue(10);
   play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
   vi.mocked(releaseVideo).mockClear();
+  vi.mocked(syncVideo).mockClear();
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -157,14 +158,44 @@ describe("review round 1 — tile clip fixes", () => {
     act(() => { transport.current!.seek(1); });
     const v = video()!;
     expect(v.currentTime).toBe(2);
+    vi.mocked(syncVideo).mockClear();
     act(() => { transport.current!.seek(3); }); // media_out (1.6 + 0.5) settled: opacity 0
     expect(video()).toBe(v);
     expect((v.closest(".cin__media") as HTMLElement).style.opacity).toBe("0");
     expect(v.currentTime).toBe(2);
+    expect(vi.mocked(syncVideo).mock.calls.map((c) => c[0])).not.toContain(v);
     clipModeRef.current = "play";
     act(() => { transport.current!.seek(3.2); });
     expect(v.currentTime).toBe(2);
     expect(play).not.toHaveBeenCalled();
+  });
+
+  it("a video tile at entrance p=0 is painted at MIN_VIDEO_OPACITY and synced (its first visible frame is never stale)", () => {
+    const { transport, video } = setup(lateBeat);
+    act(() => { transport.current!.seek(0.5); }); // the show action starts at 0.5: entrance p = 0
+    const v = video()!;
+    expect(v).not.toBeNull();
+    expect(Number((v.closest(".cin__media") as HTMLElement).style.opacity)).toBe(MIN_VIDEO_OPACITY);
+    expect(vi.mocked(syncVideo).mock.calls.map((c) => c[0])).toContain(v);
+    expect(v.currentTime).toBe(1); // in 1 + (0.5 - 0.5)
+  });
+
+  it("an image tile at entrance p=0 is still painted at 0", () => {
+    const b: Beat = { id: "imgLate", timeline: [{ kind: "wait", ms: 500 }, { ...tile, src: "media:p.png", clip: undefined }, { kind: "wait", ms: 1000 }] };
+    const { transport, container } = setup(b);
+    act(() => { transport.current!.seek(0.5); });
+    expect(container.querySelector<HTMLElement>(".cin__media")!.style.opacity).toBe("0");
+  });
+
+  it("a settled media_out without an id also skips the tile (painted 0, not synced)", () => {
+    const b: Beat = { id: "outAll", timeline: [tile, { kind: "wait", ms: 1000 }, { kind: "media_out" }, { kind: "wait", ms: 1000 }] };
+    const { transport, video } = setup(b);
+    act(() => { transport.current!.seek(1); });
+    const v = video()!;
+    vi.mocked(syncVideo).mockClear();
+    act(() => { transport.current!.seek(3); });
+    expect((v.closest(".cin__media") as HTMLElement).style.opacity).toBe("0");
+    expect(vi.mocked(syncVideo).mock.calls.map((c) => c[0])).not.toContain(v);
   });
 
   it("static mode (animate=false, autoplay) paints tiles in seek mode: exact frame, never played", () => {

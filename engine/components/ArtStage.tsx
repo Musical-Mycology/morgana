@@ -9,7 +9,7 @@ import { isMediaRef, isVideoRef, type MediaRef } from "@/engine/deck/media-ref";
 import { clipTimeAt } from "@/engine/deck/clip-clock";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { ART_DURATION_MS, type ArtLayerState } from "@/engine/authoring/art-clock";
-import { createClipVideo, releaseVideo, syncVideo, type ClipMode } from "@/engine/components/video-sync";
+import { createClipVideo, MIN_VIDEO_OPACITY, releaseVideo, syncVideo, type ClipMode } from "@/engine/components/video-sync";
 
 /** Clip options per media ref, as carried by the transition that brings the layers in. */
 export type ArtClips = Record<MediaRef, ClipOpts>;
@@ -235,7 +235,8 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
         } else el = makeLayerEl(l.asset);
         used.add(el);
         if (l.overlay) { el.dataset.overlay = "1"; el.style.mixBlendMode = "screen"; }
-        el.style.opacity = String(l.opacity);
+        // A video layer never drops to 0: it must stay composited so its seeked frame is what shows.
+        el.style.opacity = String(asVideo(el) ? Math.max(l.opacity, MIN_VIDEO_OPACITY) : l.opacity);
         el.style.transform = l.scale === 1 ? "none" : `scale(${l.scale})`;
         el.style.zIndex = String(l.z);
         return el;
