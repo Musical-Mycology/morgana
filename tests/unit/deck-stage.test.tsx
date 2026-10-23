@@ -320,3 +320,17 @@ test("camera: a deck with camera events flags the stage root data-camera; a deck
   const without = setup(D);
   expect(stageRoot(without.container).hasAttribute("data-camera")).toBe(false);
 });
+
+// The note-deck full raster lives in RenderStage (/render only): /play's and the editor's stage for a
+// camera-less note deck carries no flag and no hint-dropping style.
+test("a camera-less note deck: the deck stage gets no data-camera and no will-change override", () => {
+  const notes = doc([{ id: "s0", beats: [{ id: "a", timeline: [
+    { kind: "note_emitter", color: "#fff", pos: { x: 0.5, y: 0.5 }, dir: 0, decay: 1000, freq: 2 }, { kind: "wait", ms: 2000 },
+  ] }] }]);
+  const { container } = setup(notes);
+  const stageRoot = container.querySelector<HTMLElement>(".artstage")!.parentElement!;
+  expect(stageRoot.hasAttribute("data-camera")).toBe(false);
+  expect(container.querySelector("[data-camera]")).toBeNull();
+  const css = Array.from(container.querySelectorAll("style")).map((s) => s.textContent).join("\n");
+  expect(css).not.toMatch(/will-change: auto/);
+});

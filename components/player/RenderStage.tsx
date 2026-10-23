@@ -5,7 +5,7 @@ import type { DeckDoc } from "@/engine/deck-doc";
 import { NOTE_GLYPHS } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { pendingVideoSeeks } from "@/engine/components/video-sync";
-import { cameraEvents } from "@/engine/authoring/camera-clock";
+import { cameraEvents, hasNoteActions } from "@/engine/authoring/camera-clock";
 import { useDeckStage } from "./DeckStage";
 
 /** What one rendered frame reports back: image or clip srcs that failed for the FIRST time
@@ -40,6 +40,9 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
   const assets = useAssetResolver();
   const root = useRef<HTMLDivElement>(null);
   const hasCamera = useMemo(() => cameraEvents(doc).length > 0, [doc]);
+  const hasNotes = useMemo(() => hasNoteActions(doc), [doc]);
+  // Camera decks and note decks get a full raster per frame (below); decks with neither render as before.
+  const needsFullRaster = hasCamera || hasNotes;
   useLayoutEffect(() => {
     document.documentElement.dataset.render = "1";
     return () => { delete document.documentElement.dataset.render; };
@@ -71,11 +74,12 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
           // A broken image is tolerated: the frame shows what the browser shows; the CLI warns once.
           await Promise.all(imgs.map((img) => img.decode().catch(() => fail(img.currentSrc || img.src))));
           await document.fonts.ready;
-          if (hasCamera && root.current) {
-            // Under a camera transform, a frame whose paint was only partly invalidated (notes moving
-            // over zoomed art or objects) rasterised differently from a full raster, so a stepped frame
-            // differed from the same frame jumped to. A transient clip-path change forces the whole
-            // stage to re-raster, so every camera frame is a full raster whatever came before.
+          if (needsFullRaster && root.current) {
+            // A frame whose paint was only partly invalidated rasterised differently from a full
+            // raster, so a stepped frame differed from the same frame jumped to: under a camera
+            // transform (notes moving over zoomed art or objects), and in a camera-less deck whose note
+            // sprites animate their own scale and opacity. A transient clip-path change forces the
+            // whole stage to re-raster, so every such frame is a full raster whatever came before.
             // Two frames: a rAF callback runs before its own frame paints, so one would clear the clip
             // before any frame had painted with it.
             root.current.style.clipPath = "inset(0.5px)";
@@ -88,6 +92,12 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
       };
     });
     return () => { live = false; delete window.__morganaRender; };
-  }, [apply, layout.total, assets, hasCamera]);
-  return <div ref={root} data-render-root style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#000", containerType: "size" }}>{stage}</div>;
+  }, [apply, layout.total, assets, needsFullRaster]);
+  return <div ref={root} data-render-root style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#000", containerType: "size" }}>
+    {/* A note deck's sprites (and art layers) drop their will-change hints here, /render only, so
+        each full raster re-rasters them too (a hinted layer keeps its own raster across the clip).
+        Camera decks already drop them in DeckStage; /play and the editor keep them. Both halves are
+        needed: the hint drop alone or the clip alone still differed stepped vs jumped. */}
+    {hasNotes && !hasCamera && <style>{`html[data-render="1"] [data-render-root] .artstage__layer, html[data-render="1"] [data-render-root] .notefield__stage > * { will-change: auto !important; }`}</style>}
+    {stage}</div>;
 }

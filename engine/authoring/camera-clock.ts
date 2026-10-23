@@ -77,3 +77,10 @@ export function cameraTransform(f: Framing): string {
   if (f.zoom === 1 && f.x === 0.5 && f.y === 0.5) return "none";
   return `translate(${r6((0.5 - f.x * f.zoom) * 100)}%, ${r6((0.5 - f.y * f.zoom) * 100)}%) scale(${r6(f.zoom)})`;
 }
+
+/** Whether any beat timeline emits note particles (`note_emitter` / `note_circle`). Note sprites
+ *  animate their own scale, so — like a camera deck — a note deck needs a full raster per frame
+ *  in /render to be the same stepped or jumped (RenderStage's full-raster gate). */
+export function hasNoteActions(doc: DeckDoc): boolean {
+  return doc.scenes.some((s) => s.beats.some((b) => b.timeline.some((a) => a.kind === "note_emitter" || a.kind === "note_circle")));
+}

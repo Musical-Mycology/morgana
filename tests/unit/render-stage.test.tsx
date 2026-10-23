@@ -156,7 +156,8 @@ test("a camera deck's frame forces a full repaint (transient clip-path on the ro
   expect(w.seen.some((s) => s.includes("clip-path"))).toBe(true);
   expect(root.style.clipPath).toBe("");
 });
-test("a camera-less deck's frame never touches the root's clip-path", async () => {
+const styleText = (c: HTMLElement) => Array.from(c.querySelectorAll("style")).map((s) => s.textContent).join("\n");
+test("a deck with neither camera nor notes never touches the root's clip-path and drops no hints", async () => {
   const { container } = render(<RenderStage doc={D} />);
   const r = await ready();
   const root = container.querySelector<HTMLElement>("[data-render-root]")!;
@@ -165,4 +166,29 @@ test("a camera-less deck's frame never touches the root's clip-path", async () =
   await Promise.resolve();
   w.stop();
   expect(w.seen.some((s) => s.includes("clip-path"))).toBe(false);
+  expect(styleText(container)).not.toMatch(/will-change: auto/);
+  expect(container.querySelector("[data-camera]")).toBeNull();
+});
+
+// Note sprites animate their own scale and opacity, so a camera-less note deck had the same
+// stepped-vs-jumped raster history: in /render it gets the full raster (clip-path) AND drops the
+// will-change hints, under html[data-render="1"] only (each half alone still differed).
+test("a camera-less note deck's frame forces a full repaint and drops the hints, scoped to /render", async () => {
+  const NOTED: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s0", beats: [
+    { id: "a", timeline: [{ kind: "note_emitter", color: "#fff", pos: { x: 0.5, y: 0.5 }, dir: 0, decay: 1000, freq: 2 }, { kind: "wait", ms: 2000 }] },
+  ] }] };
+  const { container } = render(<RenderStage doc={NOTED} />);
+  const r = await ready();
+  const root = container.querySelector<HTMLElement>("[data-render-root]")!;
+  const w = clipWrites(root);
+  await r.renderFrame(1);
+  await Promise.resolve();
+  w.stop();
+  expect(w.seen.some((s) => s.includes("clip-path"))).toBe(true);
+  expect(root.style.clipPath).toBe("");
+  const css = styleText(container);
+  expect(css).toMatch(/html\[data-render="1"\] \[data-render-root\] \.artstage__layer/);
+  expect(css).toMatch(/html\[data-render="1"\] \[data-render-root\] \.notefield__stage > \*/);
+  expect(css).toMatch(/will-change: auto !important/);
+  expect(container.querySelector("[data-camera]")).toBeNull(); // the camera flag stays camera-only
 });

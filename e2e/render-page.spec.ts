@@ -602,6 +602,83 @@ test.describe("camera", () => {
   });
 });
 
+// Notes without a camera: note sprites animate their own scale and opacity, and Chromium's raster
+// history made a stepped frame differ from the same frame jumped to (up to 47 levels), camera or not.
+test.describe("notes", () => {
+  // Byte-equality is the render's contract: a flaky mismatch must fail, never pass on a CI retry.
+  test.describe.configure({ retries: 0 });
+  let noteId = "";
+  test.beforeEach(async ({ request }, info) => {
+    noteId = `e2e-render-notes-${info.parallelIndex}`;
+    await request.delete(`/api/decks/${noteId}`).catch(() => {});
+    await request.post("/api/decks", { data: { id: noteId, title: "Notes" } });
+  });
+  test.afterEach(async ({ request }) => { await request.delete(`/api/decks/${noteId}`); });
+
+  test("notes without a camera: stepped, jumped and backward-jumped frames are byte-equal", async ({ page, request }) => {
+    const still = await upload(request, noteId, "still.png", "image/png");
+    const doc = { version: 1, meta: { id: noteId, title: "Notes" }, scenes: [{ id: "s1",
+      objects: [
+        { id: "words", kind: "text", text: "Object words", transform: { x: 0.5, y: 0.5, w: 0.3, h: 0.1 }, style: { size: "md", color: "#ffffff" } },
+        { id: "ring", kind: "shape", shape: "ellipse", stroke: { color: "#ffe08a", width: 0.004 }, transform: { x: 0.36, y: 0.62, w: 0.12, h: 0.12 } },
+      ],
+      beats: [{ id: "a", art: { to: still, mode: "cut" }, timeline: [
+        { kind: "note_emitter", color: "#3FFBFF", pos: { x: 0.42, y: 0.66 }, dir: 0, var: 40, decay: 3000, freq: 5 },
+        { kind: "wait", ms: 3500 },
+      ] }] }] };
+    expect((await request.put(`/api/decks/${noteId}`, { data: doc })).status()).toBe(200);
+    expect(cameraEvents(doc as unknown as DeckDoc)).toHaveLength(0);
+    // Storyboard glyphs may be absent from a checkout (an unloaded mask paints nothing): serve a
+    // fine-lined glyph for every note so the sprites really draw.
+    const glyph = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g fill="none" stroke="#fff" stroke-width="2">
+      <ellipse cx="22" cy="48" rx="10" ry="7"/><path d="M32 48V8l18 8"/><path d="M8 20h48M8 26h48M8 32h48"/></g></svg>`;
+    await page.route("**/storyboard/notes/**", (r) => r.fulfill({ contentType: "image/svg+xml", body: glyph }));
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto(`/render?deck=${noteId}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+    const frame = (t: number) => page.evaluate(async (t) => {
+      const r = window.__morganaRender!;
+      if (!r.ready) throw new Error("not ready");
+      await r.renderFrame(t);
+    }, t);
+    const capture = async () => {
+      const png = await page.screenshot();
+      const dom = await page.evaluate(() => ({
+        notes: [...document.querySelectorAll<HTMLElement>("[data-render-root] .notefield__stage > *")]
+          .filter((e) => e.style.display !== "none").map((e) => [e.style.left, e.style.top, e.style.opacity, e.style.transform]),
+      }));
+      return { png, dom };
+    };
+
+    const ts: number[] = [];
+    for (let t = 0; t <= 3.0 + 1e-9; t += 1 / 10) ts.push(Math.round(t * 10) / 10);
+    const stepped = new Map<number, Awaited<ReturnType<typeof capture>>>();
+    for (const t of ts) {
+      await frame(t);
+      if (t === 1.5 || t === 3.0) stepped.set(t, await capture());
+    }
+    const mid = stepped.get(1.5)!, late = stepped.get(3.0)!;
+    // Sanity: notes are on screen in both frames, and the frames differ.
+    expect(mid.dom.notes.length).toBeGreaterThan(3);
+    expect(late.dom.notes.length).toBeGreaterThan(3);
+    expect(mid.png.equals(late.png)).toBe(false);
+
+    for (const [T, want] of [[1.5, mid], [3.0, late]] as const) {
+      await frame(0);
+      await frame(T);
+      const jumped = await capture();
+      expect(jumped.dom, `jump T=${T}`).toEqual(want.dom);
+      expect(jumped.png.equals(want.png), `jump T=${T}`).toBe(true);
+    }
+    // Backward: 3.0 → 1.5.
+    await frame(3.0);
+    await frame(1.5);
+    const back = await capture();
+    expect(back.dom).toEqual(mid.dom);
+    expect(back.png.equals(mid.png), "backward jump T=1.5").toBe(true);
+  });
+});
+
 test.describe("error path", () => {
   test("unknown deck publishes ready:false and shows the message", async ({ page }) => {
     await page.goto(`/render?deck=e2e-nope`);
