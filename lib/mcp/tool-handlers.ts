@@ -166,8 +166,13 @@ export async function callTool(name: string, rawArgs: unknown): Promise<DeckDoc 
     case "set_soundtrack": {
       const mediaId = a.media_id;
       if (mediaId !== null && typeof mediaId !== "string") throw new ToolCallError('"media_id" must be a string or null');
-      if (mediaId !== null && !(await listMedia(deckId)).some((m) => m.id === mediaId)) {
-        throw new ToolCallError(`media "${mediaId}" is not in this deck's media — upload it in the editor first`);
+      if (mediaId !== null) {
+        const found = (await listMedia(deckId)).find((m) => m.id === mediaId);
+        if (!found) throw new ToolCallError(`media "${mediaId}" is not in this deck's media — upload it in the editor first`);
+        const kind = mediaKind(found.mime);
+        if (kind !== "audio") {
+          throw new ToolCallError(`media "${mediaId}" is ${kind === "image" ? "an image" : kind === "video" ? "a video" : `"${found.mime}"`}, not audio — the soundtrack must be an audio file`);
+        }
       }
       return mutate(deckId, (doc) => {
         const meta = { ...doc.meta };

@@ -51,6 +51,10 @@ function extOf(name: string): string | null {
   return m && m.index > 0 ? m[1].toLowerCase() : null;
 }
 
+/** POSIX single-quoting for a file name pasted into a shell: nothing inside '…' is special, and a
+ *  literal ' becomes '\'' (close, escaped quote, reopen). */
+const shellQuote = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+
 export async function saveMedia(deckId: string, file: { name: string; bytes: Uint8Array; durationSec?: number }): Promise<MediaInfo> {
   const ext = extOf(file.name);
   if (!ext || !(ext in ALL_TYPES)) throw new MediaError(400, `unsupported file type: ${file.name}`);
@@ -59,7 +63,7 @@ export async function saveMedia(deckId: string, file: { name: string; bytes: Uin
   const sniffed = sniffMedia(ext, file.bytes);
   if (!sniffed.ok) {
     if (sniffed.reason === "codec") {
-      throw new MediaError(400, `unsupported video codec (${sniffed.fourcc}) — convert with: ffmpeg -i "${file.name}" -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4`);
+      throw new MediaError(400, `unsupported video codec (${sniffed.fourcc}) — convert with: ffmpeg -i ${shellQuote(file.name)} -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4`);
     }
     throw new MediaError(400, `${file.name} is not a valid ${ext} file`);
   }

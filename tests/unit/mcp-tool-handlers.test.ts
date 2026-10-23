@@ -227,6 +227,14 @@ test("list_media, set_soundtrack and set_markers", async () => {
   expect((await loadDeck("demo")).meta.markers).toBeUndefined();
 });
 
+test("set_soundtrack rejects media that is not audio (final review M2)", async () => {
+  await createDeck({ id: "demo", title: "Demo" });
+  const png = await saveMedia("demo", { name: "p.png", bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]) });
+  await expect(callTool("set_soundtrack", { deck_id: "demo", media_id: png.id }))
+    .rejects.toThrow(`media "${png.id}" is an image, not audio — the soundtrack must be an audio file`);
+  expect((await loadDeck("demo")).meta.soundtrack).toBeUndefined();
+});
+
 test("set_markers persists only { id, label, t } and trims labels (whitespace-only is rejected)", async () => {
   await createDeck({ id: "demo", title: "Demo" });
   await callTool("set_markers", { deck_id: "demo", markers: [{ id: "m1", label: "  drop  ", t: 40.2, color: "red", extra: { x: 1 } }] });

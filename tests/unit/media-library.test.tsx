@@ -87,7 +87,7 @@ test("drag-drop uploads the dropped files", async () => {
 });
 
 test("a failed upload shows the server message next to the file name; others still upload", async () => {
-  const hevc = 'unsupported video codec (hvc1) — convert with: ffmpeg -i "bad.mp4" -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4';
+  const hevc = "unsupported video codec (hvc1) — convert with: ffmpeg -i 'bad.mp4' -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4";
   vi.spyOn(mediaDuration, "readMediaDuration").mockResolvedValue(undefined);
   const up = vi.spyOn(mediaClient, "uploadMedia").mockRejectedValueOnce(new Error(hevc)).mockResolvedValueOnce(items[0]);
   renderLib();

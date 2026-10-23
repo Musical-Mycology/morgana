@@ -143,7 +143,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "set_soundtrack",
-    description: "Set the deck's soundtrack to a media id from list_media, or pass media_id: null to remove it. The soundtrack is one pre-mixed track that plays from deck time 0:00 in the timed Player (and in the MP4 export once that lands); its length should match the deck's total (read_deck_timing). Files must be uploaded in the editor first — binary uploads are not possible over MCP. Removing the soundtrack keeps the file in the media store.",
+    description: "Set the deck's soundtrack to an audio media id from list_media (kind \"audio\"; an image or video is rejected), or pass media_id: null to remove it. The soundtrack is one pre-mixed track that plays from deck time 0:00 in the timed Player (and in the MP4 export once that lands); its length should match the deck's total (read_deck_timing). Files must be uploaded in the editor first — binary uploads are not possible over MCP. Removing the soundtrack keeps the file in the media store.",
     inputSchema: schema({
       ...DECK_ID,
       media_id: { type: ["string", "null"], description: "A media id from list_media, or null to remove the soundtrack." },

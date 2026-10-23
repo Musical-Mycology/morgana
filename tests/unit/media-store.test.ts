@@ -157,8 +157,14 @@ test("an HEVC mp4 is rejected 400 with the exact ffmpeg-fix message", async () =
   const err = await saveMedia("d1", { name: "x.mp4", bytes: fx("clip-hevc.mp4") }).catch((e) => e);
   expect(err).toBeInstanceOf(MediaError);
   expect(err.status).toBe(400);
-  expect(err.message).toBe('unsupported video codec (hvc1) — convert with: ffmpeg -i "x.mp4" -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4');
+  expect(err.message).toBe("unsupported video codec (hvc1) — convert with: ffmpeg -i 'x.mp4' -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4");
   expect(await listMedia("d1")).toEqual([]);
+});
+
+test("the ffmpeg fix single-quotes the file name, so pasting it never runs shell syntax (final review M4)", async () => {
+  const name = `it's "$(touch pwned)" \`id\`.mp4`;
+  const err = await saveMedia("d1", { name, bytes: fx("clip-hevc.mp4") }).catch((e) => e);
+  expect(err.message).toBe(`unsupported video codec (hvc1) — convert with: ffmpeg -i 'it'\\''s "$(touch pwned)" \`id\`.mp4' -c:v libx264 -crf 18 -pix_fmt yuv420p -an out.mp4`);
 });
 
 test("bytes that do not match the extension are a 400 'not a valid <ext> file'", async () => {
