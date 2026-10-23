@@ -3,7 +3,7 @@
 import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import type { ArtAsset, ArtMode, ArtTransition, CinematicSlideSlots, Action, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
+import type { ArtAsset, ArtMode, ArtTransition, CinematicSlideSlots, Action, ClipOpts, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
 import type { DeckChrome } from "@/engine/deck-doc";
 import { isMediaRef, isVideoRef, type MediaRef } from "@/engine/deck/media-ref";
 import { clipTimeAt } from "@/engine/deck/clip-clock";
@@ -128,6 +128,13 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // whether it needs to rebuild (design spec §7b §5).
   const counterRef = useRef<{ box: HTMLElement; valueEl: HTMLElement; prefix: string; a: Extract<Action, { kind: "counter_show" }> } | null>(null);
   const mediaTiles = useRef<Map<string, HTMLElement>>(new Map());
+  // Autoplay looping tile clips: each one's `ended` listener plus the clip options it loops by
+  // (updated every paint). The ticker stops at click_gates / the beat end, so per-frame drift
+  // correction alone can't loop a clip there. Host-driven / static tiles never get one.
+  const tileLoops = useRef<Map<HTMLVideoElement, { onEnded: () => void; clip?: ClipOpts }>>(new Map());
+  // True while this beat is in static mode (no ticker: animate=false / hidden-tab autoplay):
+  // tiles are then painted in "seek" mode — one exact frame, never left playing uncorrected.
+  const staticRef = useRef(false);
   // Built, PAUSED effect timelines keyed by action index. Nothing here ever runs on
   // wall-clock — renderAt is the only thing that advances them (design spec §7b §4.2).
   // `box` is set only for a `pos`-bearing text action: the separate wrapper div makeLineBox()
@@ -208,6 +215,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // it mounts in a background tab — otherwise it would mount at the end state and later
     // seeks would never restore the entry text (design spec §10 "static mode at mount").
     const staticMode = !animate || (autoplay && document.visibilityState !== "visible");
+    staticRef.current = staticMode;
     if (staticMode) {
       // Establish the FULL, self-contained end-state art stack directly (design spec §7b §7,
       // ambiguity res. #3): resolveEnd() folds this beat's entry op AND every one of its
@@ -450,6 +458,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       if (isVideoRef(a.src)) {
         const video = createClipVideo(src);
         video.className = cls;
+        if (a.label) video.setAttribute("aria-label", a.label);
+        else video.setAttribute("aria-hidden", "true");
         fig.appendChild(video);
       } else {
         const img = document.createElement("img");
@@ -475,6 +485,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     el.style.left = `${a.pos.x * 100}%`;
     el.style.top = `${a.pos.y * 100}%`;
     gsap.set(el, { xPercent: -50, yPercent: -50 }); // center on pos; survives later scale tweens
+    el.dataset.mediaSrc = a.src ?? ""; // a re-show with a different src rebuilds the tile (paintMedia)
     return el;
   }
 
@@ -483,10 +494,28 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return el.querySelector("video");
   }
 
-  /** Take a tile off the stage for good, releasing a clip video's decoder first. */
+  function stopTileLoop(v: HTMLVideoElement) {
+    const rec = tileLoops.current.get(v);
+    if (!rec) return;
+    v.removeEventListener("ended", rec.onEnded);
+    tileLoops.current.delete(v);
+  }
+
+  /** Autoplay only: keep a `loop` clip looping through `ended` (seek to its in-point, play). */
+  function syncTileLoop(v: HTMLVideoElement, clip: ClipOpts | undefined) {
+    const rec = tileLoops.current.get(v);
+    if (!clip?.loop) { if (rec) stopTileLoop(v); return; }
+    if (rec) { rec.clip = clip; return; }
+    const next = { clip, onEnded: () => { v.currentTime = clipTimeAt(0, 0, next.clip, v.duration); v.play().catch(() => {}); } };
+    tileLoops.current.set(v, next);
+    v.addEventListener("ended", next.onEnded);
+  }
+
+  /** Take a tile off the stage for good: drop a clip video's loop listener and release its
+   *  decoder first. */
   function removeTile(el: HTMLElement) {
     const v = tileVideo(el);
-    if (v) releaseVideo(v);
+    if (v) { stopTileLoop(v); releaseVideo(v); }
     el.remove();
   }
 
@@ -504,21 +533,28 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  by scanning `fold`. Because this is recomputed from scratch on every call (not carried as
    *  tween state), backward seek falls out for free. A tile holding a clip video is synced to
    *  its clip time at beat-local `t` (the same `t` the fold ran at; `since` is beat-local too):
-   *  "play" in autoplay, else the host's clip mode (default "seek"). */
+   *  "play" in autoplay, "seek" in static mode, else the host's clip mode (default "seek"). A
+   *  fully transparent tile (entrance p=0, settled media_out) is paused and not synced: an
+   *  opacity-0 video never presents a frame, so a seek there would only wait out the fallback. */
   function paintMedia(fold: MediaFold[], state: Map<string, MediaRenderState>, t: number) {
     for (const [id, el] of mediaTiles.current) {
       if (!state.has(id)) { removeTile(el); mediaTiles.current.delete(id); }
     }
     if (!state.size) return;
-    let showActions: Map<string, Extract<Action, { kind: "media" }>> | null = null;
+    // The latest reached `media` (show) action per tile id — the one mediaStateAt's state reflects.
+    const showActions = new Map<string, Extract<Action, { kind: "media" }>>();
+    for (const { action } of fold) if (action.kind === "media") showActions.set(action.id, action);
+    const mode: ClipMode = staticRef.current ? "seek" : autoplay ? "play" : (clipModeRef?.current ?? "seek");
     for (const [id, s] of state) {
+      const a = showActions.get(id);
       let el = mediaTiles.current.get(id);
+      // Re-shown with a different src (image ↔ clip, another clip): the old element is the wrong media.
+      if (el && a && el.dataset.mediaSrc !== (a.src ?? "")) {
+        removeTile(el);
+        mediaTiles.current.delete(id);
+        el = undefined;
+      }
       if (!el) {
-        if (!showActions) {
-          showActions = new Map();
-          for (const { action } of fold) if (action.kind === "media") showActions.set(action.id, action);
-        }
-        const a = showActions.get(id);
         if (!a) continue; // no show action reached yet for this id (shouldn't happen: mediaStateAt only emits ids it has seen)
         el = makeMediaEl(a);
         stageParent()?.appendChild(el);
@@ -531,7 +567,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       const video = tileVideo(el);
       if (video) {
         const { since, clip } = s;
-        syncVideo(video, (d) => clipTimeAt(since, t, clip, d), autoplay ? "play" : (clipModeRef?.current ?? "seek"), { loop: clip?.loop });
+        if (autoplay && !staticRef.current) syncTileLoop(video, clip);
+        else stopTileLoop(video);
+        if (s.opacity === 0) { if (!video.paused) video.pause(); continue; }
+        syncVideo(video, (d) => clipTimeAt(since, t, clip, d), mode, { loop: clip?.loop });
       }
     }
   }
