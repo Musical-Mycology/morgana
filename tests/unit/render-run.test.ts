@@ -17,11 +17,13 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 
 type RenderGlobal = NonNullable<Window["__morganaRender"]>;
 
-/** The temp soundtrack path ffmpeg was given (the input right after `-ss <offset>`). */
+/** The temp soundtrack path ffmpeg was given (the `-i` input after `-ss <offset>`). */
 function audioArg(args: string[]): string {
   const i = args.indexOf("-ss");
   expect(i).toBeGreaterThan(-1);
-  return args[i + 3];
+  const j = args.indexOf("-i", i);
+  expect(j).toBeGreaterThan(i);
+  return args[j + 1];
 }
 
 /** A child-process stand-in: stdin captures writes; end() makes ffmpeg "exit" with `exitCode`. */
@@ -155,12 +157,12 @@ describe("runRender — happy path", () => {
   });
 
   test("a deck with meta.soundtrack downloads the media to a temp file, maps it into ffmpeg, then deletes it", async () => {
-    const s = setup({ meta: { soundtrack: { media: "abc123.wav" } } });
+    const s = setup({ meta: { soundtrack: { media: "0123456789abcdef.wav" } } });
     await runRender(OPTS, s.deps);
-    expect(s.fetched).toEqual([`${BASE}/api/decks/d1`, `${BASE}/api/decks/d1/media/abc123.wav`]);
+    expect(s.fetched).toEqual([`${BASE}/api/decks/d1`, `${BASE}/api/decks/d1/media/0123456789abcdef.wav`]);
     const args = s.spawnArgs[0];
     const audioPath = audioArg(args);
-    expect(audioPath).toMatch(/abc123\.wav$/);
+    expect(audioPath).toMatch(/0123456789abcdef\.wav$/);
     expect(args).toEqual(ffmpegArgs({ fps: 10, out: OPTS.out, duration: 0.3, audioPath, audioOffset: 0 }));
     expect(existsSync(audioPath)).toBe(false);
   });
@@ -185,7 +187,7 @@ describe("runRender — happy path", () => {
 describe("runRender — failures clean up", () => {
   test("a frame failure at frame 2 rejects with the frame number and T; closes the browser, kills ffmpeg, removes the output and temp audio", async () => {
     const s = setup({
-      meta: { soundtrack: { media: "abc123.wav" } },
+      meta: { soundtrack: { media: "0123456789abcdef.wav" } },
       render: readyRender(0.3, (T) => { if (T > 0.15) throw new Error("boom"); }),
     });
     await expect(runRender(OPTS, s.deps)).rejects.toThrow(/frame 2.*T=0\.2.*boom/);
@@ -224,7 +226,7 @@ describe("runRender — failures clean up", () => {
   test("abort (Ctrl-C) mid-render stops between frames and runs the same cleanup", async () => {
     const ac = new AbortController();
     const rendered: number[] = [];
-    const s = setup({ meta: { soundtrack: { media: "abc123.wav" } }, render: readyRender(1, (T) => { rendered.push(T); if (T > 0.05) ac.abort(); }) });
+    const s = setup({ meta: { soundtrack: { media: "0123456789abcdef.wav" } }, render: readyRender(1, (T) => { rendered.push(T); if (T > 0.05) ac.abort(); }) });
     const err = await runRender(OPTS, { ...s.deps, signal: ac.signal }).catch((e: Error) => e);
     expect(err).toBeInstanceOf(RenderAbortedError);
     expect(rendered).toHaveLength(2); // stopped right after the frame during which the signal fired
@@ -260,10 +262,10 @@ describe("runRender — failures clean up", () => {
   });
 
   test("a missing soundtrack file is a RenderSetupError (not a silent render)", async () => {
-    const s = setup({ meta: { soundtrack: { media: "gone.mp3" } } });
+    const s = setup({ meta: { soundtrack: { media: "fedcba9876543210.mp3" } } });
     const base = s.deps.fetch!;
     s.deps.fetch = (async (url: string) => (url.includes("/media/") ? new Response("", { status: 404 }) : base(url))) as typeof fetch;
-    await expect(runRender(OPTS, s.deps)).rejects.toThrow(/soundtrack gone\.mp3/);
+    await expect(runRender(OPTS, s.deps)).rejects.toThrow(/soundtrack fedcba9876543210\.mp3/);
     expect(s.deps.launchBrowser).not.toHaveBeenCalled();
   });
 
@@ -392,7 +394,7 @@ describe("runRender — failures clean up", () => {
   test("the synchronous emergency cleanup (forced second signal) SIGKILLs ffmpeg and deletes the output and temp audio", async () => {
     let emergency: (() => void) | undefined;
     const seen = { killed: false, unlinked: false, audioLeft: true };
-    const s = setup({ meta: { soundtrack: { media: "abc123.wav" } }, render: readyRender(1, (T) => {
+    const s = setup({ meta: { soundtrack: { media: "0123456789abcdef.wav" } }, render: readyRender(1, (T) => {
       if (T < 0.05) return;
       const audio = audioArg(s.spawnArgs[0]);
       emergency!();
@@ -530,4 +532,17 @@ describe("exitCodeFor", () => {
     expect(exitCodeFor(new RenderAbortedError())).toBe(130);
     expect(exitCodeFor(new Error("x"))).toBe(1);
   });
+});
+
+describe("soundtrack id validation", () => {
+  test.each(["../../etc/passwd", "x.m3u8", "0123456789abcdef.m3u8", "evil.wav"])(
+    "a soundtrack id %s that is not a media-store id is a RenderSetupError before any download",
+    async (media) => {
+      const s = setup({ meta: { soundtrack: { media } } });
+      const err = await runRender(OPTS, s.deps).catch((e) => e);
+      expect(err).toBeInstanceOf(RenderSetupError);
+      expect(err.message).toMatch(/not a valid soundtrack/);
+      expect(s.fetched).toEqual([`${BASE}/api/decks/d1`]);
+    },
+  );
 });
