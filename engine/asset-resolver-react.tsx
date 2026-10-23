@@ -17,7 +17,9 @@ export function useAssetResolver(): AssetResolver {
 }
 
 /** Scopes media refs to one deck for everything beneath it (`/play`, `/render`, the editor canvas). */
-export function DeckAssetsProvider({ deckId, children }: { deckId: string; children: React.ReactNode }) {
-  const value = useMemo(() => deckAssetResolver(deckId), [deckId]);
+export function DeckAssetsProvider({ deckId, children }: { deckId: string | null | undefined; children: React.ReactNode }) {
+  // A not-yet-known (null/undefined/empty) id falls back to the default resolver, so callers can
+  // wrap unconditionally and the subtree never remounts when the id arrives.
+  const value = useMemo(() => (deckId ? deckAssetResolver(deckId) : defaultAssetResolver), [deckId]);
   return <AssetResolverProvider value={value}>{children}</AssetResolverProvider>;
 }

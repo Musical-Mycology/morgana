@@ -1,4 +1,7 @@
+import { useEffect } from "react";
+import { render } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { DeckAssetsProvider, useAssetResolver } from "@/engine/asset-resolver-react";
 import { defaultAssetResolver, deckAssetResolver, type AssetResolver } from "@/engine/asset-resolver";
 import { mediaUrl } from "@/lib/api/media-client";
 
@@ -57,4 +60,25 @@ test("deckAssetResolver media URL is prefixed with the configured base path", as
   vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/morgana");
   const { deckAssetResolver: make } = await import("@/engine/asset-resolver");
   expect(make("d1").media(REF)).toBe("/morgana/api/decks/d1/media/0123456789abcdef.mp4");
+});
+
+test("DeckAssetsProvider resolves media for its deck and keeps a stable resolver per deckId", () => {
+  const seen: AssetResolver[] = [];
+  function Probe() { seen.push(useAssetResolver()); return null; }
+  const { rerender } = render(<DeckAssetsProvider deckId="d1"><Probe /></DeckAssetsProvider>);
+  expect(seen[0].media("media:x.mp4")).toBe(mediaUrl("d1", "x.mp4"));
+  rerender(<DeckAssetsProvider deckId="d1"><Probe /></DeckAssetsProvider>);
+  expect(seen[seen.length - 1]).toBe(seen[0]);
+});
+
+test("DeckAssetsProvider with a null id falls back to the default resolver and never remounts children", () => {
+  let mounts = 0;
+  const seen: AssetResolver[] = [];
+  function Probe() { useEffect(() => { mounts++; }, []); seen.push(useAssetResolver()); return null; }
+  const ui = (id: string | null) => <DeckAssetsProvider deckId={id}><Probe /></DeckAssetsProvider>;
+  const { rerender } = render(ui(null));
+  expect(seen[0]).toBe(defaultAssetResolver);
+  rerender(ui("d1"));
+  expect(seen[seen.length - 1].media("media:x.mp4")).toBe(mediaUrl("d1", "x.mp4"));
+  expect(mounts).toBe(1);
 });

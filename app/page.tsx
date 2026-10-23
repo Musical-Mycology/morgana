@@ -9,6 +9,7 @@ import { flattenBeats } from "@/lib/editor/flatten-beats";
 import { swatchGradient } from "@/lib/library/swatch";
 import { slugify } from "@/lib/library/slugify";
 import { createDeckWithRetry } from "@/lib/library/create-deck-with-retry";
+import { DeckAssetsProvider } from "@/engine/asset-resolver-react";
 import { BeatThumbnail } from "@/components/library/BeatThumbnail";
 
 type LoadState = "loading" | "ready" | "error";
@@ -116,7 +117,7 @@ export default function Library() {
               </button>
               <Link href={`/editor?deck=${meta.id}`} className="lib__card-open">
                 <div className="lib__card-swatch" data-testid="deck-card-swatch" style={thumbs[meta.id] ? undefined : { background: swatchGradient(meta.id) }}>
-                  {thumbs[meta.id] ? <BeatThumbnail beat={thumbs[meta.id]!} /> : null}
+                  {thumbs[meta.id] ? <DeckAssetsProvider deckId={meta.id}><BeatThumbnail beat={thumbs[meta.id]!} /></DeckAssetsProvider> : null}
                 </div>
                 <div className="lib__card-body">
                   <p className="lib__card-title">{meta.title}</p>

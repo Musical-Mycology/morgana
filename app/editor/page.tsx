@@ -175,11 +175,11 @@ export default function Editor() {
         <div className="ed__leftdock-layers"><LayersPanel /></div>
       </div>
       <div className="ed__canvas" style={{ position: "relative" }}>
-        {placeholder
-          ? <CanvasPlaceholderCard kind={placeholder} deckId={deckId} onRetry={() => deckId && loadDeckById(deckId)} />
-          : deckId
-            ? <DeckAssetsProvider deckId={deckId}><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} />{beatEmpty && <EmptyBeatHint />}</DeckAssetsProvider>
+        <DeckAssetsProvider deckId={deckId}>
+          {placeholder
+            ? <CanvasPlaceholderCard kind={placeholder} deckId={deckId} onRetry={() => deckId && loadDeckById(deckId)} />
             : <><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} />{beatEmpty && <EmptyBeatHint />}</>}
+        </DeckAssetsProvider>
       </div>
       <Timeline canvasRef={canvasRef} time={time} />
       {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <Inspector />}
