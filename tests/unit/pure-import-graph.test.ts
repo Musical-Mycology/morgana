@@ -44,6 +44,7 @@ test.each([
   "engine/deck/media-ref.ts",
   "engine/deck/clip-clock.ts",
   "engine/deck/media-state.ts",
+  "engine/authoring/camera-clock.ts",
 ])("%s has a DOM-free runtime import graph", (rel) => {
   const offenders = [...runtimeGraph(resolve(ROOT, rel))]
     .filter((f) => DOM_TOKENS.test(readFileSync(f, "utf8")))
@@ -57,6 +58,7 @@ const NODE_IMPORT = /^\s*import\s+(?!type\s)[\s\S]*?from\s+["'](?:node:[^"']+|fs
 test.each([
   "lib/editor/lint.ts",
   "lib/editor/media-refs.ts",
+  "engine/authoring/camera-clock.ts",
 ])("%s has a browser-safe runtime import graph (no Node builtins)", (rel) => {
   const offenders = [...runtimeGraph(resolve(ROOT, rel))]
     .filter((f) => NODE_IMPORT.test(readFileSync(f, "utf8")))
