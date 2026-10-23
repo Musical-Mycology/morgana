@@ -22,6 +22,8 @@ export function Inspector() {
   const convertAction = useEditor((s) => s.convertAction);
   const updateObject = useEditor((s) => s.updateObject);
   const deleteObject = useEditor((s) => s.deleteObject);
+  const cameraPick = useEditor((s) => s.cameraPick);
+  const setCameraPick = useEditor((s) => s.setCameraPick);
   const sceneId = beats[selected]?.sceneId;
 
   // Object selection takes precedence (mutually exclusive with action selection).
@@ -86,6 +88,17 @@ export function Inspector() {
           : undefined;
         return <Field key={f.key} spec={spec} value={getPath(action, f.key)} onChange={(v) => updateAction(selected, selectedAction!, f.key, v)} extra={extra} />;
       })}
+      {/* The canvas (DeckCanvas → CameraPick) owns the pick itself; this only enters/leaves the mode. */}
+      {d.pick === "camera" && (
+        <button
+          className="ed__pill ed__pill--ghost"
+          data-testid="camera-pick"
+          aria-pressed={cameraPick}
+          onClick={() => setCameraPick(!cameraPick)}
+        >
+          {cameraPick ? "Picking… (Esc cancels)" : "Pick on canvas"}
+        </button>
+      )}
     </div>
   );
 }

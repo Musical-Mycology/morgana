@@ -1,15 +1,19 @@
 "use client";
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { NoteField, type NoteFieldHandle } from "@/engine/components/NoteField";
 import { renderBeatAt } from "@/engine/authoring/seek";
 import { beatDuration } from "@/engine/authoring/beat-clock";
+import { deckLayout } from "@/engine/authoring/deck-clock";
+import { cameraAt, cameraEvents, cameraTransform } from "@/engine/authoring/camera-clock";
+import type { Action } from "@/engine/deck/types";
 import { useEditor } from "@/lib/editor/store";
 import { descriptorFor } from "@/lib/editor/registry";
 import { getPath } from "@/lib/editor/paths";
 import { beatLocation, type FlatBeat } from "@/lib/editor/flatten-beats";
 import { ObjectsLayer } from "./ObjectsLayer";
 import { ObjectStage, type ObjectStageHandle } from "./ObjectStage";
+import { CameraPick, type CameraPickPoint } from "./CameraPick";
 
 export interface CanvasHandle { seek: (t: number) => void; play: () => void; pause: () => void; }
 
@@ -20,6 +24,8 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     const textHost = useRef<HTMLDivElement>(null);
     const objStage = useRef<ObjectStageHandle>(null);
     const notes = useRef<NoteFieldHandle>(null);
+    const notesWorld = useRef<HTMLDivElement>(null);
+    const lastCamera = useRef("none"); // last transform written to the notes world ("none" = never written)
     const t = useRef(0);
     const raf = useRef<number | null>(null);
     const [night, setNight] = useState(0.6);
@@ -29,8 +35,24 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     const loc = doc ? beatLocation(doc, selected) : null;
     const scene = loc && doc ? doc.scenes[loc.sceneIdx] : null;
     const beatIndex = loc ? loc.beatIdx : 0;
+    // Camera preview (spec §4): the deck-time framing at this beat's deck start + local t, on the art
+    // and note worlds only. While picking, the full frame, so the pick rect reads against the stage.
+    const selectedAction = useEditor((s) => s.selectedAction);
+    const cameraPick = useEditor((s) => s.cameraPick);
+    const pickAction = cameraPick && selectedAction != null && flat ? flat.beat.timeline[selectedAction] : undefined;
+    const picking = pickAction?.kind === "camera";
+    const sceneIdx = loc?.sceneIdx ?? -1;
+    const camEvents = useMemo(() => (doc ? cameraEvents(doc) : []), [doc]);
+    const beatStart = useMemo(() => {
+      const span = doc && sceneIdx >= 0 ? deckLayout(doc).scenes[sceneIdx] : undefined;
+      const b = span?.beats[beatIndex];
+      return span && b ? span.start + b.start : 0;
+    }, [doc, sceneIdx, beatIndex]);
     const dur = () => (flat ? beatDuration(flat.beat.timeline) : 0);
     const draw = () => {
+      const tf = picking ? "none" : cameraTransform(cameraAt(camEvents, beatStart + t.current));
+      if (tf !== lastCamera.current && notesWorld.current) { lastCamera.current = tf; notesWorld.current.style.transform = tf; }
+      art.current?.setCamera(tf);
       if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight, entryArt: flat.beat.art });
       if (scene) objStage.current?.renderAt(scene, beatIndex, t.current);
       if (scene) notes.current?.renderAt(scene, beatIndex, t.current);
@@ -50,17 +72,22 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
         };
         raf.current = requestAnimationFrame(step);
       },
-    }), [flat, onTime]);
+    }), [flat, onTime, picking, camEvents, beatStart]);
 
     useEffect(() => { cancel(); t.current = 0; setPreview(false); draw(); onTime?.(0, dur()); return cancel; }, [flat]);
-    useEffect(() => { draw(); }, [scene, beatIndex]);
+    useEffect(() => { draw(); }, [scene, beatIndex, picking, camEvents, beatStart]);
 
     return (
       <div ref={host} className="ed__canvas-host" style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", maxHeight: "100%", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
         {/* clipPlayback off: the editor paints through seek.ts (no deck clock), so a clip shows its
             in-point frame, paused (spec §4 "Editor canvas", §6). */}
         <ArtStage ref={art} nightlight={night} reduced={false} transparentBg clipPlayback={false} />
-        <NoteField ref={notes} reduced={false} />
+        {/* The camera's note world, as in BeatStage: carries NoteField's own z (2), display-only. The
+            editor ObjectStage below stays unwrapped at full frame — its drag/resize handles' pointer
+            math assumes an untransformed stage (spec §4). */}
+        <div className="beat__world" ref={notesWorld} style={{ position: "absolute", inset: 0, transformOrigin: "0 0", pointerEvents: "none", zIndex: 2 }}>
+          <NoteField ref={notes} reduced={false} />
+        </div>
         {/* CinematicSlide's own `.cin` rule (position:relative) + `.cin__stage` (z-index:2) never apply here —
             CinematicSlide isn't mounted on this route, so this wrapper is otherwise static and paints BELOW
             NoteField's positioned z-index:2 regardless of DOM order. Pin it explicitly above notes (z-index:2)
@@ -73,6 +100,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
         <ObjectStage ref={objStage} scene={scene ?? { id: "", beats: [] }} active={preview} />
         <PosHandle hostRef={host} redraw={draw} />
         {!preview && <ObjectsLayer hostRef={host} />}
+        {picking && <PickLayer action={pickAction} />}
       </div>
     );
   },
@@ -118,4 +146,20 @@ function PosHandle({ hostRef, redraw }: { hostRef: React.RefObject<HTMLDivElemen
       />
     </div>
   );
+}
+
+/** Pick on canvas for the selected camera action: one click writes `to` whole ({...to, x, y}) — one
+ *  undo step — and leaves pick mode; Esc just leaves it. */
+function PickLayer({ action }: { action: Extract<Action, { kind: "camera" }> }) {
+  const selected = useEditor((s) => s.selected);
+  const selectedAction = useEditor((s) => s.selectedAction);
+  const updateAction = useEditor((s) => s.updateAction);
+  const setCameraPick = useEditor((s) => s.setCameraPick);
+  const to = action.to ?? {};
+  const onPick = (p: CameraPickPoint) => {
+    if (selectedAction == null) return;
+    updateAction(selected, selectedAction, "to", { ...to, x: p.x, y: p.y });
+    setCameraPick(false);
+  };
+  return <CameraPick zoom={to.zoom ?? 1} at={to} onPick={onPick} onCancel={() => setCameraPick(false)} />;
 }
