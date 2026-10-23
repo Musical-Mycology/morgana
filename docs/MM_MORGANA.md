@@ -100,7 +100,7 @@ Notable in-repo docs:
   `docs/superpowers/specs/2026-10-23-soundtrack-design.md`); (3) frame-stepped MP4 render —
   **landed** (spec `docs/superpowers/specs/2026-10-24-mp4-render-design.md`); (4) video
   clips + image uploads — **landed** (spec `docs/superpowers/specs/2026-10-23-video-clips-design.md`);
-  (5) camera moves; (6) credits + text particles. Each later sub-project gets its own
+  (5) camera moves — **landed** (spec `docs/superpowers/specs/2026-10-23-camera-moves-design.md`); (6) credits + text particles. Each later sub-project gets its own
   spec → plan.
   **Gotcha, now RESOLVED (§7b, 2026-07-28) — `CinematicSlide`'s GSAP master used to be a
   callback scheduler with time spacers, not a seekable representation**: effects were
@@ -231,6 +231,16 @@ Notable in-repo docs:
   only `next build` notices) — `pure-import-graph.test.ts` now also flags node builtins for
   `lint.ts`/`media-refs.ts`; shared helpers (`mediaKind`, `MEDIA_ID_PATTERN`) live in
   `engine/deck/media-ref.ts`.
+- **Camera moves (sub-project 5).** A `camera` timeline action (`to {x,y,zoom 1–8}`, `durationMs` default 1200 / 0 = cut, `ease`) takes no beat time; a framing holds across beats and scenes until the next move. `engine/authoring/camera-clock.ts` (pure) gives `cameraEvents` (same-start actions merge, **except** after a 0 ms cut) and `cameraAt` (log-space zoom, pan clamped to the stage). The transform is painted on **world layers only**:
+  - ArtStage `.artstage__world` (glow and filter stay on the fixed root);
+  - CinematicSlide `.cin__world` (tiles), which sits after `.cin__stage` at z 2, so tiles draw above all text-layer content where they overlap;
+  - BeatStage's two `.beat__world` wrappers (notes z 2, objects z 6).
+
+  Text never moves. `useDeckStage` owns `cameraRef` (a ref, so it never re-renders `Stage`) and computes it in `apply(T)`. The DeckStage stage clips overflow. Camera decks only (static `data-camera` flag) drop the `will-change` hints on art layers and note sprites, and `/render` forces a full raster per frame (transient root `clip-path`, about +35 ms per frame), because Chromium otherwise keeps raster history under a zoom.
+
+  **Gotcha (open):** decks **without** a camera but **with notes** are already not byte-identical stepped vs jumped in `/render` (up to 38 levels), because of the same raster-history effect. This predates sub-project 5 and is tracked as a follow-up.
+
+  Editor: the canvas previews art and notes, while the editor's draggable objects stay at full frame. **Pick on canvas** uses the effective zoom, clamps, writes one undo step and stops Esc propagation. Camera `to.*` fields are optional: empty means inherit, and clearing deletes the key. The editor canvas host is exactly 16:9. Lint: `camera-overlap`, and `camera-zoom-soft` when the zoom crosses above 2× on built-in panel art. Camera moves assume a 16:9 frame.
 - **`BeatStage` drives text, notes, and objects from one clock.** `CinematicSlide`'s `onTime`
   fires with the exact beat-local `t` it just painted (from the ticker, from `seek()`, or from
   the static-mode settle), and `BeatStage` paints `ObjectStage` and `NoteField` from that same

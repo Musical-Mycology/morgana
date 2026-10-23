@@ -101,12 +101,12 @@ The "expand container" half of the storyboard is already possible: a media tile 
   - CinematicSlide, NoteField and ObjectStage then paint `cameraAt(events, beatStart + t)` at the beat-local `t`.
   - With no `camera` prop the world stays at `FULL_FRAME`.
 - **Paint rules:** no `will-change: transform` on world layers, so Chromium re-rasterises zoomed art at the output resolution instead of scaling a cached bitmap. The transform is written only when the string changes.
-  - The same holds for content inside a world: art layers (`.artstage__layer`) and note sprites carry `will-change` hints, and Chromium keeps such a layer's raster scale, so under a zoom a frame's pixels depended on the zoom the layer was first rastered at (stepped vs jumped renders differed). A deck with camera events sets a static `data-camera="1"` on DeckStage's stage root, and a rule `[data-camera] .artstage__layer, [data-camera] .notefield__stage > * { will-change: auto !important }` drops the hints. Decks without camera events carry no flag and paint exactly as before.
+  - The same holds for content inside a world: art layers (`.artstage__layer`) and note sprites carry `will-change` hints, and Chromium keeps such a layer's raster scale, so under a zoom a frame's pixels depended on the zoom the layer was first rastered at (stepped vs jumped renders differed). A deck with camera events sets a static `data-camera="1"` on DeckStage's stage root, and a rule `[data-camera] .artstage__layer, [data-camera] .notefield__stage > * { will-change: auto !important }` drops the hints. Decks without camera events carry no flag and paint exactly as before. Dropping the hints alone was not enough in `/render`: Chromium's partial re-raster under a world transform still left history in the pixels, so for camera decks `renderFrame` also sets a transient `clip-path: inset(0.5px)` on the render root for two frames, then clears it before the settle frames. That forces a full raster each frame at about +35 ms per frame, in `/render` only.
 
 ## 4. Editor, lint, MCP
 
 - **Registry.** A `camera` action entry: label "Camera", icon `ti-zoom-in`, seekable. Schema:
-  - `to.zoom`: range, 1–8, step 0.05;
+  - `to.zoom`: optional number, 1–8, step 0.05 (empty = inherit; clearing deletes the key);
   - `to.x` and `to.y`: number, 0–1, step 0.01;
   - `durationMs`: number;
   - `ease`: select.
@@ -114,7 +114,7 @@ The "expand container" half of the storyboard is already possible: a media tile 
   Defaults: `{ kind: "camera", to: { zoom: 2, x: 0.5, y: 0.5 }, durationMs: 1200, ease: "inOut" }`.
 - **Pick on canvas.** The Camera action's inspector has a **Pick on canvas** button.
   - While picking, the editor canvas shows the full frame with the camera off.
-  - It draws an outline rectangle of the view the current `to.zoom` would show, centred on the pointer and clamped like `clampFraming`.
+  - It draws an outline rectangle of the view the action's **effective** zoom would show (`to.zoom`, else the zoom in effect when the action starts), centred on the pointer and clamped like `clampFraming`.
   - A click writes `to.x` and `to.y` from the clamped centre, as one undo step. Esc cancels.
   - Testids: `camera-pick`, `camera-pick-overlay`.
 - **Canvas preview.** DeckCanvas paints `cameraAt(cameraEvents(doc), beatDeckStart + t)` at the scrub point, so the editor shows what `/play` and the render show. It paints its ArtStage world and NoteField.
