@@ -1,13 +1,13 @@
 import type { RefObject } from "react";
 import type { CinematicRuntime } from "@/engine/components/layouts/CinematicSlide";
 import type { ArtStageHandle } from "@/engine/components/ArtStage";
-import type { StoryAsset } from "@/engine/deck/story-assets";
+import type { ArtAsset } from "@/engine/deck/types";
 
 export interface AuthoringHooks {
   art: RefObject<ArtStageHandle | null>;
   setNight: (n: number) => void;
-  resolveEntry: () => StoryAsset[];
-  resolveEnd: () => StoryAsset[];
+  resolveEntry: () => ArtAsset[];
+  resolveEnd: () => ArtAsset[];
   onGate: (resume: () => void) => void;
   onWaiting: (waiting: boolean) => void;
 }

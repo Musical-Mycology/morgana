@@ -22,7 +22,7 @@ const PANEL_SET = new Set<string>(PANELS);
 const OVERLAY_SET = new Set<string>(OVERLAYS);
 
 /** True for overlay assets (transparent PNGs, screen-blended). */
-export function isOverlay(asset: StoryAsset): boolean {
+export function isOverlay(asset: string): boolean {
   return OVERLAY_SET.has(asset);
 }
 

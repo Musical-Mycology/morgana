@@ -1,7 +1,6 @@
 "use client";
 import { useCallback, useMemo, useRef, useState, type Ref } from "react";
-import type { Beat, Scene } from "@/engine/deck/types";
-import type { StoryAsset } from "@/engine/deck/story-assets";
+import type { ArtAsset, Beat, Scene } from "@/engine/deck/types";
 import type { DeckChrome } from "@/engine/deck-doc";
 import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { NoteField, type NoteFieldHandle } from "@/engine/components/NoteField";
@@ -14,7 +13,7 @@ export function BeatStage({
   scene, beatIndex = 0, transport, autoplay = true, art: withArt = true,
 }: {
   sceneId: string; beat: Beat; animate?: boolean;
-  entryLayers?: StoryAsset[]; endLayers?: StoryAsset[];
+  entryLayers?: ArtAsset[]; endLayers?: ArtAsset[];
   chrome?: DeckChrome; contained?: boolean;
   scene?: Scene; beatIndex?: number;
   /** Imperative seek/play/pause/duration over CinematicSlide's single time axis — forwarded

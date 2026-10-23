@@ -3,8 +3,7 @@
 import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import type { ArtMode, ArtTransition, CinematicSlideSlots, Action, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
-import type { StoryAsset } from "@/engine/deck/story-assets";
+import type { ArtAsset, ArtMode, ArtTransition, CinematicSlideSlots, Action, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
 import type { DeckChrome } from "@/engine/deck-doc";
 import { renderPanelHTML } from "@/engine/deck/panel";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
@@ -46,7 +45,7 @@ function artKey(a: ArtTransition): string {
 
 export interface CinematicRuntime {
   /** Cross-fade to an absolute layer set (entry transitions). */
-  art(layers: StoryAsset[], mode: ArtMode, durationMs?: number): void;
+  art(layers: ArtAsset[], mode: ArtMode, durationMs?: number): void;
   /** Fold one transition onto the live stack (mid-timeline art actions). */
   applyArt(transition: ArtTransition, durationMs?: number): void;
   setNightlight(to: number, ms?: number): void;
@@ -58,9 +57,9 @@ export interface CinematicRuntime {
   pulseArrow(which: "next" | "prev", scale: number): void;
   onWaiting(waiting: boolean): void;
   /** Entry-state layers for this beat (before its mid-timeline art). */
-  resolveEntry(): StoryAsset[];
+  resolveEntry(): ArtAsset[];
   /** End-state layers for this beat (after all its art ops) — for PDF/static. */
-  resolveEnd(): StoryAsset[];
+  resolveEnd(): ArtAsset[];
   /** Jump to a 0-based slide index (inline jump links). */
   jumpTo(index: number): void;
 }

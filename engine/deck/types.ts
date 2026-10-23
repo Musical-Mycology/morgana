@@ -66,20 +66,29 @@ export const REQUIRED_SLOTS: Record<LayoutId, string[]> = {
 };
 
 import type { StoryAsset } from "./story-assets";
+import type { MediaRef } from "./media-ref";
+
+/** An art layer: a story panel key or a reference to this deck's uploaded media (spec §2). */
+export type ArtAsset = StoryAsset | MediaRef;
+
+/** Per-clip playback options, seconds. Defaults: `in: 0`, no loop (spec §3). */
+export interface ClipOpts { in?: number; loop?: boolean }
 
 /** How an art panel change is animated. */
 export type ArtMode = "cut" | "fade" | "crossfade" | "morph" | "dissolve";
 
 export interface ArtTransition {
   /** Panel(s) brought to the top of the layer stack. */
-  to: StoryAsset | StoryAsset[];
+  to: ArtAsset | ArtAsset[];
   mode: ArtMode;
   /** Override the per-mode default duration. */
   durationMs?: number;
   /** Layers to leave beneath the new panel (e.g. keep "3.02" under "3.03"). */
-  keep?: StoryAsset[];
+  keep?: ArtAsset[];
   /** Layers to fade away as part of this transition. */
-  out?: StoryAsset[];
+  out?: ArtAsset[];
+  /** Clip options for media-ref layers this transition brings in. */
+  clips?: Record<MediaRef, ClipOpts>;
 }
 
 export type TextIn =
@@ -154,7 +163,7 @@ export type Action =
   // `id` keys the tile for later media_move/media_out. Omit `src` to render a labeled
   // placeholder box (`label`). `width` = fraction of stage width (default 0.18). `round` crops
   // to a circle (headshots). Tiles are centered on `pos`.
-  | { kind: "media"; id: string; pos: StagePoint; src?: string; label?: string; width?: number; in?: MediaIn; round?: boolean; durationMs?: number; panel?: PanelSpec }
+  | { kind: "media"; id: string; pos: StagePoint; src?: string; label?: string; width?: number; in?: MediaIn; round?: boolean; durationMs?: number; panel?: PanelSpec; clip?: ClipOpts }
   | { kind: "media_move"; id: string; to: StagePoint; scale?: number; durationMs?: number }
   | { kind: "media_out"; id?: string; durationMs?: number }
   // Object animation verbs (sub-project #3a). Each targets a Scene.objects node by its

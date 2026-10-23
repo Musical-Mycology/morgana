@@ -2,9 +2,10 @@
 
 import { forwardRef, useImperativeHandle, useRef } from "react";
 import gsap from "gsap";
-import type { ArtMode, ArtTransition } from "@/engine/deck/types";
+import type { ArtAsset, ArtMode, ArtTransition } from "@/engine/deck/types";
 import { applyArt } from "@/engine/deck/flatten";
-import { isOverlay, type StoryAsset } from "@/engine/deck/story-assets";
+import { isOverlay } from "@/engine/deck/story-assets";
+import { isMediaRef } from "@/engine/deck/media-ref";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { ART_DURATION_MS, type ArtLayerState } from "@/engine/authoring/art-clock";
 
@@ -12,11 +13,11 @@ export interface ArtStageHandle {
   /** Cross-fade the visible stack to exactly `layers` (bottom→top) using `mode`. A no-op when
    *  `layers` already equals the live stack (by value): re-showing the same stack must not
    *  restart, or cut short, a crossfade that is still running into it. */
-  show(layers: StoryAsset[], mode: ArtMode, durationMs?: number): void;
+  show(layers: ArtAsset[], mode: ArtMode, durationMs?: number): void;
   /** Fold one transition onto the live stack (mid-timeline art ops). */
   apply(transition: ArtTransition, durationMs?: number): void;
   /** Snap instantly (reduced motion / jump nav / PDF). */
-  snap(layers: StoryAsset[]): void;
+  snap(layers: ArtAsset[]): void;
   /** Stateless paint of exactly `layers` (bottom→top by array order; each layer's `z` drives
    *  stacking) plus the nightlight level `night`. For host-driven / render callers that compute
    *  the state at any deck time: creates no tweens and sets no CSS transition, so the result is
@@ -26,7 +27,7 @@ export interface ArtStageHandle {
 
 interface Props { nightlight: number; reduced?: boolean; transparentBg?: boolean }
 
-function sameStack(a: StoryAsset[], b: StoryAsset[]): boolean {
+function sameStack(a: ArtAsset[], b: ArtAsset[]): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
@@ -37,10 +38,10 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
   const assetsRef = useRef(assets);
   assetsRef.current = assets;
   const root = useRef<HTMLDivElement>(null);
-  const current = useRef<StoryAsset[]>([]);
+  const current = useRef<ArtAsset[]>([]);
 
   /** Reconcile the DOM layer stack to exactly `targets`; reuse matching layers (no flicker). */
-  function render(targets: StoryAsset[], mode: ArtMode, durationMs?: number) {
+  function render(targets: ArtAsset[], mode: ArtMode, durationMs?: number) {
     const host = root.current;
     if (!host) return;
     const d = (durationMs ?? ART_DURATION_MS[mode]) / 1000;
@@ -59,7 +60,7 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
         return;
       }
       const img = document.createElement("img");
-      img.src = assetsRef.current.story(asset);
+      img.src = isMediaRef(asset) ? "" : assetsRef.current.story(asset); // media refs: resolved in Task 5/7
       img.className = "artstage__layer";
       img.dataset.asset = asset;
       img.style.zIndex = String(i + 1);
@@ -114,7 +115,7 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
         if (el) gsap.killTweensOf(el); // a stale in-flight fade must not remove or re-fade it
         else {
           el = document.createElement("img");
-          el.src = assetsRef.current.story(l.asset);
+          el.src = isMediaRef(l.asset) ? "" : assetsRef.current.story(l.asset); // media refs: resolved in Task 5/7
           el.className = "artstage__layer";
           el.dataset.asset = l.asset;
         }

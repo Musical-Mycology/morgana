@@ -1,9 +1,8 @@
 /** Art + nightlight as pure functions of deck time (timed-video sub-project 3). Pure: no DOM,
  *  GSAP or React — enforced by tests/unit/pure-import-graph.test.ts. GSAP is only the parity
  *  reference in tests: these curves must match what ArtStage's tweens produce. */
-import type { ArtMode, ArtTransition } from "@/engine/deck/types";
+import type { ArtAsset, ArtMode, ArtTransition } from "@/engine/deck/types";
 import type { DeckDoc } from "@/engine/deck-doc";
-import type { StoryAsset } from "@/engine/deck/story-assets";
 import { isOverlay } from "@/engine/deck/story-assets";
 import { applyArt, flattenStory } from "@/engine/deck/flatten";
 import { deckLayout } from "./deck-clock";
@@ -19,10 +18,10 @@ export function power2InOut(p: number): number { return p < 0.5 ? 4 * p * p * p 
 /** GSAP back.out(2): overshoots past 1 before settling. */
 export function backOut2(p: number): number { const q = p - 1; return 1 + 3 * q * q * q + 2 * q * q; }
 
-export interface ArtEvent { start: number; duration: number; mode: ArtMode; to: StoryAsset[] }  // seconds
+export interface ArtEvent { start: number; duration: number; mode: ArtMode; to: ArtAsset[] }  // seconds
 /** `z` is authoritative for stacking; array order only breaks ties. Incoming/kept layers take z from
  *  the target stack order; outgoing layers keep the z they had (GSAP parity). */
-export interface ArtLayerState { asset: StoryAsset; opacity: number; scale: number; z: number; overlay: boolean }
+export interface ArtLayerState { asset: ArtAsset; opacity: number; scale: number; z: number; overlay: boolean }
 
 const seconds = (art: ArtTransition) => (art.durationMs ?? ART_DURATION_MS[art.mode]) / 1000;
 
@@ -31,7 +30,7 @@ const seconds = (art: ArtTransition) => (art.durationMs ?? ART_DURATION_MS[art.m
  *  stack, so keep/out behave exactly as in sequential playback. */
 export function artEvents(doc: DeckDoc): ArtEvent[] {
   const out: ArtEvent[] = [];
-  let stack: StoryAsset[] = [];
+  let stack: ArtAsset[] = [];
   const push = (start: number, art: ArtTransition, entry = false) => {
     const next = applyArt(stack, art);
     // An entry art that folds to the identical stack is a no-op in ArtStage.show() (sameStack), so a
@@ -116,13 +115,13 @@ function entering(f: FadeIn | undefined, overlay: boolean, at: number): { opacit
  *  opacity when the event began. */
 export function artAt(events: ArtEvent[], T: number): ArtLayerState[] {
   let visible: ArtLayerState[] = [];
-  let fades = new Map<StoryAsset, FadeIn>(); // the target stack's layers → the fade-in that brought each in
+  let fades = new Map<ArtAsset, FadeIn>(); // the target stack's layers → the fade-in that brought each in
   for (let i = 0; i < events.length && events[i].start <= T; i++) {
     const e = events[i];
     const until = i + 1 < events.length && events[i + 1].start <= T ? events[i + 1].start : T;
     const p = e.duration <= 0 ? 1 : clamp01((until - e.start) / e.duration);
     const prev = new Set(visible.map((l) => l.asset));
-    const nextFades = new Map<StoryAsset, FadeIn>();
+    const nextFades = new Map<ArtAsset, FadeIn>();
     const incoming: ArtLayerState[] = e.to.map((asset, idx) => {
       const overlay = isOverlay(asset);
       // Kept: its own fade-in (undefined if it was outgoing, or already settled → at rest). New: this event's.
