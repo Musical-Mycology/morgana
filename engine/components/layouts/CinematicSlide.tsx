@@ -61,10 +61,6 @@ export interface CinematicRuntime {
   resolveEntry(): StoryAsset[];
   /** End-state layers for this beat (after all its art ops) — for PDF/static. */
   resolveEnd(): StoryAsset[];
-  /** Optional: this beat's flattened ENTRY nightlight, for a host-driven (seek-slaved) stage to
-   *  restore on a backward seek within the beat. `undefined` = nothing to restore. Runtimes that
-   *  never seek backward (live /story, PDF) simply omit it. */
-  resolveEntryNight?(): number | undefined;
   /** Jump to a 0-based slide index (inline jump links). */
   jumpTo(index: number): void;
 }
@@ -100,7 +96,8 @@ interface Props {
    *  seeked in lockstep, including across click_gate pauses. */
   onTime?: (t: number) => void;
   /** false = never start the autoplay ticker on mount; the host drives time via
-   *  `transport.seek` (the timed Player). Entry art is still issued. Default true. */
+   *  `transport.seek` (the timed Player). Host-driven: the host paints art + nightlight from
+   *  art-clock, so this slide never calls runtime.art/applyArt/setNightlight. Default true. */
   autoplay?: boolean;
 }
 
@@ -220,7 +217,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // this branch (e.g. suppress renderAt's art/nightlight dispatch for this one static call)
       // if/when a `keep`/`out` mid-timeline `art` action is authored anywhere (see task 11
       // report — flagged and deferred, not fixed, per the brief's literal replacement).
-      runtime.art(runtime.resolveEnd(), "cut");
+      if (autoplay) runtime.art(runtime.resolveEnd(), "cut"); // host-driven: the host paints art + nightlight from art-clock
       // The settled state IS the fold at the end of the axis: every action kind (text, clear,
       // fade_out, counters, media, art, nightlight, rotateList, reveal_again, the one-shot
       // arrows/pulse calls) already renders correctly from renderAt(t) — Tasks 5-8 built exactly
@@ -239,15 +236,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     }
 
     // Entry art: resolveEntry() already folds this beat's entry transition, so show
-    // it as an absolute cross-fade using the entry op's mode.
-    // Autoplay visits beats strictly in order, so a beat with no `art` op of its own can rely on
-    // ArtStage's live stack already holding the art it inherits. A host-driven stage cannot: a
-    // scrub/deep link/backward jump lands on a beat whose predecessors never played here, so it
-    // ALWAYS issues the resolved entry stack (an inheriting beat cuts to it). Straight-through
-    // play into an inheriting beat stays seamless because ArtStage.show() is a no-op when the
-    // target stack already equals the live one (an in-flight crossfade is left running).
-    if (!autoplay) runtime.art(runtime.resolveEntry(), slots.beat.art?.mode ?? "cut", slots.beat.art?.durationMs);
-    else if (slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs);
+    // it as an absolute cross-fade using the entry op's mode. Autoplay visits beats strictly in
+    // order, so a beat with no `art` op of its own relies on ArtStage's live stack already holding
+    // the art it inherits. Host-driven: the host paints art + nightlight from art-clock.
+    if (autoplay && slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs);
 
     // Autoplay from t=0 — observable behaviour is unchanged from the old per-segment
     // machinery (design spec §7b §4.4): a ticker now drives the single time axis instead of
@@ -589,17 +581,6 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       appliedArt.current = null;
       appliedNight.current = null;
       firedOnce.current.clear();
-      // Host-driven: the art/nightlight the forward fold issued (mid-beat `art`, `nightlight`
-      // actions) are live state on SIBLING components, not DOM this component can tear down —
-      // nulling the diff refs above only lets them re-issue. Restore the beat's entry baseline
-      // first, so the refold below re-applies exactly the actions reached by `t` onto the true
-      // entry stack (and an action no longer reached is genuinely undone). Autoplay callers
-      // keep their existing behaviour.
-      if (!autoplay) {
-        runtime.art(runtime.resolveEntry(), "cut");
-        const entryNight = runtime.resolveEntryNight?.();
-        if (typeof entryNight === "number") runtime.setNightlight(entryNight);
-      }
     }
     // Counter state is a fold over the reached actions (design spec §7b §5): counter_show
     // seeds {from,to}; counter_to/counter_add advance it, tracking `from` as the PREVIOUS
@@ -716,6 +697,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         continue;
       }
       if (f.action.kind === "art") {
+        if (!autoplay) continue; // host-driven: the host paints art + nightlight from art-clock
         // Diff against the last-issued transition, not the fold's own phase: the fold re-emits
         // this same entry on every frame within the action's window (settled or in-flight), and
         // ArtStage.show() runs its own crossfade as a side effect, so re-issuing on every frame
@@ -733,6 +715,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         continue;
       }
       if (f.action.kind === "nightlight") {
+        if (!autoplay) continue; // host-driven: the host paints art + nightlight from art-clock
         if (appliedNight.current !== f.action.to) {
           appliedNight.current = f.action.to;
           runtime.setNightlight(f.action.to, f.phase === "settled" ? 0 : f.action.durationMs);

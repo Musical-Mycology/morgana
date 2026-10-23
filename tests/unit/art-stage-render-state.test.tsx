@@ -76,3 +76,24 @@ describe("ArtStage.renderState", () => {
     expect(fromTo).not.toHaveBeenCalled();
   });
 });
+
+describe("ArtStage.renderState — interplay with tweened show()", () => {
+  it("kills an in-flight show() tween on a reused layer (advancing GSAP time leaves it put)", () => {
+    const { ref, layers } = setup();
+    ref.current!.show(["1.01"], "fade"); // a 700 ms opacity 0 → 1 tween
+    ref.current!.renderState([{ asset: "1.01", opacity: 0.5, scale: 1, z: 1, overlay: false }], 0);
+    const el = layers()[0];
+    expect(el.style.opacity).toBe("0.5");
+    gsap.globalTimeline.time(gsap.globalTimeline.time() + 5); // far past the fade's end
+    expect(layers()[0]).toBe(el);
+    expect(el.style.opacity).toBe("0.5");
+  });
+
+  it("keeps .artstage__glow as the root's first element child", () => {
+    const { ref, root } = setup();
+    ref.current!.renderState(two, 0.5);
+    expect(root.firstElementChild!.classList.contains("artstage__glow")).toBe(true);
+    ref.current!.renderState([two[1], two[0]], 0.2);
+    expect(root.firstElementChild!.classList.contains("artstage__glow")).toBe(true);
+  });
+});

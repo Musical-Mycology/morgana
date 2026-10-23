@@ -11,7 +11,7 @@ import { makeAuthoringRuntime } from "./runtime";
 
 export function BeatStage({
   sceneId, beat, animate = true, entryLayers = [], endLayers = [], chrome, contained = false,
-  scene, beatIndex = 0, transport, autoplay = true, entryNight,
+  scene, beatIndex = 0, transport, autoplay = true, art: withArt = true,
 }: {
   sceneId: string; beat: Beat; animate?: boolean;
   entryLayers?: StoryAsset[]; endLayers?: StoryAsset[];
@@ -23,38 +23,24 @@ export function BeatStage({
   /** false = host-driven: no autoplay ticker; the host drives time via `transport.seek`
    *  (the timed Player). Default true. */
   autoplay?: boolean;
-  /** Flattened entry nightlight for `beat`, supplied by a host that swaps `beat` on a mounted
-   *  stage. Re-applied on every beat change (including backward seeks), and — host-driven only —
-   *  on a backward seek WITHIN the beat (via the runtime's resolveEntryNight). */
-  entryNight?: number;
+  /** false = don't mount this stage's own ArtStage: the host owns one (persistent across beats)
+   *  and paints art + nightlight from art-clock (the timed Player). The wrapper's background is
+   *  then transparent so the host's art shows through. Default true. */
+  art?: boolean;
 }) {
   const art = useRef<ArtStageHandle>(null);
   const notes = useRef<NoteFieldHandle>(null);
   const objStage = useRef<ObjectStageHandle>(null);
-  const [night, setNight] = useState(entryNight ?? beat.nightlight ?? 0);
-  // CinematicSlide only issues nightlight for `nightlight` ACTIONS, never the beat's inherited
-  // entry value. A host that swaps `beat` on a mounted stage (the timed Player) passes the
-  // flattened entry nightlight here, and it must be re-applied on every beat change — including
-  // a backward seek into an earlier beat. Applied DURING RENDER (React's "adjust state when a
-  // prop changes" pattern), not in an effect: CinematicSlide's child layout effect runs
-  // renderAt(0) before any parent effect, and a t=0 `nightlight` action it issues must be the
-  // LAST write, so the inherited entry value has to land before the child's effects run.
-  const entryKey = `${sceneId}\u0000${beat.id}\u0000${entryNight ?? ""}`;
-  const [appliedEntryKey, setAppliedEntryKey] = useState(entryKey);
-  if (appliedEntryKey !== entryKey) {
-    setAppliedEntryKey(entryKey);
-    if (entryNight != null) setNight(entryNight);
-  }
+  const [night, setNight] = useState(beat.nightlight ?? 0);
 
   const runtime = useMemo(
     () => makeAuthoringRuntime({
       art, setNight,
       resolveEntry: () => entryLayers,
       resolveEnd: () => endLayers,
-      resolveEntryNight: () => entryNight,
       onGate: () => {}, onWaiting: () => {},
     }),
-    [entryLayers, endLayers, entryNight],
+    [entryLayers, endLayers],
   );
 
   // The one clock (design spec §7b Task 10): CinematicSlide is the sole thing that ever
@@ -70,8 +56,8 @@ export function BeatStage({
   }, [scene, beatIndex]);
 
   return (
-    <div data-testid="beatstage" style={{ position: contained ? "absolute" : "fixed", inset: 0, containerType: "size", background: "var(--color-mm-dark-brown)" }}>
-      <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />
+    <div data-testid="beatstage" style={{ position: contained ? "absolute" : "fixed", inset: 0, containerType: "size", background: withArt ? "var(--color-mm-dark-brown)" : "transparent" }}>
+      {withArt && <ArtStage ref={art} nightlight={night} reduced={false} transparentBg />}
       <NoteField ref={notes} reduced={false} />
       {/* ObjectStage/NoteField must mount (and attach their imperative refs) BEFORE
           CinematicSlide's own layout effect runs — that effect can call onTime synchronously

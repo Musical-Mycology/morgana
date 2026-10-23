@@ -96,9 +96,9 @@ export const ArtStage = forwardRef<ArtStageHandle, Props>(function ArtStage(
 
   useImperativeHandle(ref, () => ({
     show: (layers, mode, durationMs) => {
-      // A host-driven stage (the timed Player) issues its resolved entry stack on EVERY beat
-      // change; playing straight into a beat that merely inherits its art must leave the
-      // in-flight stack (and any crossfade into it) alone.
+      // Re-showing the stack already on screen (an entry art that folds to the stack the beat
+      // inherits) must leave the in-flight stack (and any crossfade into it) alone. art-clock's
+      // artEvents mirrors this by dropping such no-op entry events.
       if (sameStack(layers, current.current)) return;
       render(layers, mode, durationMs);
     },

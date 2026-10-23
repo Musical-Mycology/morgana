@@ -27,32 +27,6 @@ test("default autoplay still registers the ticker (unchanged behaviour)", () => 
   add.mockRestore();
 });
 
-test("entryNight is re-applied when the beat changes", () => {
-  // ArtStage renders `.artstage__glow` with opacity 0.15 + 0.45 * min(1, nightlight):
-  // nightlight 1 → 0.6, nightlight 0 → 0.15.
-  const glow = (c: HTMLElement) => (c.querySelector(".artstage__glow") as HTMLElement).style.opacity;
-  const b2: Beat = { id: "b2", timeline: [{ kind: "wait", ms: 500 }] };
-  const { rerender, container } = render(<BeatStage sceneId="s" beat={beat} autoplay={false} entryNight={1} contained />);
-  expect(Number(glow(container))).toBeCloseTo(0.6);
-  rerender(<BeatStage sceneId="s" beat={b2} autoplay={false} entryNight={0} contained />);
-  expect(Number(glow(container))).toBeCloseTo(0.15);
-  rerender(<BeatStage sceneId="s" beat={beat} autoplay={false} entryNight={1} contained />); // backward swap
-  expect(Number(glow(container))).toBeCloseTo(0.6);
-});
-
-test("a t=0 nightlight action beats entryNight (mount and beat swap)", () => {
-  const glow = (c: HTMLElement) => (c.querySelector(".artstage__glow") as HTMLElement).style.opacity;
-  const lit: Beat = { id: "lit", timeline: [{ kind: "nightlight", to: 1 }, { kind: "wait", ms: 500 }] };
-  const plain: Beat = { id: "plain", timeline: [{ kind: "wait", ms: 500 }] };
-  const first = render(<BeatStage sceneId="s" beat={lit} autoplay={false} entryNight={0} contained />);
-  expect(Number(glow(first.container))).toBeCloseTo(0.6);
-  first.unmount();
-  const { rerender, container } = render(<BeatStage sceneId="s" beat={plain} autoplay={false} entryNight={0} contained />);
-  expect(Number(glow(container))).toBeCloseTo(0.15);
-  rerender(<BeatStage sceneId="s" beat={lit} autoplay={false} entryNight={0} contained />);
-  expect(Number(glow(container))).toBeCloseTo(0.6);
-});
-
 // --- Final review fixes: host-driven entry state under seeking -------------------------------
 
 const layersOf = (c: HTMLElement) => Array.from(c.querySelectorAll<HTMLElement>(".artstage__layer")).map((el) => el.dataset.asset);
@@ -66,28 +40,18 @@ const midArt: Beat = { id: "mid", art: { to: "1.01", mode: "cut" }, timeline: [
   { kind: "wait", ms: 2000 },
 ] };
 
-test("a backward seek within a beat restores its entry art and entry nightlight", () => {
-  const transport = createRef<SlideTransport>();
-  const { container } = render(<BeatStage sceneId="s" beat={midArt} autoplay={false} transport={transport}
-    entryLayers={["1.01"]} endLayers={["3.01"]} entryNight={0} contained />);
-  act(() => { transport.current!.seek(3); });
-  expect(layersOf(container)).toEqual(["3.01"]);
-  expect(glowOf(container)).toBeCloseTo(0.6);
-  act(() => { transport.current!.seek(1); });
-  expect(layersOf(container)).toEqual(["1.01"]);
-  expect(glowOf(container)).toBeCloseTo(0.15);
-});
-
-test("host-driven mode ignores a hidden tab at mount: seeks still paint entry state", () => {
+test("host-driven mode ignores a hidden tab at mount: no static end state, and it never issues art/nightlight", () => {
   const vis = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
   const add = vi.spyOn(gsap.ticker, "add");
   const transport = createRef<SlideTransport>();
   const { container } = render(<BeatStage sceneId="s" beat={midArt} autoplay={false} transport={transport}
-    entryLayers={["1.01"]} endLayers={["3.01"]} entryNight={0} contained />);
-  expect(layersOf(container)).toEqual(["1.01"]); // painted at t=0, not the static end state
+    entryLayers={["1.01"]} endLayers={["3.01"]} contained />);
+  // Not the static end state (which would cut to 3.01 at glow 0.6): host-driven, the host owns
+  // art + nightlight, so the slide issues none — at mount or on any seek.
+  expect(layersOf(container)).toEqual([]);
   expect(glowOf(container)).toBeCloseTo(0.15);
-  act(() => { transport.current!.seek(0.5); });
-  expect(layersOf(container)).toEqual(["1.01"]);
+  act(() => { transport.current!.seek(3); });
+  expect(layersOf(container)).toEqual([]);
   expect(glowOf(container)).toBeCloseTo(0.15);
   expect(add).not.toHaveBeenCalled();
   add.mockRestore();
@@ -98,10 +62,16 @@ test("autoplay mode still goes static (end state, no ticker) in a hidden tab", (
   const vis = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
   const add = vi.spyOn(gsap.ticker, "add");
   const { container } = render(<BeatStage sceneId="s" beat={midArt}
-    entryLayers={["1.01"]} endLayers={["3.01"]} entryNight={0} contained />);
+    entryLayers={["1.01"]} endLayers={["3.01"]} contained />);
   expect(layersOf(container)).toEqual(["3.01"]);
   expect(glowOf(container)).toBeCloseTo(0.6);
   expect(add).not.toHaveBeenCalled();
   add.mockRestore();
   vis.mockRestore();
+});
+
+test("art={false} mounts no ArtStage of its own", () => {
+  const { container } = render(<BeatStage sceneId="s" beat={midArt} autoplay={false} art={false} contained />);
+  expect(container.querySelector(".artstage")).toBeNull();
+  expect((container.querySelector("[data-testid=beatstage]") as HTMLElement).style.background).toBe("transparent");
 });

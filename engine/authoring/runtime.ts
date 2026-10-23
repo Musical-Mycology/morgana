@@ -8,9 +8,6 @@ export interface AuthoringHooks {
   setNight: (n: number) => void;
   resolveEntry: () => StoryAsset[];
   resolveEnd: () => StoryAsset[];
-  /** Optional: the beat's flattened entry nightlight (host-driven stages restore it on a
-   *  backward seek within the beat). */
-  resolveEntryNight?: () => number | undefined;
   onGate: (resume: () => void) => void;
   onWaiting: (waiting: boolean) => void;
 }
@@ -29,7 +26,6 @@ export function makeAuthoringRuntime(h: AuthoringHooks): CinematicRuntime {
     onWaiting: (w) => h.onWaiting(w),
     resolveEntry: () => h.resolveEntry(),
     resolveEnd: () => h.resolveEnd(),
-    resolveEntryNight: () => h.resolveEntryNight?.(),
     jumpTo: () => {},
   };
 }
