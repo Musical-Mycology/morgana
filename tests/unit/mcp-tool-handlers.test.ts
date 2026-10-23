@@ -203,7 +203,7 @@ test("update_meta with path timing and value null makes the deck untimed", async
 
 test("list_media, set_soundtrack and set_markers", async () => {
   await createDeck({ id: "demo", title: "Demo" });
-  const info = await saveMedia("demo", { name: "mix.mp3", bytes: new TextEncoder().encode("x") });
+  const info = await saveMedia("demo", { name: "mix.mp3", bytes: new TextEncoder().encode("ID3x") });
   expect(await callTool("list_media", { deck_id: "demo" })).toEqual({ media: [info] });
   await callTool("set_soundtrack", { deck_id: "demo", media_id: info.id });
   expect((await loadDeck("demo")).meta.soundtrack).toEqual({ media: info.id });
