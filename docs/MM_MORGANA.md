@@ -187,7 +187,11 @@ Notable in-repo docs:
   `html[data-render="1"]`, which also hides the Next dev indicator and `.cin__ending` end-cards),
   calls `window.__morganaRender.renderFrame(T)` (`flushSync(apply)` → image decode → fonts → 2
   rAFs), screenshots PNG, pipes to system ffmpeg (`FFMPEG_PATH`; H.264 yuv420p CRF 18 + AAC 192k,
-  soundtrack `-ss <from>` + `apad`). Fonts and every `NOTE_GLYPHS` mask are preloaded before
+  soundtrack `-ss <from>` + `apad`). **Security gotcha:** the soundtrack input is opened with a
+  pinned demuxer (`AUDIO_DEMUXERS`, `-f <demuxer> -protocol_whitelist file`) and only a valid
+  media-store id is accepted — ffmpeg sniffs content otherwise, so an uploaded "audio" file that
+  is really an HLS/concat playlist would read local files or URLs into the video. Any future
+  media input to ffmpeg (sub-project 4 video clips) must follow the same rule. Fonts and every `NOTE_GLYPHS` mask are preloaded before
   `ready`; decode failures are reported once per src, render continues. Exit codes: 0 ok, 1
   render failure (incl. page `ready:false`, frame timeout `FRAME_TIMEOUT_MS` 60 s, any
   `pageerror` — fatal on purpose: there's no error boundary, so a crashed root would otherwise
