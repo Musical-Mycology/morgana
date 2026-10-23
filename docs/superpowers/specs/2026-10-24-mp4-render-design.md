@@ -95,8 +95,11 @@ duration 0 (or `cut`) means `p = 1`; plain layers use `power2.inOut` (GSAP namin
 `p < .5 ? 4p³ : 1 − (−2p+2)³/2`), overlays use `back.out(2)` for scale `0.9 → 1` and opacity, and
 `morph` plain layers enter from scale 1.04. Layers leaving fade out from **their opacity at the
 event's start** (recursively, so a transition starting mid-crossfade continues smoothly) to 0
-with `power2.inOut`, and are dropped once `p = 1`. Kept layers are at opacity 1. z follows the
-target stack order; outgoing layers keep their previous z beneath. Ease implementations are
+with `power2.inOut`, and are dropped once `p = 1`. Kept layers are at opacity 1. Incoming/kept
+layers take z from the target stack order; outgoing layers keep the z they had (GSAP parity); z is
+authoritative for stacking, array order only breaks ties. Mid-beat art actions crossfade over their
+authored duration — a deliberate change from autoplay, where zero-length actions currently land
+settled (instant). Ease implementations are
 unit-tested against `gsap.parseEase(...)` at many points.
 
 **Nightlight.** Start value = the first beat's flattened nightlight. Each beat entry whose

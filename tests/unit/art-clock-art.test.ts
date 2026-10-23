@@ -78,3 +78,57 @@ test("empty / before any art", () => {
   expect(artAt(artEvents(doc([])), 0)).toEqual([]);
   expect(artAt(artEvents(D), -1)).toEqual([]);
 });
+
+test("entry art folding to the identical stack emits no event; a running fade continues", () => {
+  const Ds = doc([{ id: "s", beats: [
+    { id: "a", art: { to: "1.01", mode: "fade" }, timeline: [{ kind: "wait", ms: 300 }] },
+    { id: "b", art: { to: "1.01", mode: "fade" }, timeline: [{ kind: "wait", ms: 2000 }] },
+  ] }]);
+  const ev = artEvents(Ds);
+  expect(ev).toHaveLength(1);
+  expect(op(artAt(ev, 0.3), "1.01")).toBeCloseTo(power2InOut(0.3 / 0.7), 6);
+  expect(op(artAt(ev, 0.2999), "1.01")).toBeCloseTo(power2InOut(0.2999 / 0.7), 6);
+});
+
+test("mid-beat art actions always emit, even when the stack is unchanged", () => {
+  const Dm = doc([{ id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
+    { kind: "art", art: { to: "1.01", mode: "fade" } }, { kind: "wait", ms: 500 },
+  ] }] }]);
+  expect(artEvents(Dm)).toHaveLength(2);
+});
+
+test("durationMs overrides the mode default on a non-cut mode", () => {
+  const Dd = doc([{ id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "fade", durationMs: 200 }, timeline: [{ kind: "wait", ms: 1000 }] }] }]);
+  const ev = artEvents(Dd);
+  expect(ev[0].duration).toBeCloseTo(0.2, 9);
+  expect(artAt(ev, 0.2)).toEqual([{ asset: "1.01", opacity: 1, scale: 1, z: 1, overlay: false }]);
+  expect(op(artAt(ev, 0.1), "1.01")).toBeCloseTo(power2InOut(0.5), 6);
+});
+
+test("an overlay leaving fades out with power2.inOut and keeps its old z", () => {
+  const Do = doc([{ id: "s", beats: [{ id: "a", art: { to: ["1.01", "MusicScore"], mode: "cut" }, timeline: [
+    { kind: "art", art: { to: "1.02", mode: "fade", keep: ["1.01"], out: ["MusicScore"] } }, { kind: "wait", ms: 2000 },
+  ] }] }]);
+  const ev = artEvents(Do);
+  const l = artAt(ev, 0.35).find((x) => x.asset === "MusicScore")!;
+  expect(l.opacity).toBeCloseTo(1 - power2InOut(0.5), 6);
+  expect(l.z).toBe(2);
+  expect(l.overlay).toBe(true);
+  expect(artAt(ev, 0.8).map((x) => x.asset)).toEqual(["1.01", "1.02"]);
+});
+
+test("a beat starting at/after a pinned boundary emits none of its art", () => {
+  const Db = doc([{ id: "s", durationSec: 1, beats: [
+    { id: "a", art: { to: "1.01", mode: "cut" }, timeline: [{ kind: "wait", ms: 1000 }] },
+    { id: "b", art: { to: "1.02", mode: "cut" }, timeline: [{ kind: "art", art: { to: "3.01", mode: "cut" } }, { kind: "wait", ms: 500 }] },
+  ] }]);
+  expect(artEvents(Db).map((e) => e.to)).toEqual([["1.01"]]);
+});
+
+test("an unpinned scene's trailing zero-length beat with entry art is emitted at the scene end", () => {
+  const Dz = doc([{ id: "s", beats: [
+    { id: "a", art: { to: "1.01", mode: "cut" }, timeline: [{ kind: "wait", ms: 1000 }] },
+    { id: "b", art: { to: "1.02", mode: "cut" }, timeline: [] },
+  ] }]);
+  expect(artEvents(Dz).map((e) => [e.start, e.to])).toEqual([[0, ["1.01"]], [1, ["1.02"]]]);
+});

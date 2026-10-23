@@ -20,6 +20,8 @@ export function power2InOut(p: number): number { return p < 0.5 ? 4 * p * p * p 
 export function backOut2(p: number): number { const q = p - 1; return 1 + 3 * q * q * q + 2 * q * q; }
 
 export interface ArtEvent { start: number; duration: number; mode: ArtMode; to: StoryAsset[] }  // seconds
+/** `z` is authoritative for stacking; array order only breaks ties. Incoming/kept layers take z from
+ *  the target stack order; outgoing layers keep the z they had (GSAP parity). */
 export interface ArtLayerState { asset: StoryAsset; opacity: number; scale: number; z: number; overlay: boolean }
 
 const seconds = (art: ArtTransition) => (art.durationMs ?? ART_DURATION_MS[art.mode]) / 1000;
@@ -30,8 +32,12 @@ const seconds = (art: ArtTransition) => (art.durationMs ?? ART_DURATION_MS[art.m
 export function artEvents(doc: DeckDoc): ArtEvent[] {
   const out: ArtEvent[] = [];
   let stack: StoryAsset[] = [];
-  const push = (start: number, art: ArtTransition) => {
-    stack = applyArt(stack, art);
+  const push = (start: number, art: ArtTransition, entry = false) => {
+    const next = applyArt(stack, art);
+    // An entry art that folds to the identical stack is a no-op in ArtStage.show() (sameStack), so a
+    // still-running fade continues. Mid-beat art actions always emit.
+    if (entry && next.length === stack.length && next.every((a, i) => a === stack[i])) return;
+    stack = next;
     out.push({ start, duration: art.mode === "cut" ? 0 : seconds(art), mode: art.mode, to: [...stack] });
   };
   for (const s of deckLayout(doc).scenes) {
@@ -41,7 +47,7 @@ export function artEvents(doc: DeckDoc): ArtEvent[] {
       if (!reached(b.start)) continue;
       const beat = scene.beats[b.beatIdx];
       const beatStart = s.start + b.start;
-      if (beat.art) push(beatStart, beat.art);
+      if (beat.art) push(beatStart, beat.art, true);
       for (const w of beatTimeline(beat.timeline)) {
         if (w.action.kind === "art" && reached(b.start + w.start)) push(beatStart + w.start, w.action.art);
       }
@@ -50,7 +56,8 @@ export function artEvents(doc: DeckDoc): ArtEvent[] {
   return out;
 }
 
-/** The art layer stack at deck time T, with crossfade opacities. Each event is evaluated up to the
+/** The art layer stack at deck time T, with crossfade opacities. Paint by `z` (array order only
+ *  breaks ties — outgoing layers are listed first but keep their old z). Each event is evaluated up to the
  *  next event's start (or T): kept layers sit at 1 (as ArtStage's reuse snaps them), incoming
  *  layers ease in, outgoing layers ease out from their opacity when the event began. */
 export function artAt(events: ArtEvent[], T: number): ArtLayerState[] {
