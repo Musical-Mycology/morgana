@@ -76,6 +76,30 @@ describe("cameraEvents", () => {
     expect(end.x).toBeCloseTo(0.8);
     expect(end.y).toBeCloseTo(0.5);
   });
+  test("a 0 ms cut is not merged into a same-instant move: the cut lands, then the move runs from it", () => {
+    const d = deck([{ id: "s", beats: [{ id: "a", timeline: [cam({ zoom: 3, x: 0.3, y: 0.3 }, 0), cam({ x: 0.7 }, 4000), { kind: "wait", ms: 5000 }] }] }]);
+    const evs = cameraEvents(d);
+    expect(evs).toEqual([
+      { start: 0, duration: 0, to: { zoom: 3, x: 0.3, y: 0.3 }, ease: "inOut" },
+      { start: 0, duration: 4, to: { x: 0.7 }, ease: "inOut" },
+    ]);
+    const at0 = cameraAt(evs, 0);
+    expect(at0.zoom).toBeCloseTo(3);
+    expect(at0.x).toBeCloseTo(0.3);
+    expect(at0.y).toBeCloseTo(0.3);
+    const mid = cameraAt(evs, 2);
+    expect(mid.zoom).toBeCloseTo(3);
+    expect(mid.x).toBeCloseTo(0.5); // inOut at p = 0.5: halfway from 0.3 to 0.7
+    expect(mid.y).toBeCloseTo(0.3);
+    expect(cameraAt(evs, 4).x).toBeCloseTo(0.7);
+  });
+  test("a move folded into a same-start cut becomes a cut, so a further same-start move follows it", () => {
+    const d = deck([{ id: "s", beats: [{ id: "a", timeline: [cam({ zoom: 2 }, 1000), cam({ zoom: 3 }, 0), cam({ x: 0.6 }, 2000)] }] }]);
+    expect(cameraEvents(d)).toEqual([
+      { start: 0, duration: 0, to: { zoom: 3 }, ease: "inOut" },
+      { start: 0, duration: 2, to: { x: 0.6 }, ease: "inOut" },
+    ]);
+  });
   test("a beat starting past a pinned scene's cut produces no event", () => {
     const d = deck([{ id: "s", durationSec: 2, beats: [
       { id: "a", timeline: [{ kind: "wait", ms: 3000 }] },

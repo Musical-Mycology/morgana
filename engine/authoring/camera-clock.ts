@@ -27,6 +27,12 @@ export function cameraEase(e: CameraEase, p: number): number {
   }
 }
 
+/** Whether a camera action starting at `start` folds into the event before it (cameraEvents): only
+ *  when they share a start and that event is a move (duration > 0), not a cut. Shared with lint. */
+export function mergesInto(prev: Pick<CameraEvent, "start" | "duration"> | undefined, start: number): boolean {
+  return !!prev && prev.start === start && prev.duration > 0;
+}
+
 export function cameraEvents(doc: DeckDoc): CameraEvent[] {
   const out: CameraEvent[] = [];
   for (const s of deckLayout(doc).scenes) {
@@ -40,8 +46,9 @@ export function cameraEvents(doc: DeckDoc): CameraEvent[] {
         const ev: CameraEvent = { start: s.start + b.start + w.start, duration: (a.durationMs ?? CAMERA_DEFAULT_MS) / 1000, to: { ...a.to }, ease: a.ease ?? "inOut" };
         // Camera actions take no timeline time, so back-to-back ones share a start: fold them into one
         // move (later fields, duration and ease win) instead of letting the later one supersede at p = 0.
+        // A 0 ms cut is never folded into: a cut then a same-instant move is the cut, then the move from it.
         const prev = out[out.length - 1];
-        if (prev && prev.start === ev.start) { prev.to = { ...prev.to, ...ev.to }; prev.duration = ev.duration; prev.ease = ev.ease; }
+        if (mergesInto(prev, ev.start)) { prev!.to = { ...prev!.to, ...ev.to }; prev!.duration = ev.duration; prev!.ease = ev.ease; }
         else out.push(ev);
       }
     }
