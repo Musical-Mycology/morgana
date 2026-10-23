@@ -7,6 +7,13 @@ import { deckLayout } from "@/engine/authoring/deck-clock";
 import type { DeckDoc } from "@/engine/deck-doc";
 import { NOTE_GLYPHS, storyAssetUrl } from "@/engine/deck/story-assets";
 
+// pendingVideoSeeks is test-controlled; everything else in video-sync stays real.
+const seeks = vi.hoisted(() => ({ impl: null as null | (() => Promise<string[]>), calls: 0 }));
+vi.mock("@/engine/components/video-sync", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/engine/components/video-sync")>();
+  return { ...real, pendingVideoSeeks: () => { seeks.calls++; return seeks.impl ? seeks.impl() : real.pendingVideoSeeks(); } };
+});
+
 // jsdom has neither HTMLImageElement.decode nor document.fonts. `decoded` records every decode
 // (detached preload Images included); a src matching `broken` rejects.
 let broken: RegExp | null = null;
@@ -18,7 +25,7 @@ beforeAll(() => {
   };
   Object.defineProperty(document, "fonts", { value: { ready: Promise.resolve() }, configurable: true });
 });
-beforeEach(() => { broken = null; decoded.length = 0; });
+beforeEach(() => { broken = null; decoded.length = 0; seeks.impl = null; seeks.calls = 0; });
 afterEach(cleanup);
 
 type Ready = Extract<NonNullable<Window["__morganaRender"]>, { ready: true }>;
@@ -71,6 +78,27 @@ test("an <img> that fails to decode is reported once (newly failed srcs only); f
   const first = await r.renderFrame(2.95); // 1.02 is mounted mid-crossfade
   expect(first.failed).toEqual([expect.stringMatching(/\/storyboard\/panels\/1\.02\.jpg$/)]);
   expect((await r.renderFrame(3.0)).failed).toEqual([]);
+});
+
+test("renderFrame waits for pending clip seeks; their failed srcs join (and dedupe with) the image failures", async () => {
+  broken = /1\.02\.jpg$/;
+  render(<RenderStage doc={D} />);
+  const r = await ready();
+  let release!: (failed: string[]) => void;
+  seeks.impl = () => new Promise<string[]>((res) => { release = res; });
+  let done = false;
+  const p = r.renderFrame(2.95).then((x) => { done = true; return x; });
+  await waitFor(() => expect(seeks.calls).toBe(1));
+  await new Promise((res) => setTimeout(res, 50));
+  expect(done).toBe(false); // still waiting on the seeks
+  const img = expect.stringMatching(/\/storyboard\/panels\/1\.02\.jpg$/);
+  const jpg = new URL("/storyboard/panels/1.02.jpg", document.baseURI).href;
+  release(["http://x/media/a.mp4", jpg]); // the jpg also fails as an <img>: reported once
+  const first = await p;
+  expect(first.failed).toEqual(["http://x/media/a.mp4", img]);
+  expect(first.failed).toHaveLength(2);
+  seeks.impl = () => Promise.resolve(["http://x/media/a.mp4", "http://x/media/b.webm"]);
+  expect((await r.renderFrame(3.0)).failed).toEqual(["http://x/media/b.webm"]);
 });
 
 test("renderFrame resolves with the art at mid-crossfade opacities", async () => {

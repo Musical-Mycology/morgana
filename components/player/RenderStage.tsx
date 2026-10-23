@@ -4,9 +4,10 @@ import { flushSync } from "react-dom";
 import type { DeckDoc } from "@/engine/deck-doc";
 import { NOTE_GLYPHS } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
+import { pendingVideoSeeks } from "@/engine/components/video-sync";
 import { useDeckStage } from "./DeckStage";
 
-/** What one rendered frame reports back: image srcs that failed to decode for the FIRST time
+/** What one rendered frame reports back: image or clip srcs that failed for the FIRST time
  *  (each src is reported once per page; the frame shows whatever the browser shows). */
 export interface RenderFrameResult { failed: string[] }
 
@@ -60,6 +61,9 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
           // query always sees the NEW beat's <img>s rather than racing React's scheduler.
           flushSync(() => apply(T));
           await nextFrame();
+          // Every clip seek this apply issued (stage clipMode is always "seek" here) must present its
+          // frame before the screenshot; a clip that errors or never lands is reported, not awaited forever.
+          (await pendingVideoSeeks()).forEach(fail);
           const imgs = Array.from(document.querySelectorAll<HTMLImageElement>("[data-render-root] img"));
           // A broken image is tolerated: the frame shows what the browser shows; the CLI warns once.
           await Promise.all(imgs.map((img) => img.decode().catch(() => fail(img.currentSrc || img.src))));

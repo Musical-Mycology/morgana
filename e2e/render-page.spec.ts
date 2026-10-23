@@ -1,4 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const id = "e2e-render";
 // Beat a: nightlight 0 -> 0.8 over 0.5-1.1 s, and a slow (1.6 s) "Alpha line" fade-in from 0.5 s, so both
@@ -98,6 +100,125 @@ test.describe("determinism", () => {
       return ["--font-display", "--font-body", "--font-cursive"].map((v) => document.fonts.check(`400 1em ${css.getPropertyValue(v).split(",")[0]}`));
     });
     expect(loaded).toEqual([true, true, true]);
+  });
+});
+
+const fixture = (name: string) => readFileSync(fileURLToPath(new URL(`./fixtures/media/${name}`, import.meta.url)));
+async function upload(request: APIRequestContext, deck: string, name: string, mimeType: string): Promise<string> {
+  const res = await request.post(`/api/decks/${deck}/media`, { multipart: { file: { name, mimeType, buffer: fixture(name) } } });
+  expect(res.status()).toBe(201);
+  return `media:${(await res.json()).id}`;
+}
+
+test.describe("clips", () => {
+  // Per-worker id: --repeat-each runs this describe in parallel workers, which must not share a deck.
+  let clipsId = "";
+  test.beforeEach(async ({ request }, info) => {
+    clipsId = `e2e-render-clips-${info.parallelIndex}`;
+    await request.delete(`/api/decks/${clipsId}`).catch(() => {});
+    await request.post("/api/decks", { data: { id: clipsId, title: "Render clips" } });
+  });
+  test.afterEach(async ({ request }) => { await request.delete(`/api/decks/${clipsId}`); });
+
+  test("clips are deterministic: stepped and jumped frames are byte-equal, across a clip crossfade, a tile loop and a backward jump", async ({ page, request }) => {
+    const h264 = await upload(request, clipsId, "clip-h264.mp4", "video/mp4");
+    const vp9 = await upload(request, clipsId, "clip-vp9.webm", "video/webm");
+    // Beat a (0-2 s): the h264 clip from its 0.5 s in-point. Beat b (2-5 s): crossfade to the vp9 clip
+    // (2.0-2.9 s) and a looping h264 tile from ~2 s, so by 4.6 the 2 s tile clip has wrapped.
+    const clipDoc = { version: 1, meta: { id: clipsId, title: "Render clips" }, scenes: [{ id: "s0", beats: [
+      { id: "a", art: { to: h264, mode: "crossfade", clips: { [h264]: { in: 0.5 } } }, timeline: [{ kind: "wait", ms: 2000 }] },
+      { id: "b", art: { to: vp9, mode: "crossfade" }, timeline: [
+        { kind: "media", id: "tile", pos: { x: 0.6, y: 0.2 }, width: 0.3, src: h264, clip: { loop: true } }, { kind: "wait", ms: 3000 },
+      ] },
+    ] }] };
+    expect((await request.put(`/api/decks/${clipsId}`, { data: clipDoc })).status()).toBe(200);
+
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto(`/render?deck=${clipsId}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+
+    const frame = (t: number) => page.evaluate(async (t) => {
+      const r = window.__morganaRender!;
+      if (!r.ready) throw new Error("not ready");
+      return (await r.renderFrame(t)).failed;
+    }, t);
+    const capture = async () => {
+      const png = await page.screenshot();
+      const dom = await page.evaluate(() => ({
+        layers: [...document.querySelectorAll<HTMLElement>(".artstage__layer")].map((e) => [e.dataset.asset, e.style.opacity]),
+        videos: [...document.querySelectorAll<HTMLVideoElement>("[data-render-root] video")].map((v) => [
+          v.classList.contains("artstage__layer") ? v.dataset.asset : `tile:${v.closest<HTMLElement>(".cin__media")?.dataset.mediaSrc}`,
+          Math.round(v.currentTime * 1000) / 1000,
+        ] as [string, number]),
+      }));
+      return { png, dom };
+    };
+    const timeOf = (dom: { videos: [string, number][] }, key: string) => dom.videos.find((v) => v[0] === key)?.[1];
+
+    const failed: string[] = [];
+    const step = async (ts: number[]) => { for (const t of ts) failed.push(...await frame(t)); };
+
+    await step([0, 0.3, 0.6, 0.9, 1.2]);
+    const stepA = await capture();
+    await step([1.5, 1.8, 2.1, 2.3]);
+    const stepCross = await capture();
+    await step([2.6, 3.0, 3.4, 3.8, 4.2, 4.6]);
+    const stepLoop = await capture();
+    // Only the clips matter here (storyboard glyphs may be absent from a dev checkout).
+    expect(failed.filter((src) => src.includes("/media/"))).toEqual([]);
+
+    // Sanity: the compared frames show what they claim to.
+    expect(Math.abs(timeOf(stepA.dom, h264)! - (0.5 + 1.2))).toBeLessThanOrEqual(1e-3);
+    expect(stepCross.dom.layers.map((l) => l[0]).sort()).toEqual([h264, vp9].sort());
+    expect(stepCross.dom.videos.map((v) => v[0])).toContain(`tile:${h264}`);
+    const tileT = timeOf(stepLoop.dom, `tile:${h264}`)!;
+    expect(tileT).toBeGreaterThanOrEqual(0);
+    expect(tileT).toBeLessThan(2); // 2.6 s on screen, a 2 s clip: it wrapped
+
+    // Jump forward from the start to mid-crossfade, and to the wrapped tile.
+    await frame(0);
+    await frame(2.3);
+    const jumpCross = await capture();
+    expect(jumpCross.dom).toEqual(stepCross.dom);
+    expect(jumpCross.png.equals(stepCross.png)).toBe(true);
+
+    await frame(0);
+    await frame(4.6);
+    const jumpLoop = await capture();
+    expect(jumpLoop.dom).toEqual(stepLoop.dom);
+    expect(jumpLoop.png.equals(stepLoop.png)).toBe(true);
+
+    // Jump backward across the beat boundary: the h264 art layer is re-created and seeked.
+    await frame(1.2);
+    const jumpBack = await capture();
+    expect(jumpBack.dom).toEqual(stepA.dom);
+    expect(jumpBack.png.equals(stepA.png)).toBe(true);
+  });
+
+  test("a clip whose media is missing is reported failed and the frame does not hang", async ({ page, request }) => {
+    const missing = "media:0000000000000000.mp4";
+    const missingDoc = { version: 1, meta: { id: clipsId, title: "Render clips" }, scenes: [{ id: "s0", beats: [
+      { id: "a", art: { to: missing, mode: "fade" }, timeline: [{ kind: "wait", ms: 1000 }] },
+    ] }] };
+    expect((await request.put(`/api/decks/${clipsId}`, { data: missingDoc })).status()).toBe(200);
+    await page.goto(`/render?deck=${clipsId}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+
+    const res = await page.evaluate(async () => {
+      const r = window.__morganaRender!;
+      if (!r.ready) throw new Error("not ready");
+      const t0 = performance.now();
+      const out = await Promise.race([
+        r.renderFrame(0.5).then((x) => x.failed),
+        new Promise<null>((res) => setTimeout(() => res(null), 10_000)),
+      ]);
+      const src = document.querySelector<HTMLVideoElement>(`video.artstage__layer[data-asset="media:0000000000000000.mp4"]`)?.src;
+      return { failed: out, ms: performance.now() - t0, src };
+    });
+    expect(res.failed, "renderFrame(0.5) did not resolve within 10 s").not.toBeNull();
+    expect(res.src).toMatch(/\/media\/0000000000000000\.mp4$/);
+    expect(res.failed).toContain(res.src);
+    expect(res.ms).toBeLessThan(10_000);
   });
 });
 
