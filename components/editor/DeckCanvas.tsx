@@ -13,7 +13,7 @@ import { getPath } from "@/lib/editor/paths";
 import { beatLocation, type FlatBeat } from "@/lib/editor/flatten-beats";
 import { ObjectsLayer } from "./ObjectsLayer";
 import { ObjectStage, type ObjectStageHandle } from "./ObjectStage";
-import { CameraPick, type CameraPickPoint } from "./CameraPick";
+import { CameraPick, effectiveZoom, type CameraPickPoint } from "./CameraPick";
 
 export interface CanvasHandle { seek: (t: number) => void; play: () => void; pause: () => void; }
 
@@ -85,7 +85,11 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     useEffect(() => { if (picking) cancel(); draw(); }, [picking]);
 
     return (
-      <div ref={host} className="ed__canvas-host" style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", maxHeight: "100%", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
+      // Exactly 16:9 in any pane shape: the width is the smaller of the parent's width and the pane's
+      // height x 16/9 (the editor's .ed__canvas is a size container; with none, cqh is the viewport
+      // height), and the height follows from aspect-ratio. (A 100% width with a max-height cap went
+      // wider than 16:9 in a short pane, so picks landed off.)
+      <div ref={host} className="ed__canvas-host" style={{ position: "relative", flex: "none", width: "min(100%, 100cqh * 16 / 9)", aspectRatio: "16 / 9", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
         {/* clipPlayback off: the editor paints through seek.ts (no deck clock), so a clip shows its
             in-point frame, paused (spec §4 "Editor canvas", §6). */}
         <ArtStage ref={art} nightlight={night} reduced={false} transparentBg clipPlayback={false} />
@@ -107,7 +111,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
         <ObjectStage ref={objStage} scene={scene ?? { id: "", beats: [] }} active={preview} />
         <PosHandle hostRef={host} redraw={draw} />
         {!preview && <ObjectsLayer hostRef={host} />}
-        {picking && <PickLayer action={pickAction} />}
+        {picking && <PickLayer action={pickAction} zoom={effectiveZoom(flat!.beat.timeline, selectedAction!, beatStart, camEvents)} />}
       </div>
     );
   },
@@ -156,8 +160,8 @@ function PosHandle({ hostRef, redraw }: { hostRef: React.RefObject<HTMLDivElemen
 }
 
 /** Pick on canvas for the selected camera action: one click writes `to` whole ({...to, x, y}) — one
- *  undo step — and leaves pick mode; Esc just leaves it. */
-function PickLayer({ action }: { action: Extract<Action, { kind: "camera" }> }) {
+ *  undo step — and leaves pick mode; Esc just leaves it. `zoom` is the action's effective zoom. */
+function PickLayer({ action, zoom }: { action: Extract<Action, { kind: "camera" }>; zoom: number }) {
   const selected = useEditor((s) => s.selected);
   const selectedAction = useEditor((s) => s.selectedAction);
   const updateAction = useEditor((s) => s.updateAction);
@@ -168,5 +172,6 @@ function PickLayer({ action }: { action: Extract<Action, { kind: "camera" }> }) 
     if (selectedAction != null && (p.x !== to.x || p.y !== to.y)) updateAction(selected, selectedAction, "to", { ...to, x: p.x, y: p.y });
     setCameraPick(false);
   };
-  return <CameraPick zoom={to.zoom ?? 1} at={to} onPick={onPick} onCancel={() => setCameraPick(false)} />;
+  // A `to` without zoom keeps the zoom in effect: frame the pick rect at that (effectiveZoom).
+  return <CameraPick zoom={zoom} at={to} onPick={onPick} onCancel={() => setCameraPick(false)} />;
 }

@@ -59,9 +59,12 @@ describe("camera action", () => {
     expect(d.defaults()).toEqual({ kind: "camera", to: { zoom: 2, x: 0.5, y: 0.5 }, durationMs: 1200, ease: "inOut" } satisfies Action);
     const by = Object.fromEntries(d.schema.map((f) => [f.key, f]));
     expect(d.schema.map((f) => f.key).sort()).toEqual(["durationMs", "ease", "to.x", "to.y", "to.zoom"]);
-    expect(by["to.zoom"]).toMatchObject({ type: "range", min: 1, max: 8, step: 0.05 });
-    expect(by["to.x"]).toMatchObject({ type: "number", min: 0, max: 1, step: 0.01 });
-    expect(by["to.y"]).toMatchObject({ type: "number", min: 0, max: 1, step: 0.01 });
+    // Optional (final review I4b): a left-out field inherits, so the zoom is a number box that can be
+    // empty ("inherit"), not a slider that always shows a value.
+    expect(by["to.zoom"]).toMatchObject({ type: "number", min: 1, max: 8, step: 0.05, optional: true });
+    expect(by["to.x"]).toMatchObject({ type: "number", min: 0, max: 1, step: 0.01, optional: true });
+    expect(by["to.y"]).toMatchObject({ type: "number", min: 0, max: 1, step: 0.01, optional: true });
+    expect(by.durationMs.optional).toBeUndefined();
     expect(by.durationMs).toMatchObject({ type: "number", min: 0, step: 50 });
     expect(by.ease.type).toBe("select");
     expect(by.ease.options?.map((o) => o.value)).toEqual(["inOut", "in", "out", "linear"]);

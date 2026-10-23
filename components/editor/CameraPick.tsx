@@ -1,8 +1,31 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { clampFraming } from "@/engine/authoring/camera-clock";
+import { cameraAt, clampFraming, type CameraEvent } from "@/engine/authoring/camera-clock";
+import { beatTimeline } from "@/engine/authoring/beat-clock";
+import type { Action } from "@/engine/deck/types";
 
 export interface CameraPickPoint { x: number; y: number }
+
+/** The zoom a camera action frames at, for Pick: its own `to.zoom`, else the zoom it keeps — the zoom
+ *  in effect at its start (deck `events` strictly before it, a move in flight included), overridden by
+ *  the zoom of any earlier camera action in this beat at the same instant (a same-start move it folds
+ *  into, or a cut it follows). `beatStart` is the beat's deck start. */
+export function effectiveZoom(timeline: Action[], actionIdx: number, beatStart: number, events: CameraEvent[]): number {
+  const windows = beatTimeline(timeline);
+  const self = windows[actionIdx];
+  const a = timeline[actionIdx];
+  if (!self || a?.kind !== "camera") return 1;
+  if (a.to?.zoom !== undefined) return clampFraming({ x: 0.5, y: 0.5, zoom: a.to.zoom }).zoom;
+  const start = beatStart + self.start;
+  let zoom = cameraAt(events.filter((e) => e.start < start - 1e-9), start).zoom;
+  for (let i = 0; i < actionIdx; i++) {
+    const w = windows[i];
+    if (w.action.kind === "camera" && Math.abs(w.start - self.start) <= 1e-9 && w.action.to?.zoom !== undefined) {
+      zoom = clampFraming({ x: 0.5, y: 0.5, zoom: w.action.to.zoom }).zoom;
+    }
+  }
+  return zoom;
+}
 
 /** Round a clamped coordinate to 4 decimals without leaving its clamp range [m, 1 − m]: a bound like
  *  0.5/7 = 0.071428… would round to 0.0714, just outside, so an out-of-range result rounds inward. */

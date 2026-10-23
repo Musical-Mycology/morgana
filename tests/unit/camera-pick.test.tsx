@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { CameraPick } from "@/components/editor/CameraPick";
+import { CameraPick, effectiveZoom } from "@/components/editor/CameraPick";
 import { DeckCanvas } from "@/components/editor/DeckCanvas";
 import { Inspector } from "@/components/editor/Inspector";
 import { useEditor } from "@/lib/editor/store";
-import { clampFraming } from "@/engine/authoring/camera-clock";
+import { cameraAt, cameraEvents, clampFraming } from "@/engine/authoring/camera-clock";
 import type { DeckDoc } from "@/engine/deck-doc";
 
 // jsdom's fireEvent.pointerMove drops clientX/clientY; dispatch a MouseEvent of the pointer type.
@@ -146,5 +146,58 @@ describe("Inspector: Pick on canvas", () => {
     act(() => useEditor.getState().setCameraPick(true));
     act(() => useEditor.getState().selectAction(1));
     expect(useEditor.getState().cameraPick).toBe(false);
+  });
+});
+
+// Final review I4a: a camera action that leaves `to.zoom` out keeps the zoom in effect, so Pick must
+// frame against that effective zoom, not 1.
+describe("Pick on canvas: the effective zoom of a partial `to`", () => {
+  const partial = (): DeckDoc => ({ version: 1, meta: { id: "d", title: "D" }, scenes: [
+    { id: "s1", beats: [{ id: "b1", timeline: [
+      { kind: "camera", to: { zoom: 4 }, durationMs: 0 },
+      { kind: "wait", ms: 500 },
+      { kind: "camera", to: { x: 0.5, y: 0.5 }, durationMs: 600 },
+      { kind: "wait", ms: 1000 },
+    ] }] },
+  ] }) as DeckDoc;
+  beforeEach(() => act(() => { useEditor.getState().load(partial()); useEditor.getState().selectAction(2); }));
+
+  it("a pan with no zoom picks against the zoom already in effect (4), not 1", () => {
+    render(<><Inspector /><DeckCanvas flat={useEditor.getState().beats[0]} /></>);
+    fireEvent.click(screen.getByTestId("camera-pick"));
+    const overlay = screen.getByTestId("camera-pick-overlay");
+    expect(screen.getByTestId("camera-pick-rect").style.width).toBe("25%");
+    stubRect(overlay);
+    fireEvent.click(overlay, { clientX: 0.9 * W, clientY: 0.1 * H });
+    // Clamped for zoom 4 (0.125 … 0.875); at zoom 1 it would have been pinned to the centre.
+    expect(useEditor.getState().doc!.scenes[0].beats[0].timeline[2]).toEqual({ kind: "camera", to: { x: 0.875, y: 0.125 }, durationMs: 600 });
+  });
+});
+
+describe("effectiveZoom", () => {
+  const cam = (to: Record<string, number>, durationMs: number) => ({ kind: "camera" as const, to, durationMs });
+  const at = (timeline: DeckDoc["scenes"][0]["beats"][0]["timeline"], actionIdx: number, beatStart = 0, prior: DeckDoc["scenes"][0]["beats"][0]["timeline"] = []) => {
+    const d = { version: 1, meta: { id: "d", title: "D" }, scenes: [
+      ...(prior.length ? [{ id: "s0", beats: [{ id: "p", timeline: prior }] }] : []),
+      { id: "s1", beats: [{ id: "b", timeline }] },
+    ] } as DeckDoc;
+    return effectiveZoom(timeline, actionIdx, beatStart, cameraEvents(d));
+  };
+  it("an explicit to.zoom wins", () => {
+    expect(at([cam({ zoom: 4 }, 0), { kind: "wait", ms: 100 }, cam({ zoom: 2.5 }, 500)], 2)).toBe(2.5);
+  });
+  it("no zoom: the zoom in effect at the action's start (a finished earlier move)", () => {
+    expect(at([cam({ zoom: 3 }, 400), { kind: "wait", ms: 1000 }, cam({ x: 0.7 }, 500)], 2)).toBeCloseTo(3);
+  });
+  it("no zoom: a move still in flight counts at its mid-flight zoom", () => {
+    expect(at([cam({ zoom: 4 }, 2000, ), { kind: "wait", ms: 1000 }, cam({ x: 0.7 }, 500)], 2)).toBeCloseTo(cameraAt(cameraEvents({ version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s", beats: [{ id: "b", timeline: [cam({ zoom: 4 }, 2000)] }] }] } as DeckDoc), 1).zoom);
+  });
+  it("no zoom: an earlier same-instant action's zoom counts (a merged move or a cut before it)", () => {
+    expect(at([cam({ zoom: 4 }, 500), cam({ x: 0.8 }, 1000)], 1)).toBe(4);
+    expect(at([cam({ zoom: 3, x: 0.3 }, 0), cam({ x: 0.7 }, 4000)], 1)).toBe(3);
+  });
+  it("no zoom and nothing before: 1; a framing from an earlier scene carries over", () => {
+    expect(at([cam({ x: 0.7 }, 500)], 0)).toBe(1);
+    expect(at([cam({ x: 0.7 }, 500)], 0, 1, [cam({ zoom: 2 }, 0), { kind: "wait", ms: 1000 }])).toBeCloseTo(2);
   });
 });

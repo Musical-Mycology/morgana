@@ -49,6 +49,22 @@ export function Field({ spec, value, onChange, extra }: { spec: FieldSpec; value
             </option>
           ))}
         </select>
+      ) : spec.type === "number" && spec.optional ? (
+        // Optional (camera `to`): unset shows empty with an "inherit" placeholder; clearing deletes the key.
+        <input
+          type="number"
+          style={base}
+          min={spec.min}
+          max={spec.max}
+          step={spec.step}
+          placeholder="inherit"
+          value={typeof value === "number" && Number.isFinite(value) ? value : ""}
+          onChange={(e) => {
+            if (e.target.value === "") { onChange(undefined); return; }
+            const n = parseFloat(e.target.value);
+            if (Number.isFinite(n)) onChange(n);
+          }}
+        />
       ) : spec.type === "range" || spec.type === "number" ? (
         <input
           type={spec.type === "range" ? "range" : "number"}

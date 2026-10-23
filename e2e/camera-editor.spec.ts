@@ -63,3 +63,41 @@ test("add a Camera action, Pick on canvas near an edge (clamped), and the canvas
   expect(objChain.length).toBeGreaterThanOrEqual(2);
   for (const tf of objChain) expect(tf).toBe("none");
 });
+
+// Final review Minor 2: the canvas host must be exactly 16:9 in every pane shape — a box wider than
+// 16:9 (a 100% width under a max-height cap) put picks off the framing they showed.
+test("the editor canvas host is exactly 16:9 in a short, wide pane and in a tall, narrow one", async ({ page, request }) => {
+  await request.delete(`/api/decks/${id}`).catch(() => {});
+  const doc = { version: 1, meta: { id, title: "Camera editor" }, scenes: [
+    { id: "s", beats: [{ id: "a", timeline: [{ kind: "camera", to: { zoom: 2 } }, { kind: "wait", ms: 2000 }] }] },
+  ] };
+  await request.post("/api/decks", { data: { id, title: "Camera editor" } });
+  await request.put(`/api/decks/${id}`, { data: doc });
+  const ratio = async () => {
+    const host = (await page.locator(".ed__canvas-host").boundingBox())!;
+    const pane = (await page.locator(".ed__canvas").boundingBox())!;
+    return { r: host.width / host.height, host, pane };
+  };
+  for (const vp of [{ width: 1600, height: 600 }, { width: 1000, height: 1000 }]) {
+    await page.setViewportSize(vp);
+    await page.goto(`/editor?deck=${id}`);
+    await expect(page.locator(".ed__canvas-host")).toBeVisible();
+    const { r, host, pane } = await ratio();
+    expect(Math.abs(r / (16 / 9) - 1), `${vp.width}x${vp.height}: host ${host.width}x${host.height}`).toBeLessThanOrEqual(0.005);
+    // It fills the pane in the binding direction (minus the pane's 16px padding) and fits inside it.
+    expect(host.width).toBeLessThanOrEqual(pane.width - 32 + 1);
+    expect(host.height).toBeLessThanOrEqual(pane.height - 32 + 1);
+    expect(Math.max(host.width / (pane.width - 32), host.height / (pane.height - 32))).toBeGreaterThan(0.99);
+  }
+
+  // In the short, wide pane the pick overlay (whose fractions become x/y) is 16:9 and covers exactly
+  // the art the canvas draws: a wider box would put a pick off the framing it showed.
+  await page.setViewportSize({ width: 1600, height: 600 });
+  await page.goto(`/editor?deck=${id}`);
+  await page.getByTestId("timeline").locator(".ed__chip").nth(0).click();
+  await page.getByTestId("camera-pick").click();
+  const overlay = (await page.getByTestId("camera-pick-overlay").boundingBox())!;
+  const art = (await page.locator(".ed__canvas .artstage").boundingBox())!;
+  expect(Math.abs(overlay.width / overlay.height / (16 / 9) - 1)).toBeLessThanOrEqual(0.005);
+  for (const k of ["x", "y", "width", "height"] as const) expect(Math.abs(overlay[k] - art[k]), `overlay vs art ${k}`).toBeLessThanOrEqual(1);
+});

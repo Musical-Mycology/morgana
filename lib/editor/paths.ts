@@ -9,6 +9,8 @@ export function setPath<T>(obj: T, path: string, value: unknown): T {
     cur[keys[i]] = { ...((cur[keys[i]] as Record<string, unknown>) ?? {}) };
     cur = cur[keys[i]] as Record<string, unknown>;
   }
-  cur[keys[keys.length - 1]] = value;
+  // undefined removes the key (an optional field cleared), rather than leaving `key: undefined`.
+  if (value === undefined) delete cur[keys[keys.length - 1]];
+  else cur[keys[keys.length - 1]] = value;
   return clone as T;
 }
