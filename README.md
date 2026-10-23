@@ -131,8 +131,8 @@ its soundtrack from a **running** Morgana (`npm run dev`, Docker, or the product
 deck must exist there and its soundtrack must be uploaded.
 
 **Prerequisites.** A running Morgana, and `ffmpeg` on your `PATH` (macOS: `brew install ffmpeg`;
-Debian/Ubuntu/WSL: `sudo apt install ffmpeg`). Set `FFMPEG_PATH` (and `FFPROBE_PATH`) to use
-binaries elsewhere. Chromium comes from Playwright (`npx playwright install chromium`).
+Debian/Ubuntu/WSL: `sudo apt install ffmpeg`). Set `FFMPEG_PATH` to use a binary elsewhere
+(the end-to-end render test also honours `FFPROBE_PATH`). Chromium comes from Playwright (`npx playwright install chromium`).
 
 ```bash
 npm run render -- --deck <id> --out talk.mp4
@@ -156,8 +156,8 @@ Frames are **deterministic**: the frame at time T renders identically however it
 AAC 192k, offset by `--from` so partial renders stay in sync, and padded with silence to the video
 length. A pinned scene with no beats shows the current art over a dark-brown background, not black.
 
-Progress goes to stderr about once a second (`frame i/N · x.x fps · ETA m:ss`); expect a few minutes
-for a 2:00 deck at the defaults. Ctrl-C stops cleanly (closes Chromium and ffmpeg and removes the
+Progress goes to stderr about once a second (`frame i/N · x.x fps · ETA m:ss`); a 2:00 deck at the defaults is
+3,600 frames, so render time depends on how fast your machine screenshots and encodes them. Ctrl-C stops cleanly (closes Chromium and ffmpeg and removes the
 partial output); a second Ctrl-C forces the exit.
 
 | Exit code | Meaning |
