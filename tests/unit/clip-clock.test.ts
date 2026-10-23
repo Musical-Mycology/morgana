@@ -32,3 +32,11 @@ test("an in-point past the end is clamped", () => {
 test("loop with duration <= in falls back to hold", () => {
   expect(clipTimeAt(0, 3, { in: 9, loop: true }, 5)).toBeCloseTo(5 - 0.001, 10);
 });
+
+test("a sub-millisecond duration never yields a negative clip time", () => {
+  expect(clipTimeAt(0, 3, undefined, 0.0005)).toBeGreaterThanOrEqual(0);
+});
+
+test("a non-finite in-point counts as 0", () => {
+  expect(clipTimeAt(0, 1, { in: NaN }, 5)).toBe(1);
+});
