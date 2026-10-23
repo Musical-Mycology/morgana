@@ -181,7 +181,8 @@ timeout covers a seek that never lands.
     or `POST /api/decks/<id>/media`.
   - The art and tile action docs mention `media:<id>` and `clips`/`clip`.
   - There is no binary upload tool.
-- **Lint** (`lintDeck` with `ctx.media?: MediaInfo[]`, which supersedes the bare `mediaIds`):
+- **Lint** (`LintContext` gains `media?: MediaInfo[]` alongside the existing `mediaIds`, which
+  the soundtrack rules keep using):
   - `media-missing` (warning): a ref whose id isn't in the deck's media.
   - `media-kind` (warning): audio used as art or tile, or a non-media ref in clip options.
   - `clip-in-past-end` (warning): `in ≥ durationSec`.
