@@ -132,9 +132,10 @@ transition** (it sets `transition: none` on the glow while state-driven). `show`
 
 ### 2.4 The fin end-card animation
 
-`CinematicSlide`'s `cin-ending-in` keyframes are disabled when the page carries
-`data-render="1"` on `<html>` (set by the render page). Interactive end-cards are not part of a
-rendered video.
+When the page carries `data-render="1"` on `<html>` (set by the render page), `CinematicSlide`'s
+`.cin__ending` end-card is hidden (`display: none`, and its `cin-ending-in` keyframes disabled).
+Interactive end-cards are not part of a rendered video. The same attribute hides Next's dev
+indicator (`nextjs-portal`), so a render against `npm run dev` stays clean.
 
 ---
 
@@ -147,12 +148,18 @@ rendered video.
   playback, `<html data-render="1">`.
 - Exposes `window.__morganaRender`:
   ```ts
-  { ready: true; total: number; renderFrame(T: number): Promise<void> }
+  { ready: true; total: number; renderFrame(T: number): Promise<{ failed: string[] }> }
   ```
   `renderFrame` applies `T` (beat swap + seek + art/night state), then waits until **every
   `<img>` in the stage is decoded** (`img.decode()`, errors tolerated and reported once),
-  `document.fonts.ready`, and two `requestAnimationFrame`s, then resolves. The CLI screenshots
-  only after it resolves.
+  `document.fonts.ready`, and two `requestAnimationFrame`s, then resolves with the srcs that
+  failed to decode for the first time (the CLI logs one warning per src, with frame and `T`).
+  The CLI screenshots only after it resolves.
+- Before `ready`, the page loads the deck's font families/weights (`document.fonts.load`, then
+  `document.fonts.ready`) **before the first beat mounts** (SplitText measures while building), and
+  preloads every NoteField glyph (CSS `mask-image` URLs, which `renderFrame` cannot see as `<img>`)
+  with `new Image()` + `decode()`; glyph failures go through the same once-per-src report.
+- `/render` without a deck id publishes `{ ready: false, error: "missing deck id" }`.
 - Load errors set `window.__morganaRender = { ready: false, error }` so the CLI can fail fast.
 
 To avoid duplicating the Player, the shared stage composition and the `apply(T)` body are

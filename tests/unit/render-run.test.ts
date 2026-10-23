@@ -1,8 +1,11 @@
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
-  CHROMIUM_LAUNCH_OPTIONS, exitCodeFor, KILL_WAIT_MS, RenderAbortedError, RenderPageError, RenderSetupError, runRender,
+  CHROMIUM_LAUNCH_OPTIONS, exitCodeFor, FRAME_TIMEOUT_MS, KILL_WAIT_MS, RenderAbortedError, RenderPageError, RenderSetupError, runRender,
   type FfmpegProcess, type RenderBrowser, type RenderDeps, type RenderPage,
 } from "@/lib/render/run";
 import { ffmpegArgs } from "@/lib/render/ffmpeg";
@@ -43,14 +46,19 @@ class FakeFfmpeg extends EventEmitter implements FfmpegProcess {
 }
 
 /** A page that runs the page functions against jsdom's `window`, so the real evaluate bodies execute. */
-function fakeBrowser(render: RenderGlobal | undefined) {
+function fakeBrowser(render: RenderGlobal | undefined, o: { hangReady?: boolean } = {}) {
   const calls = { goto: [] as string[], newPage: [] as unknown[], waitTimeout: 0, screenshots: 0, rendered: [] as number[] };
+  const errorListeners: ((message: string) => void)[] = [];
+  /** Simulate Playwright's `pageerror` (an uncaught exception in the page) or `crash`. */
+  const pageError = (message: string) => errorListeners.forEach((cb) => cb(message));
   const page: RenderPage = {
     goto: async (url) => { calls.goto.push(url); window.__morganaRender = render; },
     waitForFunction: async (fn, opts) => {
       calls.waitTimeout = opts.timeout;
+      if (o.hangReady) return new Promise(() => {});
       if (!fn()) throw Object.assign(new Error("Timeout 30000ms exceeded."), { name: "TimeoutError" });
     },
+    onError: (cb) => { errorListeners.push(cb); },
     evaluate: async (fn, arg) => fn(arg),
     screenshot: async () => { calls.screenshots++; return PNG; },
   };
@@ -58,11 +66,11 @@ function fakeBrowser(render: RenderGlobal | undefined) {
     newPage: async (o) => { calls.newPage.push(o); return page; },
     close: vi.fn(async () => {}),
   };
-  return { browser, calls };
+  return { browser, calls, pageError };
 }
 
-function readyRender(total: number, onFrame?: (T: number) => void | Promise<void>): RenderGlobal {
-  return { ready: true, total, renderFrame: async (T: number) => { await onFrame?.(T); } };
+function readyRender(total: number, onFrame?: (T: number) => void | string[] | Promise<void | string[]>): RenderGlobal {
+  return { ready: true, total, renderFrame: async (T: number) => ({ failed: (await onFrame?.(T)) ?? [] }) };
 }
 
 function deckResponse(meta: Record<string, unknown> = {}) {
@@ -71,7 +79,7 @@ function deckResponse(meta: Record<string, unknown> = {}) {
 
 function setup(opts: { render?: RenderGlobal; meta?: Record<string, unknown>; deckStatus?: number } = {}) {
   const ff = new FakeFfmpeg();
-  const { browser, calls } = fakeBrowser(opts.render ?? readyRender(0.3));
+  const { browser, calls, pageError } = fakeBrowser(opts.render ?? readyRender(0.3));
   const spawnArgs: string[][] = [];
   const logs: string[] = [];
   const fetched: string[] = [];
@@ -93,7 +101,7 @@ function setup(opts: { render?: RenderGlobal; meta?: Record<string, unknown>; de
     stat: vi.fn(async () => ({ size: 2_500_000 })),
     now: () => (clock += 1100),
   };
-  return { ff, browser, calls, spawnArgs, logs, fetched, deps };
+  return { ff, browser, calls, pageError, spawnArgs, logs, fetched, deps };
 }
 
 afterEach(() => { delete window.__morganaRender; });
@@ -404,6 +412,113 @@ describe("runRender — failures clean up", () => {
     await runRender(OPTS, { ...s.deps, onEmergencyCleanup: (fn) => { emergency = fn; } }).catch(() => {});
     emergency!();
     expect(s.deps.unlinkSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("runRender — final-review hardening", () => {
+  test("image decode failures reported by the page are warned once each, with the frame and T; the render continues", async () => {
+    const s = setup({ render: readyRender(0.3, (T) => (T === 0 ? ["/a.png"] : T === 0.1 ? ["/b.jpg", "/c.png"] : [])) });
+    const res = await runRender(OPTS, s.deps);
+    expect(res.frames).toBe(3);
+    expect(s.logs.filter((l) => l.startsWith("warning"))).toEqual([
+      "warning: frame 0 (T=0s): image failed to decode: /a.png",
+      "warning: frame 1 (T=0.1s): image failed to decode: /b.jpg",
+      "warning: frame 1 (T=0.1s): image failed to decode: /c.png",
+    ]);
+    expect(s.ff.writes).toHaveLength(3);
+  });
+
+  test("an existing --out survives a failure before any frame reached ffmpeg (frame 0)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morgana-run-test-"));
+    try {
+      const out = join(dir, "existing.mp4");
+      writeFileSync(out, "the user's previous render");
+      const s = setup({ render: readyRender(0.3, () => { throw new Error("boom"); }) });
+      const err = await runRender({ ...OPTS, out }, { ...s.deps, unlink: (p) => unlink(p) }).catch((e: Error) => e);
+      expect((err as Error).message).toMatch(/frame 0.*boom/);
+      expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(existsSync(out)).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test("the emergency cleanup before any frame reached ffmpeg leaves an existing --out alone", async () => {
+    let emergency: (() => void) | undefined;
+    const s = setup({ render: readyRender(0.3, () => { emergency!(); throw new Error("stop"); }) });
+    await runRender(OPTS, { ...s.deps, onEmergencyCleanup: (fn) => { emergency = fn; } }).catch(() => {});
+    expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(s.deps.unlinkSync).not.toHaveBeenCalled();
+  });
+
+  test("a deck response that is not JSON (wrong --base-url) is a RenderSetupError naming the base URL (exit 2)", async () => {
+    for (const body of ["<!doctype html><title>Some other app</title>", JSON.stringify({ hello: "world" })]) {
+      const s = setup();
+      s.deps.fetch = (async () => new Response(body, { status: 200, headers: { "content-type": "text/html" } })) as typeof fetch;
+      const err = await runRender(OPTS, s.deps).catch((e: Error) => e);
+      expect(err).toBeInstanceOf(RenderSetupError);
+      expect(exitCodeFor(err)).toBe(2);
+      expect((err as Error).message).toBe(`${BASE} does not look like a Morgana server`);
+      expect(s.deps.launchBrowser).not.toHaveBeenCalled();
+    }
+  });
+
+  test("FRAME_TIMEOUT_MS is 60 s", () => { expect(FRAME_TIMEOUT_MS).toBe(60_000); });
+
+  test("a frame that never resolves times out with the frame and T (exit 1) and cleans up", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const s = setup({ render: readyRender(0.3, (T) => (T > 0.15 ? new Promise<never>(() => {}) : undefined)) });
+      const done = runRender(OPTS, s.deps).catch((e: Error) => e);
+      // (not vi.waitFor: under fake timers it advances the clock itself)
+      for (let i = 0; i < 100 && s.ff.writes.length < 2; i++) await new Promise((r) => setImmediate(r));
+      expect(s.ff.writes).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(FRAME_TIMEOUT_MS - 1);
+      expect(s.ff.kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      const err = await done;
+      expect((err as Error).message).toBe("render failed at frame 2 (T=0.2s): frame timed out after 60s");
+      expect(exitCodeFor(err)).toBe(1);
+      expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(s.browser.close).toHaveBeenCalledTimes(1);
+      expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  test("successful frames leave no frame-timeout timers behind", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const s = setup();
+      await runRender(OPTS, s.deps);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  test("a page error before ready fails fast with its message (exit 1), not after the ready timeout", async () => {
+    const s = setup();
+    const fb = fakeBrowser(undefined, { hangReady: true });
+    s.deps.launchBrowser = async () => fb.browser;
+    const done = runRender(OPTS, s.deps).catch((e: Error) => e);
+    await vi.waitFor(() => expect(fb.calls.waitTimeout).toBe(30_000));
+    fb.pageError("TypeError: x is undefined");
+    const err = await done;
+    expect(err).toBeInstanceOf(RenderPageError);
+    expect(exitCodeFor(err)).toBe(1);
+    expect((err as Error).message).toBe("render page error: TypeError: x is undefined");
+    expect(fb.browser.close).toHaveBeenCalledTimes(1);
+  });
+
+  test("a page error mid-render fails the pending frame fast with its message, frame and T (exit 1)", async () => {
+    let s!: ReturnType<typeof setup>;
+    s = setup({ render: readyRender(0.3, (T) => {
+      if (T < 0.05) return;
+      setImmediate(() => s.pageError("RangeError: boom"));
+      return new Promise<never>(() => {}); // the page died mid-frame: renderFrame never settles
+    }) });
+    const err = await runRender(OPTS, s.deps).catch((e: Error) => e);
+    expect((err as Error).message).toBe("render failed at frame 1 (T=0.1s): render page error: RangeError: boom");
+    expect(exitCodeFor(err)).toBe(1);
+    expect(s.ff.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(s.deps.unlink).toHaveBeenCalledWith(OPTS.out);
   });
 });
 

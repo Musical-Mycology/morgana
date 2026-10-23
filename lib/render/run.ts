@@ -35,6 +35,8 @@ export interface RenderPage {
   waitForFunction(fn: () => unknown, options: { timeout: number }): Promise<unknown>;
   evaluate<R, A>(fn: (arg: A) => R | Promise<R>, arg: A): Promise<R>;
   screenshot(): Promise<Buffer>;
+  /** An uncaught page exception (Playwright `pageerror`) or a renderer crash (`crash`). */
+  onError(cb: (message: string) => void): void;
 }
 
 export interface RenderBrowser {
@@ -73,6 +75,8 @@ export interface RenderDeps {
 export const CHROMIUM_LAUNCH_OPTIONS = { headless: true, handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false } as const;
 
 const READY_TIMEOUT_MS = 30_000;
+/** Per-frame budget for renderFrame + screenshot; a hung frame fails with its frame number and T. */
+export const FRAME_TIMEOUT_MS = 60_000;
 /** How long cleanup waits for a SIGKILLed ffmpeg to exit before deleting its output anyway. */
 export const KILL_WAIT_MS = 5_000;
 const STDERR_TAIL_LINES = 15;
@@ -90,6 +94,10 @@ async function launchChromium(): Promise<RenderBrowser> {
         evaluate: <R, A>(fn: (arg: A) => R | Promise<R>, arg: A) =>
           p.evaluate(fn as (arg: unknown) => R | Promise<R>, arg as unknown) as Promise<R>,
         screenshot: () => p.screenshot({ type: "png" }),
+        onError: (cb) => {
+          p.on("pageerror", (e) => cb(e.message));
+          p.on("crash", () => cb("the page crashed"));
+        },
       };
     },
     close: () => browser.close(),
@@ -120,6 +128,9 @@ interface Session {
   ffClosed: boolean;
   ffExited?: Promise<void>;
   tmpDir?: string;
+  /** A frame reached ffmpeg's stdin. Until then ffmpeg has not opened `out` (image2pipe probes its
+   *  input first), so a failure must not delete what may be the user's previous render. */
+  wroteFrame: boolean;
   ok: boolean;
 }
 
@@ -127,7 +138,7 @@ type RenderResult = { out: string; frames: number; seconds: number; bytes: numbe
 
 export async function runRender(opts: RenderOptions, depsIn: Partial<RenderDeps> = {}): Promise<RenderResult> {
   const deps: RenderDeps = { ...defaultDeps, ...depsIn };
-  const s: Session = { ffClosed: false, ok: false };
+  const s: Session = { ffClosed: false, wroteFrame: false, ok: false };
   deps.onEmergencyCleanup?.(() => emergencyCleanup(s, opts.out, deps));
   try {
     try {
@@ -156,14 +167,21 @@ async function cleanup(s: Session, out: string, deps: RenderDeps): Promise<void>
     killWait = boundedWait(s.ffExited!, KILL_WAIT_MS);
   }
   await Promise.all([s.browser?.close().catch(() => {}), killWait]);
-  if (failed) await deps.unlink(out).catch(() => {});
+  if (failed && s.wroteFrame) await deps.unlink(out).catch(() => {});
   if (s.tmpDir) await rm(s.tmpDir, { recursive: true, force: true }).catch(() => {});
 }
 
 function emergencyCleanup(s: Session, out: string, deps: RenderDeps): void {
   if (s.ff && !s.ffClosed) { try { s.ff.kill("SIGKILL"); } catch { /* already gone */ } }
-  if (s.ff && !s.ok) { try { deps.unlinkSync(out); } catch { /* never written */ } }
+  if (s.ff && !s.ok && s.wroteFrame) { try { deps.unlinkSync(out); } catch { /* never written */ } }
   if (s.tmpDir) { try { rmSync(s.tmpDir, { recursive: true, force: true }); } catch { /* best effort */ } }
+}
+
+/** `p`, or a rejection with `message` after `ms`. The timer is always cleared. */
+async function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expire = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
+  try { return await Promise.race([p, expire]); } finally { clearTimeout(timer); }
 }
 
 async function boundedWait(p: Promise<void>, ms: number): Promise<void> {
@@ -188,7 +206,10 @@ async function renderSteps(opts: RenderOptions, deps: RenderDeps, s: Session): P
   catch (e) { throw new RenderSetupError(`could not reach ${baseUrl}: ${e instanceof Error ? e.message : String(e)}`); }
   if (res.status === 404) throw new RenderSetupError(`deck ${deck} not found at ${baseUrl}`);
   if (!res.ok) throw new RenderSetupError(`deck ${deck}: GET ${deckUrl} returned ${res.status}`);
-  const doc = (await res.json()) as DeckDoc;
+  const notMorgana = () => new RenderSetupError(`${baseUrl} does not look like a Morgana server`);
+  let doc: DeckDoc;
+  try { doc = (await res.json()) as DeckDoc; } catch { throw notMorgana(); }
+  if (!doc || typeof doc !== "object" || !Array.isArray(doc.scenes)) throw notMorgana();
 
   let audioPath: string | undefined;
   const media = doc.meta?.soundtrack?.media;
@@ -206,11 +227,16 @@ async function renderSteps(opts: RenderOptions, deps: RenderDeps, s: Session): P
   checkAbort();
   s.browser = await deps.launchBrowser();
   const page = await s.browser.newPage({ viewport: { width: opts.width, height: opts.height }, deviceScaleFactor: 1 });
+  // A page crash / uncaught exception fails fast, instead of waiting out the ready or frame timeout.
+  let pageFailed!: (e: Error) => void;
+  const pageError = new Promise<never>((_, reject) => { pageFailed = reject; });
+  pageError.catch(() => {}); // observed via the races below
+  page.onError((message) => pageFailed(new RenderPageError(`render page error: ${message}`)));
   const renderUrl = `${baseUrl}/render?deck=${encodeURIComponent(deck)}`;
   await page.goto(renderUrl);
   try {
     // Wait for a DECIDED state (ready true or false), not just ready, so a page error surfaces fast.
-    await page.waitForFunction(() => window.__morganaRender, { timeout: READY_TIMEOUT_MS });
+    await Promise.race([page.waitForFunction(() => window.__morganaRender, { timeout: READY_TIMEOUT_MS }), pageError]);
   } catch (e) {
     if (e instanceof Error && e.name === "TimeoutError") {
       throw new RenderSetupError(`render page did not become ready within ${READY_TIMEOUT_MS / 1000}s at ${renderUrl}`);
@@ -261,16 +287,23 @@ async function renderSteps(opts: RenderOptions, deps: RenderDeps, s: Session): P
     if (s.ffClosed || stdinError) await ffmpegDied;
     const T = times[i];
     let png: Buffer;
+    let failed: string[];
     try {
-      await page.evaluate((t) => {
-        const r = window.__morganaRender;
-        if (!r?.ready) throw new Error("render page is not ready");
-        return r.renderFrame(t);
-      }, T);
-      png = await page.screenshot();
+      const frame = (async () => {
+        const r = await page.evaluate((t) => {
+          const r = window.__morganaRender;
+          if (!r?.ready) throw new Error("render page is not ready");
+          return r.renderFrame(t);
+        }, T);
+        return { failed: r?.failed ?? [], png: await page.screenshot() };
+      })();
+      ({ png, failed } = await withTimeout(Promise.race([frame, pageError]), FRAME_TIMEOUT_MS, `frame timed out after ${FRAME_TIMEOUT_MS / 1000}s`));
     } catch (e) {
       throw new Error(`render failed at frame ${i} (T=${fmtT(T)}): ${e instanceof Error ? e.message : String(e)}`);
     }
+    // Spec §3/§5: a broken image is tolerated (the frame shows what the browser shows), warned once.
+    for (const src of failed) deps.log(`warning: frame ${i} (T=${fmtT(T)}): image failed to decode: ${src}`);
+    s.wroteFrame = true;
     if (!proc.stdin.write(png)) {
       await Promise.race([new Promise<void>((r) => proc.stdin.once("drain", r)), ffmpegDied]);
     }

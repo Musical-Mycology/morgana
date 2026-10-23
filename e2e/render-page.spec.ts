@@ -74,6 +74,31 @@ test.describe("determinism", () => {
     expect(jumpBack.dom).toEqual(stepNight.dom);
     expect(jumpBack.png.equals(stepNight.png)).toBe(true);
   });
+
+  test("render-only chrome is hidden: Next's dev indicator and interactive end-cards never reach a frame", async ({ page }) => {
+    await page.goto(`/render?deck=${id}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+    // `next dev` mounts <nextjs-portal>; the e2e server is a production build, so stand one in. An
+    // end-card is a .cin__ending inside the mounted cinematic beat.
+    const display = await page.evaluate(() => {
+      const portal = document.body.appendChild(document.createElement("nextjs-portal"));
+      const ending = document.querySelector("[data-render-root] .cin")!.appendChild(document.createElement("div"));
+      ending.className = "cin__ending";
+      return { portal: getComputedStyle(portal).display, ending: getComputedStyle(ending).display };
+    });
+    expect(display).toEqual({ portal: "none", ending: "none" });
+  });
+
+  test("the deck's fonts are loaded before the renderer is ready", async ({ page }) => {
+    await page.goto(`/render?deck=${id}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+    const loaded = await page.evaluate(() => {
+      const css = getComputedStyle(document.documentElement);
+      // The webfont itself (first in the list); next/font's local() "Fallback" face may not exist here.
+      return ["--font-display", "--font-body", "--font-cursive"].map((v) => document.fonts.check(`400 1em ${css.getPropertyValue(v).split(",")[0]}`));
+    });
+    expect(loaded).toEqual([true, true, true]);
+  });
 });
 
 test.describe("error path", () => {
@@ -82,6 +107,12 @@ test.describe("error path", () => {
     await page.waitForFunction(() => window.__morganaRender?.ready === false);
     await expect(page.getByTestId("render-error")).toBeVisible();
     expect(await page.evaluate(() => (window.__morganaRender as { error: string }).error)).toBeTruthy();
+  });
+
+  test("no deck param fails fast (no fallback deck)", async ({ page }) => {
+    await page.goto(`/render`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === false);
+    expect(await page.evaluate(() => (window.__morganaRender as { error: string }).error)).toBe("missing deck id");
   });
 
   test("empty deck id fails fast", async ({ page }) => {
