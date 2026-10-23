@@ -37,7 +37,12 @@ export function cameraEvents(doc: DeckDoc): CameraEvent[] {
       for (const w of beatTimeline(scene.beats[b.beatIdx].timeline)) {
         if (w.action.kind !== "camera" || !reached(b.start + w.start)) continue;
         const a = w.action;
-        out.push({ start: s.start + b.start + w.start, duration: (a.durationMs ?? CAMERA_DEFAULT_MS) / 1000, to: { ...a.to }, ease: a.ease ?? "inOut" });
+        const ev: CameraEvent = { start: s.start + b.start + w.start, duration: (a.durationMs ?? CAMERA_DEFAULT_MS) / 1000, to: { ...a.to }, ease: a.ease ?? "inOut" };
+        // Camera actions take no timeline time, so back-to-back ones share a start: fold them into one
+        // move (later fields, duration and ease win) instead of letting the later one supersede at p = 0.
+        const prev = out[out.length - 1];
+        if (prev && prev.start === ev.start) { prev.to = { ...prev.to, ...ev.to }; prev.duration = ev.duration; prev.ease = ev.ease; }
+        else out.push(ev);
       }
     }
   }

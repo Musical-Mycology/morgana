@@ -59,6 +59,23 @@ describe("cameraEvents", () => {
     const d = deck([{ id: "s", durationSec: 2, beats: [{ id: "a", timeline: [cam({ zoom: 2 }), { kind: "wait", ms: 3000 }, cam({ zoom: 3 })] }] }]);
     expect(cameraEvents(d).map((e) => e.to.zoom)).toEqual([2]);
   });
+  test("an action exactly at a pinned scene's cut is dropped; one at the next scene's start is kept", () => {
+    const d = deck([
+      { id: "s1", durationSec: 2, beats: [{ id: "a", timeline: [{ kind: "wait", ms: 2000 }, cam({ zoom: 2 })] }] },
+      { id: "s2", beats: [{ id: "b", timeline: [cam({ zoom: 3 })] }] },
+    ]);
+    const evs = cameraEvents(d);
+    expect(evs.map((e) => [e.start, e.to.zoom])).toEqual([[2, 3]]);
+  });
+  test("same-start actions merge into one move; later fields, duration and ease win", () => {
+    const d = deck([{ id: "s", beats: [{ id: "a", timeline: [cam({ zoom: 4 }, 500, "in"), cam({ x: 0.8 }, 1000, "linear")] }] }] );
+    const evs = cameraEvents(d);
+    expect(evs).toEqual([{ start: 0, duration: 1, to: { zoom: 4, x: 0.8 }, ease: "linear" }]);
+    const end = cameraAt(evs, 1);
+    expect(end.zoom).toBeCloseTo(4);
+    expect(end.x).toBeCloseTo(0.8);
+    expect(end.y).toBeCloseTo(0.5);
+  });
   test("a beat starting past a pinned scene's cut produces no event", () => {
     const d = deck([{ id: "s", durationSec: 2, beats: [
       { id: "a", timeline: [{ kind: "wait", ms: 3000 }] },
@@ -105,6 +122,13 @@ describe("cameraAt", () => {
     expect(cameraAt(evs, 1.5).zoom).toBeLessThan(2);
     expect(cameraAt(evs, 1.5).zoom).toBeGreaterThan(1);
     expect(cameraAt(evs, 2).zoom).toBeCloseTo(1);
+  });
+  test.each(["inOut", "in"] as const)("interrupt continuity holds with %s ease", (ease) => {
+    const evs = [ev(0, 2, { zoom: 4 }, ease), ev(1, 1, { zoom: 1 }, ease)];
+    const before = cameraAt(evs, 1 - 1e-9);
+    const at = cameraAt(evs, 1);
+    expect(Math.abs(before.zoom - at.zoom)).toBeLessThan(1e-6);
+    expect(Math.abs(before.x - at.x)).toBeLessThan(1e-6);
   });
   test("Review Focus #2: a framing holds into a later scene with no camera actions", () => {
     const d = deck([
