@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile, readdir, unlink, rm } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, unlink, rm, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { DECK_ID_RE } from "@/engine/deck-doc";
 import { dataDir } from "./deck-store";
@@ -105,6 +105,41 @@ export async function readMedia(deckId: string, mediaId: string): Promise<{ info
   } catch {
     throw new MediaError(404, "unknown media");
   }
+}
+
+/** Sidecar + file size for a media id (404 MediaError if absent) — no bytes are read. */
+export async function statMedia(deckId: string, mediaId: string): Promise<{ info: MediaInfo; path: string; size: number }> {
+  const path = mediaPath(deckId, mediaId);
+  try {
+    const info = JSON.parse(await readFile(`${path}.json`, "utf8")) as MediaInfo;
+    const st = await stat(path);
+    if (!st.isFile()) throw new Error("not a file");
+    return { info, path, size: st.size };
+  } catch {
+    throw new MediaError(404, "unknown media");
+  }
+}
+
+/**
+ * Parse a single-range `Range: bytes=…` header against a file of `size` bytes.
+ * null = no usable Range (absent, other unit, multi-range, malformed) → serve the full body.
+ */
+export function parseRange(header: string | null, size: number): { start: number; end: number } | "unsatisfiable" | null {
+  if (!header) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m || (m[1] === "" && m[2] === "")) return null;
+  if (size <= 0) return "unsatisfiable";
+  let start: number, end: number;
+  if (m[1] === "") {
+    const n = Number(m[2]);
+    if (n === 0) return "unsatisfiable";
+    start = Math.max(0, size - n); end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1);
+    if (start >= size || start > end) return "unsatisfiable";
+  }
+  return { start, end };
 }
 
 export async function deleteMedia(deckId: string, mediaId: string): Promise<void> {
