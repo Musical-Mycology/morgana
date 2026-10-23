@@ -58,6 +58,7 @@ The "expand container" half of the storyboard is already possible: a media tile 
   - It walks the deck exactly like `nightEvents`: `deckLayout` scenes and beats.
   - It uses the same reach rule: a pinned scene's content past its cut is never reached.
   - Each `camera` action in a beat timeline becomes an event at `beatStart + window.start`.
+  - **Same-start merge.** Camera actions take no timeline time, so back-to-back ones share a start. An action whose start equals the previous event's start merges into it (later `to` fields, `durationMs` and `ease` win) only when that previous event is a move (`duration > 0`). After a 0 ms cut, a same-instant action is a new event: the cut lands, then the move runs from it. Lint's `cameraLocated` mirrors this rule (`mergesInto`).
 - **`cameraAt(events, T): Framing`.**
   - Start from `FULL_FRAME`.
   - Each event with `start ≤ T` is evaluated up to the next event's start, or up to `T` for the last one.
@@ -100,6 +101,7 @@ The "expand container" half of the storyboard is already possible: a media tile 
   - CinematicSlide, NoteField and ObjectStage then paint `cameraAt(events, beatStart + t)` at the beat-local `t`.
   - With no `camera` prop the world stays at `FULL_FRAME`.
 - **Paint rules:** no `will-change: transform` on world layers, so Chromium re-rasterises zoomed art at the output resolution instead of scaling a cached bitmap. The transform is written only when the string changes.
+  - The same holds for content inside a world: art layers (`.artstage__layer`) and note sprites carry `will-change` hints, and Chromium keeps such a layer's raster scale, so under a zoom a frame's pixels depended on the zoom the layer was first rastered at (stepped vs jumped renders differed). A deck with camera events sets a static `data-camera="1"` on DeckStage's stage root, and a rule `[data-camera] .artstage__layer, [data-camera] .notefield__stage > * { will-change: auto !important }` drops the hints. Decks without camera events carry no flag and paint exactly as before.
 
 ## 4. Editor, lint, MCP
 
@@ -122,7 +124,7 @@ The "expand container" half of the storyboard is already possible: a media tile 
 - **Autoplay hosts.** Only the dev pages render BeatStage in autoplay. BeatStage's `camera` prop is implemented and unit-tested, but no production host passes it.
 - **Lint warnings:**
   - `camera-overlap`: a camera action starts while the previous move is still running. This is legal (it interrupts), but usually unintended.
-  - `camera-zoom-soft`: `zoom > 2` while the framed art is a built-in panel key. Raster art gets soft when zoomed. Uploaded art isn't flagged, because its resolution is unknown to lint.
+  - `camera-zoom-soft`: on the move that takes the zoom from ≤ 2 to `> 2` (not on every pan held above 2) while the framed art at its end is a built-in panel key; the label prints the zoom with two decimals. Raster art gets soft when zoomed. Uploaded art isn't flagged, because its resolution is unknown to lint.
 - **MCP.** The tool docs describe the camera action shape and that it holds until the next move. There is no new tool: `add_action` and `update_action` cover it.
 
 ## 5. Out of scope
