@@ -114,7 +114,11 @@ The "expand container" half of the storyboard is already possible: a media tile 
   - It draws an outline rectangle of the view the current `to.zoom` would show, centred on the pointer and clamped like `clampFraming`.
   - A click writes `to.x` and `to.y` from the clamped centre, as one undo step. Esc cancels.
   - Testids: `camera-pick`, `camera-pick-overlay`.
-- **Canvas preview.** DeckCanvas paints `cameraAt(cameraEvents(doc), beatDeckStart + t)` on its world layers at the scrub point, so the editor shows what `/play` and the render show.
+- **Canvas preview.** DeckCanvas paints `cameraAt(cameraEvents(doc), beatDeckStart + t)` at the scrub point, so the editor shows what `/play` and the render show. It paints its ArtStage world and NoteField.
+  - The editor's own ObjectStage stays at full frame. It hosts drag and resize handles whose pointer math assumes an untransformed stage.
+  - Tiles are not drawn on the editor canvas at all (unchanged).
+  - `/play` and the render show objects inside the camera.
+- **Autoplay hosts.** Only the dev pages render BeatStage in autoplay. BeatStage's `camera` prop is implemented and unit-tested, but no production host passes it.
 - **Lint warnings:**
   - `camera-overlap`: a camera action starts while the previous move is still running. This is legal (it interrupts), but usually unintended.
   - `camera-zoom-soft`: `zoom > 2` while the framed art is a built-in panel key. Raster art gets soft when zoomed. Uploaded art isn't flagged, because its resolution is unknown to lint.
