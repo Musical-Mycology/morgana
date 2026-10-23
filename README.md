@@ -253,7 +253,7 @@ and the render carries on with whatever the browser shows. A frame that takes lo
 error or crash in the render page, stops the render with exit code `1`.
 
 Progress goes to stderr about once a second (`frame i/N · x.x fps · ETA m:ss`); a 2:00 deck at the defaults is
-3,600 frames, so render time depends on how fast your machine screenshots and encodes them. Ctrl-C stops cleanly (closes Chromium and ffmpeg and removes the
+3,600 frames, so render time depends on how fast your machine screenshots and encodes them. Decks with camera moves or note particles take about 35 ms longer per frame, because each frame is forced to a full raster so that it comes out deterministic. Ctrl-C stops cleanly (closes Chromium and ffmpeg and removes the
 partial output); a second Ctrl-C forces the exit.
 
 | Exit code | Meaning |
