@@ -41,6 +41,7 @@ test("renders image, video and audio items with name, size and duration", () => 
   const vid = screen.getByTestId(`media-item-${VID}`);
   const v = vid.querySelector("video")!;
   expect(v.getAttribute("preload")).toBe("metadata");
+  expect(v.getAttribute("src")).toMatch(/#t=0\.001$/);
   expect(v.muted).toBe(true);
   expect(vid.textContent).toContain("clip.mp4");
   expect(vid.textContent).toContain("0:02");
@@ -78,8 +79,9 @@ test("drag-drop uploads the dropped files", async () => {
   renderLib();
   const f = new File(["a"], "a.png", { type: "image/png" });
   const zone = screen.getByTestId("media-library");
-  const over = fireEvent.dragOver(zone, { dataTransfer: { files: [f] } });
+  const over = fireEvent.dragOver(zone, { dataTransfer: { files: [f], types: ["Files"] } });
   expect(over).toBe(false); // preventDefault called
+  expect(fireEvent.dragOver(zone, { dataTransfer: { types: ["text/plain"] } })).toBe(true); // non-file drags untouched
   await act(async () => { fireEvent.drop(zone, { dataTransfer: { files: [f] } }); });
   expect(up).toHaveBeenCalledWith("d", f, undefined);
 });
@@ -134,4 +136,47 @@ test("the soundtrack picker lists only audio items", () => {
   const pick = screen.getByTestId("soundtrack-pick") as HTMLSelectElement;
   const opts = Array.from(pick.options).map((o) => o.value).filter(Boolean);
   expect(opts).toEqual([AUD]);
+});
+
+test("a drop while an upload is pending does not start a second upload", async () => {
+  vi.spyOn(mediaDuration, "readMediaDuration").mockResolvedValue(undefined);
+  let release!: () => void;
+  const up = vi.spyOn(mediaClient, "uploadMedia").mockImplementation(() => new Promise((res) => { release = () => res(items[0]); }));
+  renderLib();
+  const zone = screen.getByTestId("media-library");
+  const f = new File(["a"], "a.png", { type: "image/png" });
+  await act(async () => { fireEvent.drop(zone, { dataTransfer: { files: [f] } }); });
+  await act(async () => { fireEvent.drop(zone, { dataTransfer: { files: [new File(["b"], "b.png", { type: "image/png" })] } }); });
+  expect(up).toHaveBeenCalledTimes(1);
+  await act(async () => { release(); });
+  await act(async () => { fireEvent.drop(zone, { dataTransfer: { files: [f] } }); });
+  expect(up).toHaveBeenCalledTimes(2); // free again once the first finished
+});
+
+test("a failed refresh after upload shows a refresh error row, not an unhandled rejection", async () => {
+  vi.spyOn(mediaDuration, "readMediaDuration").mockResolvedValue(undefined);
+  vi.spyOn(mediaClient, "uploadMedia").mockResolvedValue(items[0]);
+  renderLib(items, vi.fn(async () => { throw new Error("boom"); }));
+  await act(async () => { fireEvent.change(screen.getByTestId("media-upload"), { target: { files: [new File(["a"], "a.png", { type: "image/png" })] } }); });
+  expect(screen.getByTestId("media-error").textContent).toContain("could not refresh the media list");
+  expect((screen.getByTestId("media-upload") as HTMLInputElement).disabled).toBe(false);
+});
+
+test("a failed refresh after delete is labelled as a refresh failure, not a failed delete", async () => {
+  const del = vi.spyOn(mediaClient, "deleteMedia").mockResolvedValue();
+  renderLib(items, vi.fn(async () => { throw new Error("boom"); }));
+  await act(async () => { fireEvent.click(screen.getByTestId(`media-delete-${VID}`)); });
+  expect(del).toHaveBeenCalled();
+  const t = screen.getByTestId("media-error").textContent!;
+  expect(t).toContain("could not refresh the media list");
+  expect(t).not.toContain("clip.mp4");
+});
+
+test("the delete confirmation dedupes identical reference rows", async () => {
+  const d = deck(true);
+  (d.scenes[0].beats[0] as unknown as { timeline: unknown[] }).timeline.push({ kind: "media", src: `media:${IMG}` });
+  useEditor.getState().load(d);
+  renderLib();
+  await act(async () => { fireEvent.click(screen.getByTestId(`media-delete-${IMG}`)); });
+  expect(screen.getAllByTestId("media-confirm-ref")).toHaveLength(1);
 });

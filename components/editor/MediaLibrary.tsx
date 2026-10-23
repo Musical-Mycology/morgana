@@ -17,6 +17,8 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const REFRESH_FAILED = "could not refresh the media list";
+
 interface Pending { media: MediaInfo; uses: string[] }
 
 /** Deck settings → Media library (spec §5): upload (button + drag-drop, per-file errors), thumbnail
@@ -29,11 +31,13 @@ export function MediaLibrary() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const busyRef = useRef(false); // guards drops/changes against a stale `busy` closure
   if (!doc) return null;
   const deckId = doc.meta.id;
 
   const upload = async (files: File[]) => {
-    if (!files.length) return;
+    if (!files.length || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true); setErrors([]);
     const failed: { name: string; message: string }[] = [];
     for (const file of files) {
@@ -44,26 +48,27 @@ export function MediaLibrary() {
         failed.push({ name: file.name, message: e instanceof Error ? e.message : String(e) });
       }
     }
+    try { await refresh(); } catch { failed.push({ name: "Media list", message: REFRESH_FAILED }); }
     setErrors(failed);
-    try { await refresh(); } finally {
-      setBusy(false);
-      if (input.current) input.current.value = "";
-    }
+    busyRef.current = false;
+    setBusy(false);
+    if (input.current) input.current.value = "";
   };
 
   const doDelete = async (m: MediaInfo) => {
     setPending(null); setErrors([]);
-    try { await deleteMedia(deckId, m.id); await refresh(); }
-    catch (e) { setErrors([{ name: m.name, message: e instanceof Error ? e.message : String(e) }]); }
+    try { await deleteMedia(deckId, m.id); }
+    catch (e) { setErrors([{ name: m.name, message: e instanceof Error ? e.message : String(e) }]); return; }
+    try { await refresh(); } catch { setErrors([{ name: "Media list", message: REFRESH_FAILED }]); }
   };
 
   const onDelete = (m: MediaInfo) => {
-    const uses = findMediaRefs(doc)
+    const uses = [...new Set(findMediaRefs(doc)
       .filter((u) => u.ref === toMediaRef(m.id))
       .map((u) => {
         const scene = doc.scenes[u.sceneIdx]; const beat = scene?.beats[u.beatIdx];
         return `${scene?.id ?? u.sceneIdx} / ${beat?.id ?? u.beatIdx} (${u.where})`;
-      });
+      }))];
     if (doc.meta.soundtrack?.media === m.id) uses.push("Deck soundtrack");
     if (uses.length === 0) void doDelete(m); else setPending({ media: m, uses });
   };
@@ -94,7 +99,7 @@ export function MediaLibrary() {
       // eslint-disable-next-line @next/next/no-img-element
       ? <img src={mediaUrl(deckId, m.id)} alt={m.name} loading="lazy" style={{ width: "100%", height: 64, objectFit: "cover", borderRadius: 4, background: "#0006" }} />
       : kind === "video"
-        ? <video src={mediaUrl(deckId, m.id)} preload="metadata" muted playsInline style={{ width: "100%", height: 64, objectFit: "cover", borderRadius: 4, background: "#0006" }} />
+        ? <video src={`${mediaUrl(deckId, m.id)}#t=0.001`} preload="metadata" muted playsInline style={{ width: "100%", height: 64, objectFit: "cover", borderRadius: 4, background: "#0006" }} />
         : null;
     return (
       <div key={m.id} data-testid={`media-item-${m.id}`}
@@ -111,7 +116,7 @@ export function MediaLibrary() {
 
   return (
     <div data-testid="media-library" style={{ marginTop: 14 }}
-      onDragOver={(e) => { e.preventDefault(); }}
+      onDragOver={(e) => { if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) e.preventDefault(); }}
       onDrop={(e) => { e.preventDefault(); void upload(Array.from(e.dataTransfer?.files ?? [])); }}>
       <div style={{ fontSize: 12, marginBottom: 6 }}>Media library</div>
       <label style={{ display: "block", fontSize: 11, marginBottom: 6 }}>
