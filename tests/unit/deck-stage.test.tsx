@@ -305,3 +305,18 @@ test("camera: mid-move inside a pinned scene's hold, every world follows deck ti
   }
   expect(seen.size).toBe(2);
 });
+
+// Final review I1: Chromium keeps the raster scale of a `will-change: transform` layer, so under a
+// zooming world its pixels depended on render history. A deck with camera events flags its stage
+// root (static, per deck) and a CSS rule drops those hints; a camera-less deck carries no flag.
+test("camera: a deck with camera events flags the stage root data-camera; a deck without has none", () => {
+  const stageRoot = (c: HTMLElement) => c.querySelector<HTMLElement>(".artstage")!.parentElement!;
+  const withCam = setup(CAM);
+  expect(stageRoot(withCam.container).dataset.camera).toBe("1");
+  const css = Array.from(withCam.container.querySelectorAll("style")).map((s) => s.textContent).join("\n");
+  expect(css).toMatch(/\[data-camera\] \.artstage__layer/);
+  expect(css).toMatch(/\[data-camera\] \.notefield__stage > \*/);
+  cleanup();
+  const without = setup(D);
+  expect(stageRoot(without.container).hasAttribute("data-camera")).toBe(false);
+});

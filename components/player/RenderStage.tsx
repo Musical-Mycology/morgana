@@ -1,10 +1,11 @@
 "use client";
-import { useEffect, useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { flushSync } from "react-dom";
 import type { DeckDoc } from "@/engine/deck-doc";
 import { NOTE_GLYPHS } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { pendingVideoSeeks } from "@/engine/components/video-sync";
+import { cameraEvents } from "@/engine/authoring/camera-clock";
 import { useDeckStage } from "./DeckStage";
 
 /** What one rendered frame reports back: image or clip srcs that failed for the FIRST time
@@ -37,6 +38,8 @@ function preloadImage(src: string): Promise<void> {
 export function RenderStage({ doc }: { doc: DeckDoc }) {
   const { apply, layout, stage } = useDeckStage(doc, 0);
   const assets = useAssetResolver();
+  const root = useRef<HTMLDivElement>(null);
+  const hasCamera = useMemo(() => cameraEvents(doc).length > 0, [doc]);
   useLayoutEffect(() => {
     document.documentElement.dataset.render = "1";
     return () => { delete document.documentElement.dataset.render; };
@@ -68,12 +71,23 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
           // A broken image is tolerated: the frame shows what the browser shows; the CLI warns once.
           await Promise.all(imgs.map((img) => img.decode().catch(() => fail(img.currentSrc || img.src))));
           await document.fonts.ready;
+          if (hasCamera && root.current) {
+            // Under a camera transform, a frame whose paint was only partly invalidated (notes moving
+            // over zoomed art or objects) rasterised differently from a full raster, so a stepped frame
+            // differed from the same frame jumped to. A transient clip-path change forces the whole
+            // stage to re-raster, so every camera frame is a full raster whatever came before.
+            // Two frames: a rAF callback runs before its own frame paints, so one would clear the clip
+            // before any frame had painted with it.
+            root.current.style.clipPath = "inset(0.5px)";
+            await nextFrame(); await nextFrame();
+            root.current.style.clipPath = "";
+          }
           await nextFrame(); await nextFrame();
           return { failed: unreported.splice(0) };
         },
       };
     });
     return () => { live = false; delete window.__morganaRender; };
-  }, [apply, layout.total, assets]);
-  return <div data-render-root style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#000", containerType: "size" }}>{stage}</div>;
+  }, [apply, layout.total, assets, hasCamera]);
+  return <div ref={root} data-render-root style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#000", containerType: "size" }}>{stage}</div>;
 }

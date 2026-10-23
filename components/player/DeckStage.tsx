@@ -117,9 +117,16 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   // Mount (and a new doc): paint art + nightlight at the current T before the first frame shows.
   useLayoutEffect(() => { paintArt(); }, [paintArt]);
 
+  const hasCamera = camEv.length > 0;
   const stage = (
     // overflow: hidden: zoomed world layers (tiles, notes, objects) never spill outside the frame.
-    <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--color-mm-dark-brown)" }}>
+    // data-camera: a static per-deck flag (the deck has camera events). Chromium keeps the raster
+    // scale of a `will-change: transform` layer, so under a zooming world an art layer or note
+    // sprite rastered at one zoom kept that resolution at the next, and a frame's pixels depended on
+    // how the render got there. Camera decks drop those hints; camera-less decks are unchanged.
+    <div data-camera={hasCamera ? "1" : undefined} style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--color-mm-dark-brown)" }}>
+      {/* !important: a note sprite's will-change is an inline style (makeNoteHex). */}
+      {hasCamera && <style>{`[data-camera] .artstage__layer, [data-camera] .notefield__stage > * { will-change: auto !important; }`}</style>}
       <ArtStage ref={artRef} nightlight={initialNight} reduced={false} transparentBg />
       {loc && loc.flatIdx != null && <Stage doc={doc} flatIdx={loc.flatIdx} transport={transport} clipModeRef={clipMode} cameraRef={cameraRef} />}
     </div>
