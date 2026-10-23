@@ -8,7 +8,8 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { DeckDoc } from "@/engine/deck-doc";
 import { frameTimes, RenderArgError, type RenderOptions } from "./args";
-import { ffmpegArgs, resolveBinary } from "./ffmpeg";
+import { MEDIA_ID_RE } from "@/lib/store/media-store";
+import { audioDemuxer, ffmpegArgs, resolveBinary } from "./ffmpeg";
 
 /** Setup/usage failures (deck missing, soundtrack missing, nothing to render, …): the CLI exits 2. */
 export class RenderSetupError extends Error {
@@ -214,6 +215,11 @@ async function renderSteps(opts: RenderOptions, deps: RenderDeps, s: Session): P
   let audioPath: string | undefined;
   const media = doc.meta?.soundtrack?.media;
   if (media) {
+    // The id comes from the server's deck JSON: only a media-store id with a pinned demuxer may
+    // reach the filesystem or ffmpeg (see AUDIO_DEMUXERS).
+    if (typeof media !== "string" || !MEDIA_ID_RE.test(media) || !audioDemuxer(media)) {
+      throw new RenderSetupError(`${JSON.stringify(media)} is not a valid soundtrack media id`);
+    }
     const mediaUrl = `${baseUrl}/api/decks/${encodeURIComponent(deck)}/media/${encodeURIComponent(media)}`;
     const mres = await deps.fetch(mediaUrl).catch(() => undefined);
     if (!mres?.ok) {
