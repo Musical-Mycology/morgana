@@ -128,7 +128,9 @@ per deck under `MORGANA_DATA_DIR/media/<deckId>/` and are deleted with the deck.
 `npm run render` turns a timed deck into an MP4 (H.264 video, AAC soundtrack) by stepping the deck
 clock frame by frame in headless Chromium and piping the frames into ffmpeg. It reads the deck and
 its soundtrack from a **running** Morgana (`npm run dev`, Docker, or the production server), so the
-deck must exist there and its soundtrack must be uploaded.
+deck must exist there and its soundtrack must be uploaded. For final renders, use the production
+server (`npm run build && npm start`) rather than `npm run dev`, which compiles pages on demand
+and injects dev-only tooling into the page.
 
 **Prerequisites.** A running Morgana, and `ffmpeg` on your `PATH` (macOS: `brew install ffmpeg`;
 Debian/Ubuntu/WSL: `sudo apt install ffmpeg`). Set `FFMPEG_PATH` to use a binary elsewhere
@@ -155,6 +157,9 @@ Frames are **deterministic**: the frame at time T renders identically however it
 (stepped from 0 or jumped to), so partial renders match the full render. The soundtrack is muxed as
 AAC 192k, offset by `--from` so partial renders stay in sync, and padded with silence to the video
 length. A pinned scene with no beats shows the current art over a dark-brown background, not black.
+An image that fails to load is reported once (`warning: frame i (T=…): image failed to decode: <src>`)
+and the render carries on with whatever the browser shows. A frame that takes longer than 60 s, or an
+error or crash in the render page, stops the render with exit code `1`.
 
 Progress goes to stderr about once a second (`frame i/N · x.x fps · ETA m:ss`); a 2:00 deck at the defaults is
 3,600 frames, so render time depends on how fast your machine screenshots and encodes them. Ctrl-C stops cleanly (closes Chromium and ffmpeg and removes the
