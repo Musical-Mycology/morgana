@@ -7,6 +7,7 @@ import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { flattenStory } from "@/engine/deck/flatten";
 import { deckLayout, locate, type DeckLayout, type Located } from "@/engine/authoring/deck-clock";
 import { artAt, artEvents, nightAt, nightEvents } from "@/engine/authoring/art-clock";
+import { cameraAt, cameraEvents, cameraTransform } from "@/engine/authoring/camera-clock";
 import type { ClipMode } from "@/engine/components/video-sync";
 import type { Framing } from "@/engine/deck/types";
 
@@ -51,14 +52,20 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
    *  "seek" (exact, awaitable) otherwise. TimedPlayer flips it; RenderStage leaves "seek". A ref,
    *  read at paint time, so a mode change never re-renders the memoised Stage. */
   clipMode: React.MutableRefObject<ClipMode>;
+  /** The camera framing at T, set by `apply` (and on mount) before anything paints. Every world
+   *  layer reads it at its own paint time: the ArtStage world here, tiles and notes/objects in
+   *  the beat. A ref, so a framing change never re-renders the memoised Stage. */
+  cameraRef: React.MutableRefObject<Framing>;
 } {
   const layout = useMemo(() => deckLayout(doc), [doc]);
   const artEv = useMemo(() => artEvents(doc), [doc]);
   const nightTl = useMemo(() => nightEvents(doc), [doc]);
+  const camEv = useMemo(() => cameraEvents(doc), [doc]);
   const transport = useRef<SlideTransport>(null);
   const artRef = useRef<ArtStageHandle>(null);
   const T = useRef(Math.max(0, Math.min(layout.total, initialT)));
   const clipMode = useRef<ClipMode>("seek");
+  const cameraRef = useRef<Framing>(cameraAt(camEv, T.current));
   const [displayT, setDisplayT] = useState(T.current);
   const [loc, setLoc] = useState<Located | null>(() => locate(layout, T.current));
   const locRef = useRef(loc);
@@ -71,11 +78,20 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
     artRef.current?.renderState(artAt(artEv, T.current), nightAt(nightTl, T.current), T.current, clipMode.current);
   }, [artEv, nightTl]);
 
+  /** Set the framing at T and paint the ArtStage world (written only when the string changes).
+   *  The beat's own world layers pick cameraRef up in their paint, which the seek triggers. */
+  const paintCamera = useCallback(() => {
+    cameraRef.current = cameraAt(camEv, T.current);
+    artRef.current?.setCamera(cameraTransform(cameraRef.current));
+  }, [camEv]);
+
   /** Move the deck clock to `to` and paint. A beat change re-renders <Stage>; the seek for the
    *  new beat happens in the layout effect below so the first painted frame is already at localT.
-   *  Art + nightlight are painted here, from art-clock, for every T. */
+   *  Art + nightlight are painted here, from art-clock, for every T; the camera framing is set
+   *  before the seek so the beat's paint reads the new framing. */
   const apply = useCallback((to: number) => {
     T.current = Math.max(0, Math.min(layout.total, to));
+    paintCamera();
     const next = locate(layout, T.current);
     const prev = locRef.current;
     locRef.current = next;
@@ -83,7 +99,11 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
     else if (next && next.flatIdx != null) transport.current?.seek(next.localT, beatClipClock(layout, next, T.current));
     setDisplayT(T.current);
     paintArt();
-  }, [layout, paintArt]);
+  }, [layout, paintArt, paintCamera]);
+
+  // Mount (and a new doc): set + paint the framing at the current T. Declared before the seek
+  // effect below so a doc change re-seeks the beat with the new framing already in the ref.
+  useLayoutEffect(() => { paintCamera(); }, [paintCamera]);
 
   // Children's layout effects (CinematicSlide's beat setup) run before this one, so the seek
   // lands on the freshly-mounted beat before the browser paints.
@@ -101,8 +121,8 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
     // overflow: hidden: zoomed world layers (tiles, notes, objects) never spill outside the frame.
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--color-mm-dark-brown)" }}>
       <ArtStage ref={artRef} nightlight={initialNight} reduced={false} transparentBg />
-      {loc && loc.flatIdx != null && <Stage doc={doc} flatIdx={loc.flatIdx} transport={transport} clipModeRef={clipMode} />}
+      {loc && loc.flatIdx != null && <Stage doc={doc} flatIdx={loc.flatIdx} transport={transport} clipModeRef={clipMode} cameraRef={cameraRef} />}
     </div>
   );
-  return { apply, T, displayT, loc, layout, stage, clipMode };
+  return { apply, T, displayT, loc, layout, stage, clipMode, cameraRef };
 }

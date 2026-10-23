@@ -1,6 +1,8 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { cameraAt, cameraEvents, cameraTransform } from "../engine/authoring/camera-clock";
+import type { DeckDoc } from "../engine/deck-doc";
 
 // Per-worker deck id (set in beforeEach): --repeat-each runs copies in parallel workers, which must not share a deck.
 let id = "e2e-render";
@@ -301,6 +303,164 @@ test.describe("clips", () => {
     expect(res.src).toMatch(/\/media\/0000000000000000\.mp4$/);
     expect(res.failed!.filter((s) => s === res.src)).toHaveLength(1); // reported exactly once
     expect(res.ms).toBeLessThan(10_000);
+  });
+});
+
+// Camera moves (timed-video sub-project 5). Scene 1 (pinned to 4 s): a still as art, a text line and a
+// tile; at 0.5 s a 2 s move to {zoom 3, x 0.3, y 0.4}. Scene 2 (from 4 s) cuts to a clip as art and has
+// no move for 1 s, so the framing persists across the cut; at 5 s a 1 s move back to zoom 1.
+// Uploaded media, not storyboard art: storyboard files may be absent (a dev checkout, CI), and a
+// broken-image icon under a zoom rasterises differently depending on history.
+const cameraDocFor = (id: string, still: string, clip: string) => ({ version: 1, meta: { id, title: "Camera" }, scenes: [
+  { id: "s1", durationSec: 4, beats: [{ id: "a", art: { to: still, mode: "cut" }, timeline: [
+    { kind: "wait", ms: 500 }, { kind: "camera", to: { zoom: 3, x: 0.3, y: 0.4 }, durationMs: 2000 },
+    { kind: "text", value: "Camera line", in: "fade" },
+    { kind: "media", id: "tile", pos: { x: 0.3, y: 0.4 }, label: "tile" }, { kind: "wait", ms: 3500 },
+  ] }] },
+  { id: "s2", beats: [{ id: "b", art: { to: clip, mode: "cut" }, timeline: [
+    { kind: "text", value: "Second line", in: "fade" }, { kind: "wait", ms: 1000 },
+    { kind: "camera", to: { zoom: 1 }, durationMs: 1000 }, { kind: "wait", ms: 2000 },
+  ] }] },
+] });
+// The text-fixed fixture: one line fully in at zoom 1, then a 1 s move to zoom 3 (centered, so the
+// world grows from the top-left by exactly x3).
+const textDocFor = (id: string, still: string) => ({ version: 1, meta: { id, title: "Camera text" }, scenes: [
+  { id: "s1", beats: [{ id: "a", art: { to: still, mode: "cut" }, timeline: [
+    { kind: "text", value: "Steady words", in: "fade" }, { kind: "wait", ms: 1500 },
+    { kind: "camera", to: { zoom: 3 }, durationMs: 1000 }, { kind: "wait", ms: 1500 },
+  ] }] },
+] });
+
+test.describe("camera", () => {
+  // Byte-equality is the render's contract: a flaky mismatch must fail, never pass on a CI retry.
+  test.describe.configure({ retries: 0 });
+  let camId = "";
+  test.beforeEach(async ({ request }, info) => {
+    camId = `e2e-render-camera-${info.parallelIndex}`;
+    await request.delete(`/api/decks/${camId}`).catch(() => {});
+    await request.post("/api/decks", { data: { id: camId, title: "Camera" } });
+  });
+  test.afterEach(async ({ request }) => { await request.delete(`/api/decks/${camId}`); });
+
+  /** `s` as the browser serialises it back from `style.transform` (Chromium keeps ~6 significant
+   *  digits, so the 6-decimal string the page wrote reads back shorter). */
+  const cssTransform = (page: import("@playwright/test").Page, s: string) => page.evaluate((s) => {
+    const el = document.createElement("div");
+    el.style.transform = s;
+    return el.style.transform;
+  }, s);
+
+  const open = async (page: import("@playwright/test").Page) => {
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto(`/render?deck=${camId}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+    return (t: number) => page.evaluate(async (t) => {
+      const r = window.__morganaRender!;
+      if (!r.ready) throw new Error("not ready");
+      await r.renderFrame(t);
+    }, t);
+  };
+
+  test("camera is deterministic: stepped and jumped frames are byte-equal mid-zoom, after a cut and on a backward jump", async ({ page, request }) => {
+    const still = await upload(request, camId, "still.png", "image/png");
+    const clip = await upload(request, camId, "clip-h264.mp4", "video/mp4");
+    const camDoc = cameraDocFor(camId, still, clip);
+    expect((await request.put(`/api/decks/${camId}`, { data: camDoc })).status()).toBe(200);
+    const ev = cameraEvents(camDoc as unknown as DeckDoc);
+    const frame = await open(page);
+    const capture = async () => {
+      const png = await page.screenshot();
+      const dom = await page.evaluate(() => {
+        const tf = (sel: string) => [...document.querySelectorAll<HTMLElement>(`[data-render-root] ${sel}`)].map((e) => e.style.transform);
+        return {
+          art: tf(".artstage__world"), cin: tf(".cin__world"), beat: tf(".beat__world"), stage: tf(".cin__stage"),
+          layers: [...document.querySelectorAll<HTMLElement>(".artstage__layer")].map((e) => e.dataset.asset),
+          text: [...document.querySelectorAll<HTMLElement>("[data-render-root] .cin__line")].map((e) => e.textContent),
+        };
+      });
+      return { png, dom };
+    };
+    const expectFraming = async (dom: Awaited<ReturnType<typeof capture>>["dom"], T: number) => {
+      const want = await cssTransform(page, cameraTransform(cameraAt(ev, T)));
+      expect(dom.art).toEqual([want]);
+      expect(dom.cin).toEqual([want]);
+      expect(dom.beat).toEqual([want, want]);
+      expect(dom.stage).toEqual([""]); // the text layer never moves
+    };
+
+    // Stepping through the whole deck.
+    for (const t of [0, 0.25, 0.5, 0.75, 1.0]) await frame(t);
+    const stepMid = await capture();
+    for (const t of [1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]) await frame(t);
+    const stepCut = await capture();
+    for (const t of [5.0, 5.2, 5.4]) await frame(t);
+    const stepOut = await capture();
+
+    // Sanity: the compared frames really are mid-zoom / held across the cut / mid zoom-out.
+    expect(cameraAt(ev, 1.0).zoom).toBeGreaterThan(1);
+    expect(cameraAt(ev, 1.0).zoom).toBeLessThan(3);
+    const held = cameraAt(ev, 4.5); // scene 2, before its move: scene 1's end framing
+    expect(held.zoom).toBeCloseTo(3, 9);
+    expect(held.x).toBeCloseTo(0.3, 9);
+    expect(held.y).toBeCloseTo(0.4, 9);
+    expect(cameraAt(ev, 5.4).zoom).toBeGreaterThan(1);
+    expect(cameraAt(ev, 5.4).zoom).toBeLessThan(3);
+    await expectFraming(stepMid.dom, 1.0);
+    expect(stepMid.dom.text).toEqual(["Camera line"]);
+    expect(stepMid.dom.layers).toEqual([still]);
+    await expectFraming(stepCut.dom, 4.5);
+    expect(stepCut.dom.text).toEqual(["Second line"]);
+    expect(stepCut.dom.layers).toEqual([clip]);
+    await expectFraming(stepOut.dom, 5.4);
+
+    // Jumps from the start straight to each point.
+    for (const [T, stepped] of [[1.0, stepMid], [4.5, stepCut], [5.4, stepOut]] as const) {
+      await frame(0);
+      await frame(T);
+      const jumped = await capture();
+      expect(jumped.dom, `T=${T}`).toEqual(stepped.dom);
+      expect(jumped.png.equals(stepped.png), `T=${T}`).toBe(true);
+    }
+
+    // Backward jump from 5.4 (scene 2, mid zoom-out) to 1.0 (scene 1, mid zoom-in).
+    await frame(1.0);
+    const jumpBack = await capture();
+    expect(jumpBack.dom).toEqual(stepMid.dom);
+    expect(jumpBack.png.equals(stepMid.png)).toBe(true);
+  });
+
+  test("text stays fixed while the world zooms: the line's rect is unchanged at zoom 1 and zoom 3; the art world's is x3", async ({ page, request }) => {
+    const textDoc = textDocFor(camId, await upload(request, camId, "still.png", "image/png"));
+    expect((await request.put(`/api/decks/${camId}`, { data: textDoc })).status()).toBe(200);
+    const ev = cameraEvents(textDoc as unknown as DeckDoc);
+    expect(ev).toHaveLength(1);
+    const z1 = ev[0].start - 0.05, z3 = ev[0].start + ev[0].duration + 0.5;
+    expect(cameraAt(ev, z1).zoom).toBe(1);
+    expect(cameraAt(ev, z3).zoom).toBeCloseTo(3, 9);
+    const frame = await open(page);
+    const measure = () => page.evaluate(() => {
+      const rect = (sel: string) => {
+        const els = document.querySelectorAll<HTMLElement>(`[data-render-root] ${sel}`);
+        if (els.length !== 1) throw new Error(`${sel}: ${els.length} elements`);
+        const r = els[0].getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      };
+      return { line: rect(".cin__line"), box: rect(".cin__text"), world: rect(".artstage__world"), root: rect(".artstage") };
+    });
+
+    await frame(z1);
+    const atOne = await measure();
+    await frame(z3);
+    const atThree = await measure();
+
+    expect(atOne.line.width).toBeGreaterThan(0);
+    for (const k of ["x", "y", "width", "height"] as const) {
+      expect(Math.abs(atThree.line[k] - atOne.line[k]), `line ${k}`).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(atThree.box[k] - atOne.box[k]), `text box ${k}`).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(atThree.root[k] - atOne.root[k]), `artstage root ${k}`).toBeLessThanOrEqual(0.5); // the root stays fixed
+    }
+    expect(Math.abs(atThree.world.width - 3 * atOne.world.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(atThree.world.height - 3 * atOne.world.height)).toBeLessThanOrEqual(1);
   });
 });
 

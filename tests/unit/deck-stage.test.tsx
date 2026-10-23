@@ -1,14 +1,23 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
-import { createRef, forwardRef, useImperativeHandle } from "react";
+import { createElement, createRef, forwardRef, useImperativeHandle } from "react";
 import { useDeckStage, type DeckStageHandle } from "@/components/player/DeckStage";
 import { nightAt, nightEvents, power2InOut } from "@/engine/authoring/art-clock";
 import type { DeckDoc } from "@/engine/deck-doc";
-import type { Scene } from "@/engine/deck/types";
+import type { Beat, Scene } from "@/engine/deck/types";
+import { cameraAt, cameraEvents, cameraTransform } from "@/engine/authoring/camera-clock";
 import type { ClipMode } from "@/engine/components/video-sync";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+// Counts BeatStage renders (the memoised Stage's only child) without changing what it renders.
+const beatStageRenders = vi.hoisted(() => ({ n: 0 }));
+vi.mock("@/engine/authoring/BeatStage", async (importOriginal) => {
+  const m = await importOriginal<typeof import("@/engine/authoring/BeatStage")>();
+  const Counted = (p: React.ComponentProps<typeof m.BeatStage>) => { beatStageRenders.n++; return createElement(m.BeatStage, p); };
+  return { ...m, BeatStage: Counted };
+});
 
 const doc = (scenes: Scene[]): DeckDoc => ({ version: 1, meta: { id: "d", title: "D" }, scenes });
 
@@ -168,4 +177,94 @@ test("clip art entering at a later beat: clip time counts from its entry in deck
   expect(video().currentTime).toBeCloseTo(1.25, 9);
   apply(5.5);
   expect(video().currentTime).toBeCloseTo(2.5, 9);
+});
+
+// --- deck-time camera (camera moves Task 4) -------------------------------------------------
+
+// Beat a: art 1.01, then at t=0.5 a 2 s camera move to {zoom 3, x 0.3, y 0.4}, a text line and a
+// media tile; a long wait so deck time 10 is still inside the beat.
+const camBeat = (id: string, wait: number): Beat => ({ id, art: { to: "1.01", mode: "cut" }, timeline: [
+  { kind: "wait", ms: 500 },
+  { kind: "camera", to: { zoom: 3, x: 0.3, y: 0.4 }, durationMs: 2000 },
+  { kind: "text", value: "Fixed words", in: "fade" },
+  { kind: "media", id: "m", pos: { x: 0.3, y: 0.4 }, label: "tile" },
+  { kind: "wait", ms: wait },
+] });
+const CAM = doc([{ id: "s1", beats: [camBeat("a", 10000)] }]);
+// Two scenes: the move happens in scene 1 (4 s, pinned); scene 2 has no camera action.
+const CAM2 = doc([
+  { id: "s1", durationSec: 4, beats: [camBeat("a", 1000)] },
+  { id: "s2", beats: [{ id: "b", timeline: [{ kind: "text", value: "Later words", in: "fade" }, { kind: "wait", ms: 3000 }] }] },
+]);
+
+function worlds(container: HTMLElement) {
+  const one = (sel: string) => container.querySelector<HTMLElement>(sel)!;
+  return {
+    art: one(".artstage__world").style.transform,
+    cin: one(".cin__world").style.transform,
+    beat: Array.from(container.querySelectorAll<HTMLElement>(".beat__world")).map((w) => w.style.transform),
+    stage: one(".cin__stage").style.transform,
+    text: Array.from(container.querySelectorAll<HTMLElement>(".cin__text")).map((t) => t.style.transform),
+  };
+}
+const expectFraming = (container: HTMLElement, tf: string) => {
+  const w = worlds(container);
+  expect(w.art).toBe(tf);
+  expect(w.cin).toBe(tf);
+  expect(w.beat).toEqual([tf, tf]);
+  expect(w.stage).toBe(""); // the text layer never moves
+  expect(w.text.length).toBeGreaterThan(0);
+  for (const t of w.text) expect(t).toBe("");
+};
+
+test("camera: apply(T) paints the art world, tiles and notes/objects with the same framing; text stays fixed", () => {
+  const ev = cameraEvents(CAM);
+  const { container, apply } = setup(CAM);
+  apply(1.5); // mid-move (0.5 → 2.5)
+  const tf = cameraTransform(cameraAt(ev, 1.5));
+  expect(tf).toContain("scale(");
+  expect(tf).not.toContain("scale(3)"); // genuinely mid-move
+  expectFraming(container, tf);
+  expect(container.querySelector(".cin__world .cin__media")).not.toBeNull();
+});
+
+test("camera: apply past the move holds the end framing", () => {
+  const { container, apply } = setup(CAM);
+  apply(10);
+  expectFraming(container, cameraTransform({ zoom: 3, x: 0.3, y: 0.4 }));
+  apply(0.2); // a backward scrub to before the move: full frame everywhere
+  const w = worlds(container);
+  expect(w.art).toBe("none");
+  expect(w.cin).toBe("none");
+  expect(w.beat).toEqual(["none", "none"]);
+});
+
+test("camera: mount paints the framing at initialT", () => {
+  const { container } = setup(CAM, 1.5);
+  expectFraming(container, cameraTransform(cameraAt(cameraEvents(CAM), 1.5)));
+});
+
+test("camera: the framing persists across a cut into a scene with no camera action", () => {
+  const { container, apply } = setup(CAM2);
+  apply(3); // scene 1, after the move
+  const end = cameraTransform({ zoom: 3, x: 0.3, y: 0.4 });
+  expect(worlds(container).art).toBe(end);
+  apply(5); // scene 2 (starts at 4)
+  expect(container.textContent).toContain("Later words");
+  const w = worlds(container);
+  expect(w.art).toBe(end);
+  expect(w.cin).toBe(end);
+  expect(w.beat).toEqual([end, end]);
+  expect(w.stage).toBe("");
+});
+
+test("camera: a framing change alone never re-renders Stage", () => {
+  const { container, apply } = setup(CAM);
+  apply(0.6); // settle on the beat
+  const before = beatStageRenders.n;
+  expect(before).toBeGreaterThan(0); // the counter sees Stage's BeatStage
+  const seen = new Set<string>();
+  for (const t of [0.8, 1.0, 1.5, 2.0, 2.4]) { apply(t); seen.add(worlds(container).art); }
+  expect(seen.size).toBe(5); // the framing really changed every step
+  expect(beatStageRenders.n).toBe(before);
 });
