@@ -6,11 +6,12 @@ import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { NoteField, type NoteFieldHandle } from "@/engine/components/NoteField";
 import { CinematicSlide, type SlideTransport } from "@/engine/components/layouts/CinematicSlide";
 import { ObjectStage, type ObjectStageHandle } from "@/components/editor/ObjectStage";
+import type { ClipMode } from "@/engine/components/video-sync";
 import { makeAuthoringRuntime } from "./runtime";
 
 export function BeatStage({
   sceneId, beat, animate = true, entryLayers = [], endLayers = [], chrome, contained = false,
-  scene, beatIndex = 0, transport, autoplay = true, art: withArt = true,
+  scene, beatIndex = 0, transport, autoplay = true, art: withArt = true, clipModeRef,
 }: {
   sceneId: string; beat: Beat; animate?: boolean;
   entryLayers?: ArtAsset[]; endLayers?: ArtAsset[];
@@ -27,6 +28,9 @@ export function BeatStage({
    *  and paints art + nightlight from art-clock (the timed Player). The wrapper's background is
    *  then transparent so the host's art shows through. Default true. */
   art?: boolean;
+  /** The host's clip mode (play/seek) for this beat's video tiles, read at paint time — forwarded
+   *  to CinematicSlide. Undefined = autoplay ("play"). */
+  clipModeRef?: React.RefObject<ClipMode>;
 }) {
   const art = useRef<ArtStageHandle>(null);
   const notes = useRef<NoteFieldHandle>(null);
@@ -68,7 +72,7 @@ export function BeatStage({
           this ordering has no effect on paint/stacking — only on effect timing. */}
       {scene && <ObjectStage ref={objStage} scene={scene} active />}
       <div style={{ position: "absolute", inset: 0 }}>
-        <CinematicSlide slots={{ sceneId, beat }} animate={animate} runtime={runtime} chrome={chrome} transport={transport} onTime={paint} autoplay={autoplay} />
+        <CinematicSlide slots={{ sceneId, beat }} animate={animate} runtime={runtime} chrome={chrome} transport={transport} onTime={paint} autoplay={autoplay} clipModeRef={clipModeRef} />
       </div>
     </div>
   );

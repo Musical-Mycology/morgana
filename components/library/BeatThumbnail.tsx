@@ -20,7 +20,7 @@ export function BeatThumbnail({ beat }: { beat: Beat }) {
       style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}
       aria-hidden
     >
-      <ArtStage ref={art} nightlight={beat.nightlight ?? 0.6} reduced transparentBg />
+      <ArtStage ref={art} nightlight={beat.nightlight ?? 0.6} reduced transparentBg clipPlayback={false} />
       <div className="cin__stage">
         <div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} />
       </div>

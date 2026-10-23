@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { createRef, forwardRef, useImperativeHandle } from "react";
 import { useDeckStage, type DeckStageHandle } from "@/components/player/DeckStage";
 import { nightAt, nightEvents, power2InOut } from "@/engine/authoring/art-clock";
 import type { DeckDoc } from "@/engine/deck-doc";
 import type { Scene } from "@/engine/deck/types";
+import type { ClipMode } from "@/engine/components/video-sync";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const doc = (scenes: Scene[]): DeckDoc => ({ version: 1, meta: { id: "d", title: "D" }, scenes });
 
@@ -108,4 +109,48 @@ test("exactly one ArtStage: BeatStage's own is not mounted", () => {
   const { container } = setup(D, 1);
   expect(container.querySelectorAll(".artstage")).toHaveLength(1);
   expect(container.querySelector("[data-testid=beatstage]")).not.toBeNull();
+});
+
+// --- clips as art layers (video-clips Task 7) ----------------------------------------------
+
+/** A host that also exposes the hook's clipMode ref. */
+const ClipHost = forwardRef<DeckStageHandle & { clipMode: React.MutableRefObject<ClipMode> }, { doc: DeckDoc }>(function ClipHost({ doc }, ref) {
+  const { apply, T, layout, stage, clipMode } = useDeckStage(doc, 0);
+  useImperativeHandle(ref, () => ({ apply, total: layout.total, current: () => T.current, clipMode }), [apply, layout.total, T, clipMode]);
+  return <div style={{ position: "relative", width: 1920, height: 1080 }}>{stage}</div>;
+});
+
+const V = doc([{ id: "s", beats: [{ id: "a", art: { to: "media:a.mp4", mode: "cut" }, timeline: [{ kind: "wait", ms: 3000 }] }] }]);
+
+function setupClip() {
+  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(1);
+  vi.spyOn(HTMLMediaElement.prototype, "duration", "get").mockReturnValue(10);
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  const ref = createRef<DeckStageHandle & { clipMode: React.MutableRefObject<ClipMode> }>();
+  const { container } = render(<ClipHost ref={ref} doc={V} />);
+  const video = () => container.querySelector<HTMLVideoElement>('video.artstage__layer[data-asset="media:a.mp4"]')!;
+  const apply = (t: number) => act(() => { ref.current!.apply(t); });
+  return { ref, play, video, apply };
+}
+
+test("clip art: apply(T) seeks the art video to deck time (seek mode by default)", () => {
+  const { ref, play, video, apply } = setupClip();
+  expect(ref.current!.clipMode.current).toBe("seek");
+  apply(1.25);
+  expect(video().currentTime).toBeCloseTo(1.25, 9);
+  expect(play).not.toHaveBeenCalled();
+});
+
+test("clip art: clipMode 'play' makes apply play the clip; a scrub back seeks", () => {
+  const { ref, play, video, apply } = setupClip();
+  apply(1.25);
+  ref.current!.clipMode.current = "play";
+  apply(1.3);
+  expect(play).toHaveBeenCalled();
+  expect(play.mock.contexts).toContain(video());
+  ref.current!.clipMode.current = "seek";
+  apply(0.5);
+  expect(video().currentTime).toBeCloseTo(0.5, 9);
 });

@@ -5,8 +5,16 @@ import { render, cleanup } from "@testing-library/react";
 import gsap from "gsap";
 import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import type { ArtLayerState } from "@/engine/authoring/art-clock";
+import { DeckAssetsProvider } from "@/engine/asset-resolver-react";
+import { mediaUrl } from "@/lib/api/media-client";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+vi.mock("@/engine/components/video-sync", async (orig) => {
+  const m = await orig<typeof import("@/engine/components/video-sync")>();
+  return { ...m, syncVideo: vi.fn(m.syncVideo), releaseVideo: vi.fn(m.releaseVideo) };
+});
+import { releaseVideo, syncVideo } from "@/engine/components/video-sync";
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.mocked(syncVideo).mockClear(); vi.mocked(releaseVideo).mockClear(); });
 
 function setup() {
   const ref = createRef<ArtStageHandle>();
@@ -95,5 +103,92 @@ describe("ArtStage.renderState — interplay with tweened show()", () => {
     expect(root.firstElementChild!.classList.contains("artstage__glow")).toBe(true);
     ref.current!.renderState([two[1], two[0]], 0.2);
     expect(root.firstElementChild!.classList.contains("artstage__glow")).toBe(true);
+  });
+});
+
+describe("ArtStage.renderState — media refs", () => {
+  /** jsdom media: metadata "loaded" (readyState 1, 10 s long); play/pause/load are not implemented. */
+  function stubMedia() {
+    vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(1);
+    vi.spyOn(HTMLMediaElement.prototype, "duration", "get").mockReturnValue(10);
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  }
+  function setupDeck() {
+    const ref = createRef<ArtStageHandle>();
+    const { container } = render(<DeckAssetsProvider deckId="d1"><ArtStage ref={ref} nightlight={0} reduced={false} /></DeckAssetsProvider>);
+    const root = container.querySelector<HTMLElement>(".artstage")!;
+    return { ref, root, videos: () => Array.from(root.querySelectorAll<HTMLVideoElement>("video.artstage__layer")) };
+  }
+  const vid: ArtLayerState = { asset: "media:a.mp4", opacity: 1, scale: 1, z: 1, overlay: false, since: 2 };
+
+  it("a video ref becomes a muted <video> synced to its clip time at deck time T", () => {
+    stubMedia();
+    const { ref, videos } = setupDeck();
+    ref.current!.renderState([vid], 0, 3.5, "seek");
+    const [v] = videos();
+    expect(videos()).toHaveLength(1);
+    expect(v.className).toBe("artstage__layer");
+    expect(v.dataset.asset).toBe("media:a.mp4");
+    expect(v.getAttribute("src")).toBe(mediaUrl("d1", "a.mp4"));
+    expect(v.muted).toBe(true);
+    expect(syncVideo).toHaveBeenCalledTimes(1);
+    const [el, clipT, mode, opts] = vi.mocked(syncVideo).mock.calls[0];
+    expect(el).toBe(v);
+    expect(clipT(10)).toBeCloseTo(1.5, 9);
+    expect(mode).toBe("seek");
+    expect(opts).toEqual({ loop: undefined });
+    expect(v.currentTime).toBeCloseTo(1.5, 9);
+  });
+
+  it("passes the layer's clip options (in-point, loop) and the mode through", () => {
+    stubMedia();
+    const { ref } = setupDeck();
+    ref.current!.renderState([{ ...vid, clip: { in: 4, loop: true } }], 0, 3.5, "play");
+    const [, clipT, mode, opts] = vi.mocked(syncVideo).mock.calls[0];
+    expect(clipT(10)).toBeCloseTo(5.5, 9);
+    expect(mode).toBe("play");
+    expect(opts).toEqual({ loop: true });
+  });
+
+  it("T and mode default to 0 and seek", () => {
+    stubMedia();
+    const { ref } = setupDeck();
+    ref.current!.renderState([{ ...vid, since: 0 }], 0);
+    const [, clipT, mode] = vi.mocked(syncVideo).mock.calls[0];
+    expect(clipT(10)).toBe(0);
+    expect(mode).toBe("seek");
+  });
+
+  it("a second renderState with the same asset reuses the element", () => {
+    stubMedia();
+    const { ref, videos } = setupDeck();
+    ref.current!.renderState([vid], 0, 3.5, "seek");
+    const first = videos()[0];
+    ref.current!.renderState([vid], 0, 4, "seek");
+    expect(videos()).toEqual([first]);
+    expect(first.currentTime).toBeCloseTo(2, 9);
+  });
+
+  it("removing the layer releases its video", () => {
+    stubMedia();
+    const { ref, videos } = setupDeck();
+    ref.current!.renderState([vid], 0, 3.5, "seek");
+    const v = videos()[0];
+    ref.current!.renderState([], 0, 4, "seek");
+    expect(v.isConnected).toBe(false);
+    expect(releaseVideo).toHaveBeenCalledWith(v);
+    expect(v.hasAttribute("src")).toBe(false);
+  });
+
+  it("an image media ref becomes an <img> with the assets.media src (no video sync)", () => {
+    const { ref, root } = setupDeck();
+    ref.current!.renderState([{ ...vid, asset: "media:p.png" }], 0, 3.5, "seek");
+    const img = root.querySelector<HTMLImageElement>("img.artstage__layer")!;
+    expect(img.dataset.asset).toBe("media:p.png");
+    expect(img.getAttribute("src")).toBe(mediaUrl("d1", "p.png"));
+    expect(root.querySelector("video")).toBeNull();
+    expect(syncVideo).not.toHaveBeenCalled();
   });
 });

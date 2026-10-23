@@ -5,6 +5,8 @@ import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import type { ArtAsset, ArtMode, ArtTransition, CinematicSlideSlots, Action, TextIn, TextSize, TextAlign, StagePoint, SlideTheme, PanelSpec } from "@/engine/deck/types";
 import type { DeckChrome } from "@/engine/deck-doc";
+import type { MediaRef } from "@/engine/deck/media-ref";
+import type { ClipMode } from "@/engine/components/video-sync";
 import { renderPanelHTML } from "@/engine/deck/panel";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
@@ -35,17 +37,23 @@ function boxAnchor(pos: StagePoint, align?: TextAlign): { left: string; right: s
  *  `lib/editor/paths.ts`'s `setPath()` shallow-spreads `{...obj}` then assigns the edited field,
  *  so a field set for the first time (e.g. `durationMs`) lands at the END of insertion order —
  *  two value-identical transitions edited in a different order would otherwise serialise
- *  differently and spuriously re-trigger ArtStage's crossfade. An explicit field list also fails
- *  loudly (a TS error) if ArtTransition gains a field this key doesn't know about, rather than
- *  silently changing diffing behaviour. */
+ *  differently and spuriously re-trigger ArtStage's crossfade. `clips` is serialised the same
+ *  way: refs sorted, each with a fixed [in, loop] pair.
+ *  Nothing checks this list: tsc does NOT flag a new ArtTransition field missing from it. A field
+ *  left out makes two transitions that differ only in it dedupe as one, so when ArtTransition
+ *  gains a field, add it here. */
 function artKey(a: ArtTransition): string {
-  return JSON.stringify([a.to, a.mode, a.durationMs ?? null, a.keep ?? null, a.out ?? null]);
+  const clips = a.clips
+    ? (Object.keys(a.clips) as MediaRef[]).sort().map((ref) => [ref, a.clips![ref]?.in ?? null, a.clips![ref]?.loop ?? null])
+    : null;
+  return JSON.stringify([a.to, a.mode, a.durationMs ?? null, a.keep ?? null, a.out ?? null, clips]);
 }
 
 
 export interface CinematicRuntime {
-  /** Cross-fade to an absolute layer set (entry transitions). */
-  art(layers: ArtAsset[], mode: ArtMode, durationMs?: number): void;
+  /** Cross-fade to an absolute layer set (entry transitions). `clips`: in-points/loop for media
+   *  refs the transition brings in. */
+  art(layers: ArtAsset[], mode: ArtMode, durationMs?: number, clips?: ArtTransition["clips"]): void;
   /** Fold one transition onto the live stack (mid-timeline art actions). */
   applyArt(transition: ArtTransition, durationMs?: number): void;
   setNightlight(to: number, ms?: number): void;
@@ -98,6 +106,9 @@ interface Props {
    *  `transport.seek` (the timed Player). Host-driven: the host paints art + nightlight from
    *  art-clock, so this slide never calls runtime.art/applyArt/setNightlight. Default true. */
   autoplay?: boolean;
+  /** The host's clip mode for this beat's video tiles, read at paint time (a ref, so a mode
+   *  change never re-renders the slide). Undefined = autoplay: "play". Consumed by media tiles. */
+  clipModeRef?: React.RefObject<ClipMode>;
 }
 
 export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true }: Props) {
@@ -240,7 +251,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // it as an absolute cross-fade using the entry op's mode. Autoplay visits beats strictly in
     // order, so a beat with no `art` op of its own relies on ArtStage's live stack already holding
     // the art it inherits. Host-driven: the host paints art + nightlight from art-clock.
-    if (autoplay && slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs);
+    if (autoplay && slots.beat.art) runtime.art(runtime.resolveEntry(), slots.beat.art.mode, slots.beat.art.durationMs, slots.beat.art.clips);
 
     // Autoplay from t=0 — observable behaviour is unchanged from the old per-segment
     // machinery (design spec §7b §4.4): a ticker now drives the single time axis instead of

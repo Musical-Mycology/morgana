@@ -32,7 +32,9 @@ function applyAt(a: Action, p: number, ctx: SeekCtx): void {
     }
     case "art": {
       const layers = Array.isArray(a.art.to) ? a.art.to : [a.art.to];
-      if (p >= 1) ctx.art?.snap(layers); else ctx.art?.show(layers, "fade", 1);
+      // Clip options travel with the transition; with no deck clock here the host (the editor
+      // canvas, library thumbnails: `clipPlayback={false}`) shows each clip's in-point frame.
+      if (p >= 1) ctx.art?.snap(layers, a.art.clips); else ctx.art?.show(layers, "fade", 1, a.art.clips);
       break;
     }
     case "clear":

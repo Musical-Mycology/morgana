@@ -17,7 +17,7 @@ export interface AuthoringHooks {
  *  noteFieldStateAt reducer via NoteField, driven by whatever clock the host supplies. */
 export function makeAuthoringRuntime(h: AuthoringHooks): CinematicRuntime {
   return {
-    art: (layers, mode, ms) => h.art.current?.show(layers, mode, ms),
+    art: (layers, mode, ms, clips) => h.art.current?.show(layers, mode, ms, clips),
     applyArt: (t, ms) => h.art.current?.apply(t, ms),
     setNightlight: (to) => h.setNight(to),
     onGate: (resume) => h.onGate(resume),

@@ -390,6 +390,44 @@ test("art diffing key is independent of the transition object's own key insertio
   expect(calls).toEqual(["art"]); // fired once, not once per differently-key-ordered-but-equal action
 });
 
+// video-clips Task 7: `clips` is part of the art key — two transitions that differ only in their
+// clip options are different art (a new in-point), so the second must not be deduped away.
+test("art diffing key includes clips: transitions differing only in clips both fire", () => {
+  const calls: unknown[] = [];
+  const runtime = { ...noopRuntime, applyArt: (t: unknown) => calls.push(t) };
+  const tl: Action[] = [
+    { kind: "art", art: { to: "media:a.mp4", mode: "fade", clips: { "media:a.mp4": { in: 1 } } } },
+    { kind: "wait", ms: 500 },
+    { kind: "art", art: { to: "media:a.mp4", mode: "fade", clips: { "media:a.mp4": { in: 3 } } } },
+    { kind: "wait", ms: 500 },
+  ];
+  const transport = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "clipkey", timeline: tl } }} animate runtime={runtime} transport={transport} />,
+  );
+  transport.current!.seek(0.1);
+  transport.current!.seek(0.6);
+  expect(calls).toHaveLength(2);
+});
+
+test("art diffing key for clips ignores the clips object's key order", () => {
+  const calls: string[] = [];
+  const runtime = { ...noopRuntime, applyArt: () => calls.push("art") };
+  const tl: Action[] = [
+    { kind: "art", art: { to: ["media:a.mp4", "media:b.webm"], mode: "fade", clips: { "media:a.mp4": { in: 1, loop: true }, "media:b.webm": { in: 2 } } } },
+    { kind: "wait", ms: 500 },
+    { kind: "art", art: { to: ["media:a.mp4", "media:b.webm"], mode: "fade", clips: { "media:b.webm": { in: 2 }, "media:a.mp4": { loop: true, in: 1 } } } },
+    { kind: "wait", ms: 500 },
+  ];
+  const transport = createRef<SlideTransport>();
+  render(
+    <CinematicSlide slots={{ sceneId: "s", beat: { id: "clipkey2", timeline: tl } }} animate runtime={runtime} transport={transport} />,
+  );
+  transport.current!.seek(0.1);
+  transport.current!.seek(0.6);
+  expect(calls).toEqual(["art"]);
+});
+
 // --- review round 2: destructive-boundary round trip ----------------------------------------
 //
 // The round-1 fix (lastDestructive, a one-way "already torn down" flag) over-corrected: it

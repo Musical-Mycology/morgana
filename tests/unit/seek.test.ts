@@ -9,3 +9,17 @@ test("a text action with pos renders absolutely at its normalized point", () => 
   expect(p.style.left).toBe("50%");
   expect(p.style.top).toBe("30%");
 });
+
+test("art carries the transition's clip options through to ArtStage", () => {
+  const host = document.createElement("div");
+  const calls: unknown[][] = [];
+  const art = {
+    show: (...a: unknown[]) => calls.push(["show", ...a]),
+    snap: (...a: unknown[]) => calls.push(["snap", ...a]),
+    apply: () => {}, renderState: () => {},
+  };
+  const clips = { "media:a.mp4": { in: 2 } } as const;
+  const tl = [{ kind: "art", art: { to: "media:a.mp4", mode: "fade", durationMs: 1000, clips } }, { kind: "wait", ms: 2000 }] as Parameters<typeof renderBeatAt>[0];
+  renderBeatAt(tl, 0.5, { textHost: host, art }); // art is instantaneous on the beat clock: settled → snap
+  expect(calls).toEqual([["snap", ["media:a.mp4"], clips]]);
+});

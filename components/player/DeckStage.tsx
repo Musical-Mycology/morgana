@@ -7,6 +7,7 @@ import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { flattenStory } from "@/engine/deck/flatten";
 import { deckLayout, locate, type DeckLayout, type Located } from "@/engine/authoring/deck-clock";
 import { artAt, artEvents, nightAt, nightEvents } from "@/engine/authoring/art-clock";
+import type { ClipMode } from "@/engine/components/video-sync";
 
 /** The imperative face of a deck stage (the render page drives frames through it). */
 export interface DeckStageHandle { apply(T: number): void; total: number; current(): number }
@@ -14,7 +15,7 @@ export interface DeckStageHandle { apply(T: number): void; total: number; curren
 /** One mounted BeatStage for the whole deck. Memoised on the beat so the per-frame clock
  *  re-render never re-renders the stage; only a beat change does. Its own ArtStage is not
  *  mounted (`art={false}`): the deck stage owns the one ArtStage. */
-const Stage = memo(function Stage({ doc, flatIdx, transport }: { doc: DeckDoc; flatIdx: number; transport: React.RefObject<SlideTransport | null> }) {
+const Stage = memo(function Stage({ doc, flatIdx, transport, clipModeRef }: { doc: DeckDoc; flatIdx: number; transport: React.RefObject<SlideTransport | null>; clipModeRef: React.RefObject<ClipMode> }) {
   const slides = useMemo(() => flattenStory(doc.scenes), [doc]);
   const slide = slides[flatIdx];
   if (!slide || slide.layout !== "cinematic") return null;
@@ -23,7 +24,7 @@ const Stage = memo(function Stage({ doc, flatIdx, transport }: { doc: DeckDoc; f
   return (
     <BeatStage
       sceneId={slide.slots.sceneId} beat={slide.slots.beat} scene={scene} beatIndex={beatIndex}
-      chrome={doc.meta.chrome} autoplay={false} art={false} transport={transport} contained
+      chrome={doc.meta.chrome} autoplay={false} art={false} transport={transport} clipModeRef={clipModeRef} contained
     />
   );
 });
@@ -36,6 +37,10 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   T: React.MutableRefObject<number>;
   displayT: number; loc: Located | null; layout: DeckLayout;
   stage: React.ReactNode;
+  /** How clips follow deck time: "play" (native playback, drift-corrected) while a host plays;
+   *  "seek" (exact, awaitable) otherwise. TimedPlayer flips it; RenderStage leaves "seek". A ref,
+   *  read at paint time, so a mode change never re-renders the memoised Stage. */
+  clipMode: React.MutableRefObject<ClipMode>;
 } {
   const layout = useMemo(() => deckLayout(doc), [doc]);
   const artEv = useMemo(() => artEvents(doc), [doc]);
@@ -43,6 +48,7 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   const transport = useRef<SlideTransport>(null);
   const artRef = useRef<ArtStageHandle>(null);
   const T = useRef(Math.max(0, Math.min(layout.total, initialT)));
+  const clipMode = useRef<ClipMode>("seek");
   const [displayT, setDisplayT] = useState(T.current);
   const [loc, setLoc] = useState<Located | null>(() => locate(layout, T.current));
   const locRef = useRef(loc);
@@ -52,7 +58,7 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   const initialNight = useMemo(() => nightAt(nightTl, T.current), [nightTl]);
 
   const paintArt = useCallback(() => {
-    artRef.current?.renderState(artAt(artEv, T.current), nightAt(nightTl, T.current));
+    artRef.current?.renderState(artAt(artEv, T.current), nightAt(nightTl, T.current), T.current, clipMode.current);
   }, [artEv, nightTl]);
 
   /** Move the deck clock to `to` and paint. A beat change re-renders <Stage>; the seek for the
@@ -81,8 +87,8 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   const stage = (
     <div style={{ position: "absolute", inset: 0, background: "var(--color-mm-dark-brown)" }}>
       <ArtStage ref={artRef} nightlight={initialNight} reduced={false} transparentBg />
-      {loc && loc.flatIdx != null && <Stage doc={doc} flatIdx={loc.flatIdx} transport={transport} />}
+      {loc && loc.flatIdx != null && <Stage doc={doc} flatIdx={loc.flatIdx} transport={transport} clipModeRef={clipMode} />}
     </div>
   );
-  return { apply, T, displayT, loc, layout, stage };
+  return { apply, T, displayT, loc, layout, stage, clipMode };
 }
