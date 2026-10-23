@@ -1,6 +1,6 @@
 # Video clips + image uploads — design
 
-**Status:** approved design (sub-project 4)
+**Status:** implemented (sub-project 4)
 **Roadmap:** timed-video sub-project 4 of 6 — see
 [Deck clock + timed Player](2026-10-22-deck-clock-timed-player-design.md) §0.2. Builds on
 [Soundtrack + deck media store](2026-10-23-soundtrack-design.md) (#37) and
