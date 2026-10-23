@@ -173,6 +173,45 @@ a loop wrap). Re-encode them with a short keyframe interval first for a faster r
 ffmpeg -i in.mp4 -c:v libx264 -crf 18 -g 30 -pix_fmt yuv420p -an out.mp4
 ```
 
+### Camera moves
+
+A timed deck can move a camera over its art, media tiles, notes and objects: push in on a detail,
+pan across a panel, pull back out.
+
+**The action.** `camera` has `to { x, y, zoom }`, `durationMs` and `ease`. `x` and `y` are the
+centre of the view as fractions of the stage (0.5, 0.5 is the middle), and `zoom` runs from 1 (the
+full frame) to 8. `durationMs` defaults to 1200, and 0 is a cut. `ease` is `inOut`, `in`, `out` or
+`linear`, and defaults to `inOut`. Any field you leave out keeps its current value, so
+`{ to: { zoom: 3 } }` zooms in on whatever the camera is already centred on.
+
+**Timing.** A camera action takes no beat time: it starts at its place in the timeline and moves in
+parallel with whatever follows. Two camera actions at the same moment merge into one move, and the
+later fields win. A framing holds across beats and scenes until the next move; it is not reset at a
+scene change. A move that starts while another is still running interrupts it and takes over from
+the framing it had reached, so there is no jump.
+
+**What moves.** Art (including clips), media tiles, notes and objects zoom and pan. Text lines,
+counters, the end card and the nightlight glow stay fixed. Tiles still draw above text where they
+overlap, as before.
+
+**Motion.** Zoom is smooth in log space, so a push-in feels even. The view is clamped so it never
+shows past the stage edge: near an edge the centre is pulled in as far as the zoom needs. The stage
+clips anything zoomed beyond the frame.
+
+**In the editor.** The Camera action has fields plus **Pick on canvas**. While picking, the canvas
+shows the full frame and a rectangle of the view the zoom would give; a click sets `x` and `y` as
+one undo step, and **Esc** cancels. Outside picking, the canvas previews the camera on art and
+notes. The editor's draggable objects stay at full frame while you edit them, so you can grab them
+where they are; `/play` and the render show them inside the camera.
+
+**Lint.** `camera-overlap` warns when a move starts before the previous one finishes (it
+interrupts it). `camera-zoom-soft` warns when a move ends above 2× over built-in panel art, which
+looks soft when magnified. For zoom shots, supply art at 2-3× the stage resolution (an uploaded
+image or clip is not flagged).
+
+**Determinism.** The camera is a pure function of the deck clock, so camera frames are
+deterministic in the MP4 render, and scrubbing or seeking `/play` lands on the same framing.
+
 ### Render to MP4
 
 `npm run render` turns a timed deck into an MP4 (H.264 video, AAC soundtrack) by stepping the deck

@@ -1,6 +1,6 @@
 # Camera moves — design
 
-**Status:** approved design (sub-project 5)
+**Status:** implemented (sub-project 5)
 **Roadmap:** timed-video sub-project 5 of 6. See
 [Deck clock + timed Player](2026-10-22-deck-clock-timed-player-design.md) §0.2, which builds on
 [MP4 render](2026-10-24-mp4-render-design.md) (#38) and [Video clips](2026-10-23-video-clips-design.md) (#40).
