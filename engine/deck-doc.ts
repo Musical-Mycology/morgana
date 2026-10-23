@@ -118,7 +118,7 @@ function validateCameraActions(scene: Scene, si: number, e: string[]): void {
       if (a?.kind !== "camera") return;
       const at = `scenes[${si}].beats[${bi}].timeline[${ai}]`;
       const to = a.to as Record<string, unknown> | undefined;
-      if (!to || typeof to !== "object") { e.push(`${at}.to missing`); }
+      if (!to || typeof to !== "object" || Array.isArray(to)) { e.push(`${at}.to missing`); }
       else {
         if (to.x === undefined && to.y === undefined && to.zoom === undefined) e.push(`${at}: camera needs at least one of x, y, zoom`);
         for (const k of ["x", "y"] as const) {

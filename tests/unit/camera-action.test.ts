@@ -26,12 +26,24 @@ describe("camera action", () => {
     expect(validateDeckDoc(deckWith({ kind: "camera", to: { zoom: 1 } })).ok).toBe(true);
   });
 
+  test("durationMs 0 (a cut) and zoom exactly 1 or 8 are valid", () => {
+    expect(validateDeckDoc(deckWith({ kind: "camera", to: { zoom: 2 }, durationMs: 0 })).errors).toEqual([]);
+    expect(validateDeckDoc(deckWith({ kind: "camera", to: { zoom: 1 } })).errors).toEqual([]);
+    expect(validateDeckDoc(deckWith({ kind: "camera", to: { zoom: 8 } })).errors).toEqual([]);
+  });
+
   test.each([
     ["empty to", { kind: "camera", to: {} }, "camera needs at least one of x, y, zoom"],
     ["zoom below 1", { kind: "camera", to: { zoom: 0.5 } }, ".to.zoom must be 1–8"],
     ["zoom above 8", { kind: "camera", to: { zoom: 9 } }, ".to.zoom must be 1–8"],
     ["x above 1", { kind: "camera", to: { x: 1.2 } }, ".to.x must be 0–1"],
     ["negative duration", { kind: "camera", to: { zoom: 2 }, durationMs: -1 }, ".durationMs must be a finite number ≥ 0"],
+    ["NaN zoom", { kind: "camera", to: { zoom: NaN } }, ".to.zoom must be 1–8"],
+    ["Infinity x", { kind: "camera", to: { x: Infinity } }, ".to.x must be 0–1"],
+    ["non-object to", { kind: "camera", to: "zoom" }, ".to missing"],
+    ["array to", { kind: "camera", to: [1] }, ".to missing"],
+    ["string zoom", { kind: "camera", to: { zoom: "2" } }, ".to.zoom must be 1–8"],
+    ["negative x", { kind: "camera", to: { x: -0.1 } }, ".to.x must be 0–1"],
     ["unknown ease", { kind: "camera", to: { zoom: 2 }, ease: "bounce" }, ".ease must be one of"],
   ])("rejects %s", (_n, action, frag) => {
     const r = validateDeckDoc(deckWith(action));
