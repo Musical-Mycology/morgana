@@ -17,6 +17,7 @@ import { LintPanel } from "@/components/editor/LintPanel";
 import { useLint } from "@/lib/editor/use-lint";
 import { DeckMediaContext, useDeckMediaState } from "@/lib/editor/use-deck-media";
 import { releaseSoundtracksExcept, useSoundtrack } from "@/lib/audio/use-soundtrack";
+import { DeckAssetsProvider } from "@/engine/asset-resolver-react";
 import { lintCounts } from "@/lib/editor/lint";
 import { primaryPath } from "@/lib/editor/selection";
 import { useExternalChangePoll } from "@/lib/editor/use-external-change-poll";
@@ -176,7 +177,9 @@ export default function Editor() {
       <div className="ed__canvas" style={{ position: "relative" }}>
         {placeholder
           ? <CanvasPlaceholderCard kind={placeholder} deckId={deckId} onRetry={() => deckId && loadDeckById(deckId)} />
-          : <><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} />{beatEmpty && <EmptyBeatHint />}</>}
+          : deckId
+            ? <DeckAssetsProvider deckId={deckId}><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} />{beatEmpty && <EmptyBeatHint />}</DeckAssetsProvider>
+            : <><DeckCanvas ref={canvasRef} flat={selectedFlat} onTime={onTime} />{beatEmpty && <EmptyBeatHint />}</>}
       </div>
       <Timeline canvasRef={canvasRef} time={time} />
       {panel === "settings" ? <DeckSettings /> : panel === "export" ? <ExportPanel /> : panel === "mcp" ? <McpPanel /> : panel === "lint" ? <LintPanel issues={issues} /> : <Inspector />}

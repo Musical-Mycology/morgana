@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { defaultAssetResolver, type AssetResolver } from "@/engine/asset-resolver";
+import { defaultAssetResolver, deckAssetResolver, type AssetResolver } from "@/engine/asset-resolver";
+import { mediaUrl } from "@/lib/api/media-client";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -28,6 +29,32 @@ test("custom resolver overrides", () => {
   const r: AssetResolver = {
     story: (k) => `https://cdn.example/${k}`,
     brand: (f) => `https://cdn.example/${f}`,
+    media: (m) => `https://cdn.example/${m}`,
   };
   expect(r.story("3.02")).toBe("https://cdn.example/3.02");
+});
+
+const REF = "media:0123456789abcdef.mp4" as const;
+
+test("default resolver resolves media refs to an empty string (no deck)", () => {
+  expect(defaultAssetResolver.media(REF)).toBe("");
+});
+
+test("deckAssetResolver maps a media ref to the deck's media URL", () => {
+  const r = deckAssetResolver("d1");
+  expect(r.media(REF)).toBe(mediaUrl("d1", "0123456789abcdef.mp4"));
+  expect(r.media(REF)).toBe("/api/decks/d1/media/0123456789abcdef.mp4");
+});
+
+test("deckAssetResolver leaves story() and brand() unchanged", () => {
+  const r = deckAssetResolver("d1");
+  expect(r.story("1.01")).toBe(defaultAssetResolver.story("1.01"));
+  expect(r.brand("logo_day_angelring.png")).toBe(defaultAssetResolver.brand("logo_day_angelring.png"));
+});
+
+test("deckAssetResolver media URL is prefixed with the configured base path", async () => {
+  vi.resetModules();
+  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/morgana");
+  const { deckAssetResolver: make } = await import("@/engine/asset-resolver");
+  expect(make("d1").media(REF)).toBe("/morgana/api/decks/d1/media/0123456789abcdef.mp4");
 });

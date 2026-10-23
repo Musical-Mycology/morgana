@@ -2,10 +2,14 @@ import type { StoryAsset } from "@/engine/deck/story-assets";
 import { storyAssetUrl } from "@/engine/deck/story-assets";
 import { sporekleAsset, type SporekleAsset } from "@/engine/sporekles";
 import { withBasePath } from "@/lib/base-path";
+import { mediaRefId, type MediaRef } from "@/engine/deck/media-ref";
+import { mediaUrl } from "@/lib/api/media-client";
 
 export interface AssetResolver {
   story(key: StoryAsset): string;
   brand(file: SporekleAsset | string): string;
+  /** `media:<id>` ref → URL of that deck's uploaded media. "" when there is no deck. */
+  media(ref: MediaRef): string;
 }
 
 // storyAssetUrl() hand-builds app-absolute URLs ("/storyboard/…"); Next does not
@@ -25,4 +29,11 @@ export interface AssetResolver {
 export const defaultAssetResolver: AssetResolver = {
   story: (key) => withBasePath(storyAssetUrl(key)),
   brand: (file) => sporekleAsset(file),
+  media: () => "",
 };
+
+/** Resolver for a loaded deck: media refs map to that deck's media URL (base path applied by
+ *  mediaUrl — the one seam). Everything else behaves as the default. */
+export function deckAssetResolver(deckId: string): AssetResolver {
+  return { ...defaultAssetResolver, media: (ref) => mediaUrl(deckId, mediaRefId(ref)) };
+}
