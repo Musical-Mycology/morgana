@@ -4,6 +4,7 @@ import { CameraPick } from "@/components/editor/CameraPick";
 import { DeckCanvas } from "@/components/editor/DeckCanvas";
 import { Inspector } from "@/components/editor/Inspector";
 import { useEditor } from "@/lib/editor/store";
+import { clampFraming } from "@/engine/authoring/camera-clock";
 import type { DeckDoc } from "@/engine/deck-doc";
 
 // jsdom's fireEvent.pointerMove drops clientX/clientY; dispatch a MouseEvent of the pointer type.
@@ -42,6 +43,25 @@ describe("CameraPick", () => {
     fireEvent.click(overlay, { clientX: 0.9 * W, clientY: 0.1 * H });
     expect(onPick).toHaveBeenCalledTimes(1);
     expect(onPick).toHaveBeenCalledWith({ x: 0.875, y: 0.125 });
+  });
+
+  it("rounding never lands outside the clamp (zoom 7, picked at the corners)", () => {
+    const onPick = vi.fn();
+    render(<CameraPick zoom={7} onPick={onPick} onCancel={() => {}} />);
+    const overlay = screen.getByTestId("camera-pick-overlay");
+    stubRect(overlay);
+    fireEvent.click(overlay, { clientX: 0.01 * W, clientY: 0.99 * H });
+    fireEvent.click(overlay, { clientX: 0.99 * W, clientY: 0.01 * H });
+    const m = 0.5 / 7;
+    for (const [p] of onPick.mock.calls as [{ x: number; y: number }][]) {
+      for (const v of [p.x, p.y]) {
+        expect(v).toBeGreaterThanOrEqual(m);
+        expect(v).toBeLessThanOrEqual(1 - m);
+        expect(Math.round(v * 1e4) / 1e4).toBe(v); // still 4-decimal tidy
+      }
+      expect(clampFraming({ zoom: 7, ...p })).toEqual({ zoom: 7, ...p });
+    }
+    expect(onPick).toHaveBeenCalledTimes(2);
   });
 
   it("Esc calls onCancel and stops propagation (the editor's window Escape handler never sees it)", () => {
@@ -97,6 +117,19 @@ describe("Inspector: Pick on canvas", () => {
     expect(screen.queryByTestId("camera-pick-overlay")).toBeNull();
     act(() => s.undo());
     expect(useEditor.getState().doc!.scenes[0].beats[0].timeline[0]).toMatchObject({ to: { zoom: 4, x: 0.5, y: 0.5 } });
+  });
+
+  it("a no-op pick (same x/y as `to`) writes nothing — no undo entry — and leaves pick mode", () => {
+    render(<><Inspector /><DeckCanvas flat={useEditor.getState().beats[0]} /></>);
+    fireEvent.click(screen.getByTestId("camera-pick"));
+    const overlay = screen.getByTestId("camera-pick-overlay");
+    stubRect(overlay);
+    const before = useEditor.getState();
+    fireEvent.click(overlay, { clientX: 0.5 * W, clientY: 0.5 * H }); // to is already {x 0.5, y 0.5}
+    const s = useEditor.getState();
+    expect(s.past.length).toBe(before.past.length);
+    expect(s.doc).toBe(before.doc);
+    expect(s.cameraPick).toBe(false);
   });
 
   it("Esc on the canvas cancels pick mode without writing", () => {

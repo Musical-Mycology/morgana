@@ -1,5 +1,5 @@
 "use client";
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { NoteField, type NoteFieldHandle } from "@/engine/components/NoteField";
 import { renderBeatAt } from "@/engine/authoring/seek";
@@ -48,9 +48,14 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
       const b = span?.beats[beatIndex];
       return span && b ? span.start + b.start : 0;
     }, [doc, sceneIdx, beatIndex]);
+    // draw() reads the camera inputs through a ref refreshed every render: play()'s rAF loop closes
+    // over the draw from the render that started it, and must still see a pick or a doc edit.
+    const cam = useRef({ picking, camEvents, beatStart });
+    useLayoutEffect(() => { cam.current = { picking, camEvents, beatStart }; });
     const dur = () => (flat ? beatDuration(flat.beat.timeline) : 0);
     const draw = () => {
-      const tf = picking ? "none" : cameraTransform(cameraAt(camEvents, beatStart + t.current));
+      const c = cam.current;
+      const tf = c.picking ? "none" : cameraTransform(cameraAt(c.camEvents, c.beatStart + t.current));
       if (tf !== lastCamera.current && notesWorld.current) { lastCamera.current = tf; notesWorld.current.style.transform = tf; }
       art.current?.setCamera(tf);
       if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight, entryArt: flat.beat.art });
@@ -72,10 +77,12 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
         };
         raf.current = requestAnimationFrame(step);
       },
-    }), [flat, onTime, picking, camEvents, beatStart]);
+    }), [flat, onTime]);
 
     useEffect(() => { cancel(); t.current = 0; setPreview(false); draw(); onTime?.(0, dur()); return cancel; }, [flat]);
-    useEffect(() => { draw(); }, [scene, beatIndex, picking, camEvents, beatStart]);
+    useEffect(() => { draw(); }, [scene, beatIndex, camEvents, beatStart]);
+    // Picking pauses canvas playback: the pick reads against a still, full-frame stage.
+    useEffect(() => { if (picking) cancel(); draw(); }, [picking]);
 
     return (
       <div ref={host} className="ed__canvas-host" style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", maxHeight: "100%", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
@@ -157,8 +164,8 @@ function PickLayer({ action }: { action: Extract<Action, { kind: "camera" }> }) 
   const setCameraPick = useEditor((s) => s.setCameraPick);
   const to = action.to ?? {};
   const onPick = (p: CameraPickPoint) => {
-    if (selectedAction == null) return;
-    updateAction(selected, selectedAction, "to", { ...to, x: p.x, y: p.y });
+    // A pick that lands on the current centre writes nothing (no undo entry).
+    if (selectedAction != null && (p.x !== to.x || p.y !== to.y)) updateAction(selected, selectedAction, "to", { ...to, x: p.x, y: p.y });
     setCameraPick(false);
   };
   return <CameraPick zoom={to.zoom ?? 1} at={to} onPick={onPick} onCancel={() => setCameraPick(false)} />;

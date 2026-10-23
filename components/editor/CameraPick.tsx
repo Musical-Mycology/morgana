@@ -4,7 +4,15 @@ import { clampFraming } from "@/engine/authoring/camera-clock";
 
 export interface CameraPickPoint { x: number; y: number }
 
-const r4 = (n: number) => Math.round(n * 1e4) / 1e4;
+/** Round a clamped coordinate to 4 decimals without leaving its clamp range [m, 1 − m]: a bound like
+ *  0.5/7 = 0.071428… would round to 0.0714, just outside, so an out-of-range result rounds inward. */
+function snap4(v: number, zoom: number): number {
+  const m = 0.5 / zoom;
+  const r = Math.round(v * 1e4) / 1e4;
+  if (r < m) return Math.ceil(m * 1e4) / 1e4;
+  if (r > 1 - m) return Math.floor((1 - m) * 1e4) / 1e4;
+  return r;
+}
 
 /** "Pick on canvas" for a camera action (spec §4): covers the editor canvas with a crosshair layer
  *  and draws the view `zoom` would show as an outline rect, centred on the pointer and clamped like
@@ -55,7 +63,7 @@ export function CameraPick({ zoom, at, onPick, onCancel }: {
       onClick={(e) => {
         e.preventDefault();
         const p = fromEvent(e);
-        if (p) onPick({ x: r4(p.x), y: r4(p.y) });
+        if (p) onPick({ x: snap4(p.x, f.zoom), y: snap4(p.y, f.zoom) });
       }}
     >
       <div

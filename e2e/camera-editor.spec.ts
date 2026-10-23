@@ -50,6 +50,16 @@ test("add a Camera action, Pick on canvas near an edge (clamped), and the canvas
   });
   await expect.poll(() => page.evaluate(() => document.querySelector<HTMLElement>(".ed__canvas .artstage__world")?.style.transform ?? ""))
     .toContain("scale(3)");
-  // The editor's own ObjectStage stays at full frame.
-  expect(await page.evaluate(() => document.querySelector<HTMLElement>(".ed__canvas [data-testid=object-stage]")?.parentElement?.style.transform ?? "")).toBe("");
+  // The editor's own ObjectStage stays at full frame: neither it nor any ancestor up to the canvas
+  // host carries a transform (computed, so a class rule would count too).
+  const objChain = await page.evaluate(() => {
+    const out: string[] = [];
+    for (let n = document.querySelector<HTMLElement>(".ed__canvas [data-testid=object-stage]"); n; n = n.parentElement) {
+      out.push(getComputedStyle(n).transform);
+      if (n.classList.contains("ed__canvas-host")) break;
+    }
+    return out;
+  });
+  expect(objChain.length).toBeGreaterThanOrEqual(2);
+  for (const tf of objChain) expect(tf).toBe("none");
 });

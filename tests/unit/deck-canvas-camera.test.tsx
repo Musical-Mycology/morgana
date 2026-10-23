@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, act, cleanup } from "@testing-library/react";
 import { createRef } from "react";
 import { DeckCanvas, type CanvasHandle } from "@/components/editor/DeckCanvas";
@@ -77,6 +77,34 @@ describe("DeckCanvas camera preview", () => {
     act(() => useEditor.getState().setCameraPick(false));
     expect(queryByTestId("camera-pick-overlay")).toBeNull();
     expect(world(container).style.transform).toBe(cameraTransform(cameraAt(cameraEvents(doc), S + 1.5)));
+  });
+
+  it("entering pick mode during canvas playback pauses it and holds FULL_FRAME, even if a queued frame fires", () => {
+    let frame: FrameRequestCallback | null = null;
+    let nextId = 0;
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => { frame = cb; return ++nextId; });
+    const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    try {
+      const ref = createRef<CanvasHandle>();
+      const flat = useEditor.getState().beats[1];
+      const { container } = render(<DeckCanvas ref={ref} flat={flat} />);
+      act(() => ref.current!.seek(1.2));
+      act(() => ref.current!.play());
+      const t0 = performance.now();
+      act(() => frame!(t0 + 300)); // a playing frame: mid-move, camera framing painted
+      expect(world(container).style.transform).toContain("scale(");
+      const playingId = nextId;
+      act(() => { useEditor.getState().selectAction(1); useEditor.getState().setCameraPick(true); });
+      expect(caf).toHaveBeenCalledWith(playingId); // playback paused
+      expect(fullFrame(world(container).style.transform)).toBe(true);
+      // A frame already in flight (closing over the pre-pick render) still paints the full frame.
+      act(() => frame!(t0 + 400));
+      expect(fullFrame(world(container).style.transform)).toBe(true);
+      expect(fullFrame(notesWorld(container).style.transform)).toBe(true);
+    } finally {
+      raf.mockRestore();
+      caf.mockRestore();
+    }
   });
 
   it("shows no pick overlay when the selected action is not a camera", () => {
