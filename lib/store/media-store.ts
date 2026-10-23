@@ -4,6 +4,7 @@ import { join, resolve, sep } from "node:path";
 import { DECK_ID_RE } from "@/engine/deck-doc";
 import { dataDir } from "./deck-store";
 import { sniffMedia } from "./media-sniff";
+import { mediaKind, type MediaKind } from "@/engine/deck/media-ref";
 
 /** Per-deck, content-addressed media (spec §2). Generic: audio, images, video. */
 export const MEDIA_ID_RE = /^[0-9a-f]{16}\.[a-z0-9]{1,5}$/;
@@ -17,11 +18,8 @@ export const IMAGE_TYPES: Record<string, string> = {
 export const VIDEO_TYPES: Record<string, string> = { mp4: "video/mp4", webm: "video/webm" };
 const ALL_TYPES: Record<string, string> = { ...AUDIO_TYPES, ...IMAGE_TYPES, ...VIDEO_TYPES };
 
-export type MediaKind = "audio" | "image" | "video";
-export function mediaKind(mime: string): MediaKind | null {
-  const k = mime.split("/")[0];
-  return k === "audio" || k === "image" || k === "video" ? k : null;
-}
+// mediaKind lives in the pure engine/deck/media-ref.ts so browser code can use it; re-exported for server callers.
+export { mediaKind, type MediaKind };
 
 export interface MediaInfo { id: string; name: string; mime: string; bytes: number; uploadedAt: string; durationSec?: number }
 

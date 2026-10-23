@@ -54,3 +54,13 @@ test("no ctx.media -> none of the media rules fire", () => {
   expect(rules(d)).toEqual([]);
   expect(rules(d, { mediaIds: [] })).toEqual([]);
 });
+
+test("a ref in both to and keep warns once", () => {
+  const issues = rules(deck({ to: "media:zzz.mp4", keep: ["media:zzz.mp4"], mode: "cut" }), { media });
+  expect(issues.filter((i) => i.rule === "media-missing")).toHaveLength(1);
+});
+
+test("clip-in-past-end is skipped when the video has no durationSec", () => {
+  const noDur = [{ id: "a.mp4", name: "a.mp4", mime: "video/mp4", bytes: 1, uploadedAt: "" }];
+  expect(rules(deck({ to: "media:a.mp4", mode: "cut", clips: { "media:a.mp4": { in: 99 } } }), { media: noDur })).toEqual([]);
+});

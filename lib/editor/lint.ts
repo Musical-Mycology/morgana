@@ -5,9 +5,9 @@ import { deckLayout, sceneOverrun } from "@/engine/authoring/deck-clock";
 import { formatClock } from "@/lib/timing/clock-format";
 import { parseInlineLinks } from "@/engine/deck/inline-links";
 import type { Action } from "@/engine/deck/types";
-import { isMediaRef, mediaRefId } from "@/engine/deck/media-ref";
+import { isMediaRef, mediaKind, mediaRefId } from "@/engine/deck/media-ref";
 import { findMediaRefs } from "@/lib/editor/media-refs";
-import { mediaKind, type MediaInfo } from "@/lib/store/media-store";
+import type { MediaInfo } from "@/lib/store/media-store";
 
 export type LintSeverity = "error" | "warning";
 export interface LintLocation { sceneIdx: number; beatIdx?: number; actionIdx?: number }

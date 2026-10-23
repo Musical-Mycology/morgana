@@ -49,3 +49,16 @@ test.each([
     .map((f) => f.replace(ROOT + "/", ""));
   expect(offenders).toEqual([]);
 });
+
+// Browser-reachable modules (the "use client" editor page imports them). A runtime edge to a Node
+// builtin or to the fs-backed stores breaks the Next client bundle, which vitest (Node) cannot see.
+const NODE_IMPORT = /^\s*import\s+(?!type\s)[\s\S]*?from\s+["'](?:node:[^"']+|fs|fs\/promises|path|crypto)["']/m;
+test.each([
+  "lib/editor/lint.ts",
+  "lib/editor/media-refs.ts",
+])("%s has a browser-safe runtime import graph (no Node builtins)", (rel) => {
+  const offenders = [...runtimeGraph(resolve(ROOT, rel))]
+    .filter((f) => NODE_IMPORT.test(readFileSync(f, "utf8")))
+    .map((f) => f.replace(ROOT + "/", ""));
+  expect(offenders).toEqual([]);
+});

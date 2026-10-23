@@ -6,3 +6,10 @@ export function isMediaRef(s: unknown): s is MediaRef { return typeof s === "str
 export function mediaRefId(ref: MediaRef): string { return ref.slice(MEDIA_REF_PREFIX.length); }
 export function toMediaRef(id: string): MediaRef { return `${MEDIA_REF_PREFIX}${id}` as MediaRef; }
 export function isVideoRef(s: unknown): s is MediaRef { return isMediaRef(s) && /\.(mp4|webm)$/i.test(s); }
+
+export type MediaKind = "audio" | "image" | "video";
+/** Coarse kind from a mime type (`null` for anything else). */
+export function mediaKind(mime: string): MediaKind | null {
+  const k = mime.split("/")[0];
+  return k === "audio" || k === "image" || k === "video" ? k : null;
+}
