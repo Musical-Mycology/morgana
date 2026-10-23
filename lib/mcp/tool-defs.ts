@@ -74,7 +74,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "insert_action_after",
-    description: "Insert a new action of the given kind into a beat's timeline, immediately after action_index (or at the end if action_index is omitted).",
+    description: "Insert a new action of the given kind into a beat's timeline, immediately after action_index (or at the end if action_index is omitted). camera actions pan/zoom the world layers (art, tiles, notes, objects; text stays fixed): to {x,y,zoom 1–8}, durationMs (0 = cut), ease inOut|in|out|linear; a framing holds until the next camera action.",
     inputSchema: schema({
       ...DECK_ID, ...BEAT_INDEX,
       action_index: { type: ["number", "null"], description: "Insert after this action index, or omit/null to append." },
@@ -107,7 +107,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "update_action",
-    description: "Set a single field on an existing action, addressed by a dot-path (e.g. \"value\", \"pos.x\", \"art.mode\"). Art layers (`art.to`/`keep`/`out`) and a media tile's `src` accept `media:<id>` refs from list_media; set video clip options with `art.clips` (keyed by ref) or the tile's `clip` (`{ in, loop }`). Use read_deck first to see current fields, or convert_action_kind/insert_action_after to see a kind's default field set.",
+    description: "Set a single field on an existing action, addressed by a dot-path (e.g. \"value\", \"pos.x\", \"art.mode\"). Art layers (`art.to`/`keep`/`out`) and a media tile's `src` accept `media:<id>` refs from list_media; set video clip options with `art.clips` (keyed by ref) or the tile's `clip` (`{ in, loop }`). Use read_deck first to see current fields, or convert_action_kind/insert_action_after to see a kind's default field set. camera actions pan/zoom the world layers (art, tiles, notes, objects; text stays fixed): to {x,y,zoom 1–8}, durationMs (0 = cut), ease inOut|in|out|linear; a framing holds until the next camera action.",
     inputSchema: schema({
       ...DECK_ID, ...BEAT_INDEX, ...ACTION_INDEX,
       path: { type: "string", description: "Dot-path into the action, e.g. \"value\" or \"pos.x\"." },

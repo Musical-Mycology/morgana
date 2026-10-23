@@ -109,6 +109,33 @@ function validateSceneActionTargets(scene: Scene, si: number, e: string[]): void
   });
 }
 
+const CAMERA_EASES = ["inOut", "in", "out", "linear"];
+
+/** Validate camera actions: `to` has ≥1 of x/y/zoom in range, durationMs ≥ 0, ease one of the four. */
+function validateCameraActions(scene: Scene, si: number, e: string[]): void {
+  scene?.beats?.forEach((b, bi) => {
+    b?.timeline?.forEach((a: Record<string, unknown>, ai) => {
+      if (a?.kind !== "camera") return;
+      const at = `scenes[${si}].beats[${bi}].timeline[${ai}]`;
+      const to = a.to as Record<string, unknown> | undefined;
+      if (!to || typeof to !== "object") { e.push(`${at}.to missing`); }
+      else {
+        if (to.x === undefined && to.y === undefined && to.zoom === undefined) e.push(`${at}: camera needs at least one of x, y, zoom`);
+        for (const k of ["x", "y"] as const) {
+          if (to[k] !== undefined && (typeof to[k] !== "number" || !Number.isFinite(to[k]) || (to[k] as number) < 0 || (to[k] as number) > 1)) e.push(`${at}.to.${k} must be 0–1`);
+        }
+        if (to.zoom !== undefined && (typeof to.zoom !== "number" || !Number.isFinite(to.zoom) || to.zoom < 1 || to.zoom > 8)) e.push(`${at}.to.zoom must be 1–8`);
+      }
+      if (a.durationMs !== undefined && (typeof a.durationMs !== "number" || !Number.isFinite(a.durationMs) || a.durationMs < 0)) {
+        e.push(`${at}.durationMs must be a finite number ≥ 0`);
+      }
+      if (a.ease !== undefined && (typeof a.ease !== "string" || !CAMERA_EASES.includes(a.ease))) {
+        e.push(`${at}.ease must be one of ${CAMERA_EASES.join(", ")}`);
+      }
+    });
+  });
+}
+
 export function validateDeckDoc(obj: unknown): { ok: boolean; errors: string[] } {
   const e: string[] = [];
   const d = obj as Partial<DeckDoc>;
@@ -148,6 +175,7 @@ export function validateDeckDoc(obj: unknown): { ok: boolean; errors: string[] }
     if (s?.durationSec !== undefined && !isPositiveFinite(s.durationSec)) e.push(`scenes[${i}].durationSec must be a finite number > 0`);
     validateSceneObjects(s?.objects, `scenes[${i}]`, new Set<string>(), 1, e);
     validateSceneActionTargets(s, i, e);
+    validateCameraActions(s, i, e);
   });
   return { ok: e.length === 0, errors: e };
 }

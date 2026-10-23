@@ -39,6 +39,13 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
     { key: "to", label: "Level (0-1)", type: "range", min: 0, max: 1, step: 0.05 },
     { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
   ], defaults: () => ({ kind: "nightlight", to: 0.5 }) },
+  camera: { kind: "camera", label: "Camera", icon: "ti-zoom-in", seekable: true, schema: [
+    { key: "to.zoom", label: "Zoom (1–8)", type: "range", min: 1, max: 8, step: 0.05 },
+    { key: "to.x", label: "Center X", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "to.y", label: "Center Y", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
+    { key: "ease", label: "Ease", type: "select", options: opts("inOut", "in", "out", "linear") },
+  ], defaults: () => ({ kind: "camera", to: { zoom: 2, x: 0.5, y: 0.5 }, durationMs: 1200, ease: "inOut" }) },
   click_gate: { kind: "click_gate", label: "Click gate", icon: "ti-hand-click", seekable: true, schema: [],
     defaults: () => ({ kind: "click_gate" }) },
   clear: { kind: "clear", label: "Clear", icon: "ti-eraser", seekable: true, schema: [],
