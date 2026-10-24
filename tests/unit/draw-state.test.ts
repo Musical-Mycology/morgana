@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { drawDuration, drawGlyphAt, drawSweepAt, drawText, wordRuns } from "@/engine/components/effects/draw-state";
+import { drawDuration, isDrawnLine, drawGlyphAt, drawSweepAt, drawText, wordRuns } from "@/engine/components/effects/draw-state";
 import { introDuration } from "@/engine/authoring/beat-clock";
 
 test("drawDuration = (0.1 + chars·0.08 + 0.4) / speed", () => {
@@ -8,11 +8,21 @@ test("drawDuration = (0.1 + chars·0.08 + 0.4) / speed", () => {
   expect(drawDuration(0)).toBeCloseTo(0.5, 12);
 });
 
-test("introDuration for draw follows drawDuration; dots add no tail (dots are not drawn)", () => {
+test("introDuration for a normal draw line follows drawDuration", () => {
   expect(introDuration({ in: "draw", value: "abc" })).toBeCloseTo(0.74, 12);
   expect(introDuration({ in: "draw", value: "abc", speed: 2 })).toBeCloseTo(0.37, 12);
-  expect(introDuration({ in: "draw", value: "abc", dots: true })).toBeCloseTo(0.74, 12);
   expect(introDuration({ in: "fade", value: "abc" })).toBe(0.8); // other styles unchanged
+});
+
+test("a dotted or empty draw line is timed exactly as fade (it reveals with fade), dots tail included", () => {
+  expect(introDuration({ in: "draw", value: "Hi", dots: true })).toBe(introDuration({ in: "fade", value: "Hi", dots: true }));
+  expect(introDuration({ in: "draw", value: "Hi", dots: true })).toBeGreaterThan(introDuration({ in: "fade", value: "Hi" }));
+  expect(introDuration({ in: "draw", value: "" })).toBe(introDuration({ in: "fade", value: "" }));
+  expect(introDuration({ in: "draw", value: "Hi", speed: 2 })).toBeCloseTo(drawDuration(2, 2), 12); // a normal draw line is unchanged
+  expect(isDrawnLine({ in: "draw", value: "Hi" })).toBe(true);
+  expect(isDrawnLine({ in: "draw", value: "Hi", dots: true })).toBe(false);
+  expect(isDrawnLine({ in: "draw", value: "" })).toBe(false);
+  expect(isDrawnLine({ in: "fade", value: "Hi" })).toBe(false);
 });
 
 test("drawGlyphAt: each glyph strokes over 0.18 s from i·0.08, then all glyphs fill together over 0.4 s", () => {

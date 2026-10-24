@@ -5,7 +5,7 @@
  *  This is the single source of truth for when anything happens in a beat
  *  (design spec §7b D2). Never derive a duration by reading a built GSAP timeline. */
 import type { Action, TextIn } from "@/engine/deck/types";
-import { drawDuration } from "@/engine/components/effects/draw-state";
+import { drawDuration, isDrawnLine } from "@/engine/components/effects/draw-state";
 
 // Mirrors INTRO_DUR + introDuration() in CinematicSlide.tsx so windows match playback timing.
 const INTRO_DUR: Record<Exclude<TextIn, "draw">, number> = {
@@ -16,19 +16,21 @@ const DOTFADE_TAIL = 2.02;
 
 export function introDuration(a: { in: TextIn; value: string; dots?: true; speed?: number }): number {
   const sp = a.speed ?? (a.in === "cursive" ? 0.2 : 1);
-  // draw: per-character outline + one fill phase (draw-state.ts). Dots are not drawn, so no dot tail.
-  if (a.in === "draw") return drawDuration(a.value.length, sp);
+  // draw: per-character outline + one fill phase (draw-state.ts). A dotted or empty draw line is
+  // not drawn: it reveals (and is timed, dots tail included) exactly as "fade".
+  if (isDrawnLine(a)) return drawDuration(a.value.length, sp);
+  const inStyle: Exclude<TextIn, "draw"> = a.in === "draw" ? "fade" : a.in;
   const chars = a.value.length;
   const words = a.value.trim().split(/\s+/).length;
   let base: number;
-  switch (a.in) {
+  switch (inStyle) {
     case "cursive":
     case "typewriter": base = 0.1 + chars * 0.045; break;
     case "letterFly":
     case "letterUp":
     case "blurIn": base = 0.5 + chars * 0.03; break;
     case "wordUp": base = 0.6 + words * 0.08; break;
-    default: base = INTRO_DUR[a.in];
+    default: base = INTRO_DUR[inStyle];
   }
   return (base + (a.dots ? DOTFADE_TAIL : 0)) / sp;
 }

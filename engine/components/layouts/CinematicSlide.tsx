@@ -18,7 +18,7 @@ import {
   flyUp, fadeIn, fadeSide, dotFade, rotateItemAt, lineAndDots,
   letterFly, letterUp, wordUp, blurIn, typewriter, drawIn,
 } from "../effects/cinematic-anim";
-import { DRAW_DASH_EM, DRAW_STROKE_EM, DRAW_VARIANT, drawText } from "../effects/draw-state";
+import { DRAW_DASH_EM, DRAW_STROKE_EM, DRAW_VARIANT, drawText, isDrawnLine } from "../effects/draw-state";
 import { foldAt, rebuildBoundary, beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
 import { cameraAt, cameraTransform, FULL_FRAME, type CameraEvent } from "@/engine/authoring/camera-clock";
 
@@ -682,7 +682,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive", "draw"];
     // Markup, and inline `append` fragments, cannot be drawn glyph-by-glyph: they reveal with "fade".
     // So do dotted and empty draw lines (the dots live in HTML; an empty line has no outline).
-    const effIn: TextIn = (hasInlineMarkup(a.value) && perPiece.includes(a.in)) || (a.in === "draw" && (a.append || a.dots || !a.value)) ? "fade" : a.in;
+    const effIn: TextIn = (hasInlineMarkup(a.value) && perPiece.includes(a.in)) || (a.in === "draw" && (a.append || !isDrawnLine(a))) ? "fade" : a.in;
     // instantText / no-reveal lines have no entrance: they render at rest, and their dots
     // render already-faded-in via `instant`.
     const instant = !!(instantText && !a.reveal);
