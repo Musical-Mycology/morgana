@@ -1,6 +1,6 @@
 # Credits, drawn titles, text particles and fade to black: design
 
-**Status:** approved design (sub-project 6, the last on the timed-video roadmap)
+**Status:** implemented (sub-project 6, the last on the timed-video roadmap). Plan: `docs/superpowers/plans/2026-10-23-credits-particles.md`.
 **Roadmap:** timed-video sub-project 6 of 6; see [Deck clock + timed Player](2026-10-22-deck-clock-timed-player-design.md) §0.2. It builds on [MP4 render](2026-10-24-mp4-render-design.md), [Camera moves](2026-10-23-camera-moves-design.md) and the note-deck full-raster fix.
 **Driving use case:** the Alt-Ctrl 2027 festival video's Credits section (90–120 s). It shows "credits with particle lines coming off the words" and ends with a fade to black. It must be identical in `/play`, the editor scrub and the frame-accurate MP4 render.
 
@@ -65,7 +65,7 @@
   - CinematicSlide builds one `.cin__credits` block in the **fixed text layer** (inside `.cin__stage`, so the camera never moves it), clipped to `area` with `overflow: hidden`.
   - The edges fade with `mask-image: linear-gradient(transparent, #000 8%, #000 92%, transparent)`.
   - Each item renders an optional `role` line in the small uppercase style, then one line per name in the body style.
-- **Scroll.** `creditsOffset(t, durationMs, blockH, areaH)` is pure: `translateY` runs linearly from `areaH` (the block starts just below the area) to `−blockH` (it ends just above). `blockH` is measured once after fonts are ready.
+- **Scroll.** `creditsOffset(t, durationMs, blockH, areaH)` is pure: `translateY` runs linearly from `areaH` (the block starts just below the area) to `−blockH` (it ends just above). `blockH` is measured at build and re-measured on every measurement pass (layout change, stage resize, late font).
 - **Particles.** With `particles`, each credit line (role or name) is a text source with `scroll` set from `creditsOffset`. It emits only while its top edge is inside the area. That window is computed in closed form from the linear offset and intersected with `[start, end)`, so notes never come from clipped-out lines.
 
 ## 4. Fade to black
