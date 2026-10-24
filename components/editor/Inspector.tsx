@@ -90,11 +90,15 @@ export function Inspector() {
         // A credits action with no `area` runs on DEFAULT_CREDITS_AREA. A partial area would fail
         // validation (and the deck would not save), so the first edit of any Area sub-field seeds the
         // whole area from the default, then applies that edit — in one write (one undo step).
-        const areaKey = action.kind === "credits" && f.key.startsWith("area.") && !getPath(action, "area") ? f.key.slice(5) : null;
+        // A cleared Area box (NaN) writes nothing, so it can neither seed nor store a NaN.
+        const isArea = action.kind === "credits" && f.key.startsWith("area.");
+        const areaKey = isArea && !getPath(action, "area") ? f.key.slice(5) : null;
         const value = areaKey ? (DEFAULT_CREDITS_AREA as unknown as Record<string, number>)[areaKey] : getPath(action, f.key);
-        const onChange = (v: unknown) => areaKey
-          ? updateAction(selected, selectedAction!, "area", { ...DEFAULT_CREDITS_AREA, [areaKey]: v })
-          : updateAction(selected, selectedAction!, f.key, v);
+        const onChange = (v: unknown) => {
+          if (isArea && !(typeof v === "number" && Number.isFinite(v))) return;
+          if (areaKey) updateAction(selected, selectedAction!, "area", { ...DEFAULT_CREDITS_AREA, [areaKey]: v });
+          else updateAction(selected, selectedAction!, f.key, v);
+        };
         return <Field key={f.key} spec={spec} value={value} onChange={onChange} extra={extra} />;
       })}
       {/* The canvas (DeckCanvas → CameraPick) owns the pick itself; this only enters/leaves the mode. */}

@@ -74,3 +74,16 @@ test("Particles: hidden sub-fields until checked; checking writes the defaults, 
   expect("particles" in action(1)).toBe(false);
   expect(screen.queryByTestId("field-particles.color")).toBeNull();
 });
+
+test("clearing an Area box writes nothing (no NaN seed), with or without an area", () => {
+  render(<Inspector />);
+  const before = useEditor.getState().doc;
+  const pastLen = useEditor.getState().past.length;
+  fireEvent.change(screen.getByTestId("field-area.w"), { target: { value: "" } });
+  expect(useEditor.getState().doc).toBe(before);
+  expect(useEditor.getState().past.length).toBe(pastLen);
+  expect("area" in action(0)).toBe(false);
+  fireEvent.change(screen.getByTestId("field-area.w"), { target: { value: "0.5" } });
+  fireEvent.change(screen.getByTestId("field-area.h"), { target: { value: "" } });
+  expect(action(0).area).toEqual({ x: 0.2, y: 0.32, w: 0.5, h: 0.63 });
+});
