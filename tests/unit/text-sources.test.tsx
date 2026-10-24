@@ -231,10 +231,48 @@ test("a beat without particle lines never publishes sources and leaves the stage
   act(() => transport.current!.seek(1));
   const html = container.innerHTML;
   const calls = onTime.mock.calls.length;
+  const rectSpy = vi.mocked(Element.prototype.getBoundingClientRect);
+  rectSpy.mockClear();
   await ready(transport);
   expect(sources.current).toEqual([]);
   expect(container.innerHTML).toBe(html);
   expect(onTime.mock.calls.length).toBe(calls); // nothing changed: no extra repaint (Review Focus #2)
+  expect(rectSpy).not.toHaveBeenCalled(); // no particle line: no forced layout at all
+});
+
+test("a beat that loses its particle lines publishes [] once (no measuring), then stays quiet", async () => {
+  const { transport, sources, onTime } = mount();
+  act(() => transport.current!.seek(1.7));
+  await ready(transport);
+  expect(sources.current).toHaveLength(1);
+  const rectSpy = vi.mocked(Element.prototype.getBoundingClientRect);
+  rectSpy.mockClear();
+  act(() => transport.current!.seek(2.3)); // the clear wipes every line: no particle line is built
+  const calls = onTime.mock.calls.length;
+  await ready(transport);
+  expect(sources.current).toEqual([]);
+  expect(onTime.mock.calls.length).toBe(calls + 1); // the clearing re-notify
+  expect(rectSpy).not.toHaveBeenCalled();
+});
+
+test("Review Focus #1 (guard-sensitive): a stale measurement never reaches the host, even when the new beat reuses its indices", async () => {
+  let release!: () => void;
+  Object.defineProperty(document, "fonts", { value: { ready: new Promise<void>((r) => { release = r; }) }, configurable: true });
+  const transport = createRef<SlideTransport>();
+  const sources = { current: [] as TextSource[] };
+  const seen: TextSource[][] = [];
+  const onTime = vi.fn(() => { seen.push(sources.current); });
+  const b: Beat = { id: "b", timeline: [{ kind: "text", value: "Hello world", in: "fade", particles: {} }, { kind: "wait", ms: 500 }] };
+  const c: Beat = { id: "c", timeline: [{ kind: "text", value: "No notes here", in: "fade" }, { kind: "wait", ms: 500 }] };
+  const { rerender } = render(<CinematicSlide slots={{ sceneId: "s", beat: b }} animate runtime={runtime} transport={transport} autoplay={false} textSourcesRef={sources} onTime={onTime} />);
+  act(() => transport.current!.seek(0.3)); // beat b's measurement queued behind fonts.ready
+  rerender(<CinematicSlide slots={{ sceneId: "s", beat: c }} animate runtime={runtime} transport={transport} autoplay={false} textSourcesRef={sources} onTime={onTime} />);
+  release();
+  await ready(transport);
+  await act(async () => { await Promise.resolve(); });
+  expect(seen.length).toBeGreaterThan(0);
+  expect(seen.every((s) => s.length === 0)).toBe(true);
+  expect(sources.current).toEqual([]);
 });
 
 test("NoteField paints text-keyed sprites into textHost and emitter sprites into its own stage", () => {

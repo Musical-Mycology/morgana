@@ -1038,6 +1038,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  the same built lines measure the same. */
   function publishSources(): boolean {
     const timeline = slots.beat.timeline;
+    if (!textSourcesRef) return false;
+    // No built particle line: nothing to measure, so force no layout (most decks). Publish [] once
+    // if this beat had sources before (its particle lines were wiped), so the host clears them.
+    if (![...built.current.keys()].some((i) => { const a = timeline[i]; return a?.kind === "text" && !!a.particles && !a.append; })) {
+      if (!textSourcesRef.current.length) return false;
+      textSourcesRef.current = [];
+      return true;
+    }
     const windows = beatTimeline(timeline);
     const sr = scope.current?.querySelector<HTMLElement>(".cin__stage")?.getBoundingClientRect();
     const out: TextSource[] = [];
@@ -1045,7 +1053,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     for (const i of [...built.current.keys()].sort((x, y) => x - y)) {
       const entry = built.current.get(i)!;
       const a = timeline[i];
-      if (!textSourcesRef || !sr || !(sr.width > 0 && sr.height > 0)) continue;
+      if (!sr || !(sr.width > 0 && sr.height > 0)) continue;
       // Ruling F11: an `append` fragment is not measured — a known limitation (particles on an
       // appended fragment are ignored; its words never emit).
       if (a?.kind !== "text" || !a.particles || a.append) continue;
@@ -1056,7 +1064,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       const rects = boxes.get(entry.el) ?? [];
       if (rects.length) out.push({ key: `a${i}`, idx: textSourceIdx(i), start: windows[i].start, end: textSourceEnd(timeline, i), rects, ...particleOpts(a.particles) });
     }
-    if (!textSourcesRef || JSON.stringify(out) === JSON.stringify(textSourcesRef.current)) return false;
+    if (JSON.stringify(out) === JSON.stringify(textSourcesRef.current)) return false;
     textSourcesRef.current = out;
     return true;
   }
