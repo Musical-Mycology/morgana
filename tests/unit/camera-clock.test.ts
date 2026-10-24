@@ -190,6 +190,11 @@ describe("hasNoteActions", () => {
       { id: "s1", beats: [{ id: "b", timeline: [] }, { id: "c", timeline: [circle] }] },
     ]))).toBe(true);
   });
+  test("a note action past a pinned scene's cut still counts (the reach rule is ignored on purpose: the gate only has to be safe)", () => {
+    const d = deck([{ id: "s", durationSec: 1, beats: [{ id: "a", timeline: [{ kind: "wait", ms: 2000 }, emitter] }] }]);
+    expect(cameraEvents(deck([{ id: "s", durationSec: 1, beats: [{ id: "a", timeline: [{ kind: "wait", ms: 2000 }, cam({ zoom: 2 })] }] }]))).toEqual([]); // cameraEvents does apply it
+    expect(hasNoteActions(d)).toBe(true);
+  });
   test("a deck with neither (camera, text, waits) has none", () => {
     expect(hasNoteActions(deck([{ id: "s", beats: [{ id: "a", timeline: [cam({ zoom: 2 }), { kind: "wait", ms: 100 }] }] }]))).toBe(false);
     expect(hasNoteActions(deck([]))).toBe(false);

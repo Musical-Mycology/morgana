@@ -192,3 +192,24 @@ test("a camera-less note deck's frame forces a full repaint and drops the hints,
   expect(css).toMatch(/will-change: auto !important/);
   expect(container.querySelector("[data-camera]")).toBeNull(); // the camera flag stays camera-only
 });
+test("a deck with camera AND notes: the full raster still runs, and RenderStage adds no hint-drop style of its own (DeckStage's data-camera covers it)", async () => {
+  const BOTH: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s0", beats: [
+    { id: "a", timeline: [
+      { kind: "note_emitter", color: "#fff", pos: { x: 0.5, y: 0.5 }, dir: 0, decay: 1000, freq: 2 },
+      { kind: "camera", to: { zoom: 2 }, durationMs: 0 }, { kind: "wait", ms: 2000 },
+    ] },
+  ] }] };
+  const { container } = render(<RenderStage doc={BOTH} />);
+  const r = await ready();
+  const root = container.querySelector<HTMLElement>("[data-render-root]")!;
+  const w = clipWrites(root);
+  await r.renderFrame(1);
+  await Promise.resolve();
+  w.stop();
+  expect(w.seen.some((s) => s.includes("clip-path"))).toBe(true);
+  expect(root.style.clipPath).toBe("");
+  const css = styleText(container);
+  expect(css).not.toMatch(/\[data-render-root\] \.(artstage__layer|notefield__stage)/); // the !hasCamera guard: no RenderStage rule
+  expect(css).toMatch(/\[data-camera\] \.notefield__stage > \*/); // DeckStage's camera rule does it
+  expect(container.querySelector("[data-camera]")).not.toBeNull();
+});
