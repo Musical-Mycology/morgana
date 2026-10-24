@@ -269,6 +269,14 @@ test.describe("credits and particles", () => {
     // Review Focus #3: scrub back to before the fade — the overlay paints nothing again.
     await page.mouse.click(box.x + box.width * (2 / 8.5), box.y + box.height / 2);
     await expect.poll(async () => (await read()).fade[0]).toBe("none");
+    // ... and the roll offset after that back-scrub is mid-roll (not clamped at 0 or -blockH), so it really tracks the clock.
+    const Tb = await deckT(page);
+    expect(Tb).toBeGreaterThan(0);
+    expect(Tb).toBeLessThan(6);                                        // inside the 0-6 s roll
+    await expect.poll(() => rollMatches(Tb)).toBeLessThanOrEqual(0.01);
+    const mid = await read();
+    expect(mid.off).toBeLessThan(mid.areaH);                           // strictly between the clamps: areaH (start) ...
+    expect(mid.off).toBeGreaterThan(-mid.blockH);                      // ... and -blockH (end)
   });
 
   test("text particles stay on the words during a camera move: .notefield__text never transforms; the sprites equal the camera-less deck's", async ({ page, request }) => {
@@ -295,7 +303,12 @@ test.describe("credits and particles", () => {
       }
       return { out, beat: document.querySelector<HTMLElement>("[data-testid=play-stage] .beat__world")!.style.transform };
     });
-    expect(chain.beat).toContain("scale(");                  // the camera really is zooming the world
+    // The camera really is mid-move: the world's scale is strictly between 1 and the target 3, and equals cameraAt at the deck time.
+    const Tc = await deckT(page);
+    const scale = Number(/scale\(([\d.]+)\)/.exec(chain.beat)?.[1]);
+    expect(scale).toBeGreaterThan(1);
+    expect(scale).toBeLessThan(3);
+    expect(scale).toBeCloseTo(cameraAt(cameraEvents(mk(`${cid}-cam`, true) as unknown as DeckDoc), Tc).zoom, 3);
     for (const n of chain.out) expect(n.tf, n.world).toBe("none");
     const still = await open(`${cid}-still`);
     expect(withCam).toEqual(still);                          // same word boxes, same notes
