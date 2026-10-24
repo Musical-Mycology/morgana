@@ -22,7 +22,9 @@ import { DRAW_DASH_EM, DRAW_STROKE_EM, DRAW_VARIANT, drawText, isDrawnLine } fro
 import { foldAt, rebuildBoundary, beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
 import { cameraAt, cameraTransform, FULL_FRAME, type CameraEvent } from "@/engine/authoring/camera-clock";
 import { particleOpts, textSourceEnd, textSourceIdx, type TextRect, type TextSource } from "../effects/note-state";
-import { atRestRects, restLine, wrapWords, type RestChild } from "../text-sources";
+import { atRestRects, creditLineRects, restLine, wrapWords, type RestChild } from "../text-sources";
+import { buildCreditsBlock } from "../credits-block";
+import { creditLineWindow, creditsOffset, creditsScroll } from "@/engine/deck/credits";
 
 /**
  * Position a text box at `pos` per its align. Right boxes anchor their RIGHT edge (via the
@@ -141,6 +143,10 @@ export function beatFraming(t: number, cameraRef?: React.RefObject<Framing>, cam
   return cameraRef?.current ?? (camera ? cameraAt(camera.events, camera.beatStart + t) : FULL_FRAME);
 }
 
+/** A built credits roll and its measured sizes (px): blockH = roll height, areaH = clip area height. */
+interface CreditsState { block: HTMLElement; roll: HTMLElement; lines: HTMLElement[]; blockH: number; areaH: number; lastTf: string }
+type BuiltEntry = { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement; credits?: CreditsState };
+
 export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true, clipModeRef, cameraRef, camera, textSourcesRef }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
@@ -170,7 +176,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // creates (distinct from `el`, the <p> inside it). resetFrom must tear both down, or a
   // backward seek strands an empty positioned box in the stage (and a detached node in
   // lineBoxes.current) every time it lands inside an in-flight fade_out.
-  const built = useRef<Map<number, { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement }>>(new Map());
+  // `credits` is set only for a credits action: `el` is its roll, `box` its block (a line box).
+  const built = useRef<Map<number, BuiltEntry>>(new Map());
   // Last-issued art transition (JSON of its ArtTransition, since object identity changes every
   // render) and nightlight target. Autoplay only (host-driven stages never call into the runtime
   // for art/nightlight). ArtStage.apply() runs its own crossfade as a side effect on a SIBLING
@@ -705,7 +712,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
 
   /** Build one text action's element + its real reveal timeline, paused at 0 — the only place
    *  text elements/timelines are built (design spec §7b §4.2). */
-  function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement } {
+  function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): BuiltEntry {
     layoutRev.current++;
     const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive", "draw"];
     // Markup, and inline `append` fragments, cannot be drawn glyph-by-glyph: they reveal with "fade".
@@ -729,6 +736,59 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     const tl = buildTextEffect(el, effIn, a);
     tl.pause(0);
     return { el, tl, box };
+  }
+
+  /** Build the credits block into the fixed text stage (tracked as a line box: fade_out fades it,
+   *  clear / a settled fade_out removes it, like text). Sizes are re-measured on every measurement
+   *  pass (after fonts; ruling F14). */
+  function buildCredits(a: Extract<Action, { kind: "credits" }>): BuiltEntry {
+    layoutRev.current++;
+    const { block, roll, lines } = buildCreditsBlock(a);
+    stageParent()?.appendChild(block);
+    lineBoxes.current.push(block);
+    return { el: roll, tl: null, box: block, credits: { block, roll, lines, blockH: roll.offsetHeight, areaH: block.clientHeight, lastTf: "" } };
+  }
+
+  /** The roll's translateY at `local` seconds into the credits action — written only on change. */
+  function paintCredits(c: CreditsState, local: number, durationMs: number) {
+    const v = Math.round(creditsOffset(local, durationMs, c.blockH, c.areaH) * 100) / 100;
+    const tf = `translateY(${v === 0 ? 0 : v}px)`;
+    if (tf === c.lastTf) return;
+    c.lastTf = tf;
+    c.roll.style.transform = tf;
+  }
+
+  /** Each credit line as a text source (spec §3 "Particles"): word boxes with the roll at offset 0
+   *  (layout offsets ignore its translateY), the roll's scroll added analytically, and a birth
+   *  window = the line's in-area window ∩ [roll start, the next clear/fade_out/stop_notes). */
+  function creditSources(a: Extract<Action, { kind: "credits" }>, i: number, c: CreditsState, start: number, sr: DOMRect): TextSource[] {
+    const br = c.block.getBoundingClientRect();
+    const area = { y: (br.top - sr.top) / sr.height, h: c.areaH / sr.height };
+    const scroll = creditsScroll(start, a.durationMs, c.blockH / sr.height, area.h);
+    const end = textSourceEnd(slots.beat.timeline, i) ?? Infinity;
+    const opts = particleOpts(a.particles!);
+    const out: TextSource[] = [];
+    c.lines.forEach((ln, k) => {
+      const rects = creditLineRects(c.block, ln, sr);
+      if (!rects.length) return;
+      const win = creditLineWindow(Math.min(...rects.map((r) => r.y)), area, scroll);
+      if (!win) return;
+      const s0 = Math.max(win.start, start), e0 = Math.min(win.end, end);
+      if (e0 > s0) out.push({ key: `a${i}.${k}`, idx: textSourceIdx(i, k), start: s0, end: e0, rects, scroll, ...opts });
+    });
+    return out;
+  }
+
+  /** Repaint every built roll at `lastT` (after a measurement pass changed its sizes) — no re-fold. */
+  function repaintCredits() {
+    const timeline = slots.beat.timeline;
+    let windows: ReturnType<typeof beatTimeline> | null = null;
+    for (const [i, entry] of built.current) {
+      const a = timeline[i];
+      if (!entry.credits || a?.kind !== "credits") continue;
+      windows ??= beatTimeline(timeline);
+      paintCredits(entry.credits, lastT.current - windows[i].start, a.durationMs);
+    }
   }
 
   /** Drop every cached entry from `index` onward, killing its (paused) tween and removing
@@ -944,6 +1004,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // to remove it again — which no longer happens on repeat visits, stranding it in the DOM.
       // Shared by both `built`-cached kinds below (text and rotateList).
       if (f.index < wipeBoundary) continue;
+      if (f.action.kind === "credits") {
+        let entry = built.current.get(f.index);
+        if (!entry) { entry = buildCredits(f.action); built.current.set(f.index, entry); }
+        paintCredits(entry.credits!, t - f.start, f.action.durationMs);
+        continue;
+      }
       if (f.action.kind === "rotateList") {
         // No GSAP loop, no `tl` — an infinite `repeat: -1` loop can't be seeked as a tween, so
         // the visible item is derived from elapsed time instead (design spec §7b §5, ambiguity
@@ -1025,9 +1091,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     pendingSources.current = Promise.resolve(fonts).then(() => {
       if (gen !== measureGen.current || !scope.current) return; // a newer beat (or unmount) owns the ref now
       measureQueued.current = false;
+      const changed = publishSources();
+      repaintCredits(); // at the sizes publishSources just measured
       // The host repaints notes with the new sources at the same t. Unchanged sources need no
       // repaint (the host already painted with them), so a deck without particles sees no extra onTime.
-      if (publishSources()) onTime?.(lastT.current);
+      if (changed) onTime?.(lastT.current);
     });
   }
 
@@ -1038,10 +1106,21 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  the same built lines measure the same. */
   function publishSources(): boolean {
     const timeline = slots.beat.timeline;
+    // Credits rolls re-read their sizes on every pass (fonts may have changed them; ruling F14), with
+    // or without a sources ref (Slide.tsx has none) and with or without particles.
+    for (const entry of built.current.values()) {
+      if (!entry.credits) continue;
+      entry.credits.blockH = entry.credits.roll.offsetHeight;
+      entry.credits.areaH = entry.credits.block.clientHeight;
+    }
     if (!textSourcesRef) return false;
-    // No built particle line: nothing to measure, so force no layout (most decks). Publish [] once
-    // if this beat had sources before (its particle lines were wiped), so the host clears them.
-    if (![...built.current.keys()].some((i) => { const a = timeline[i]; return a?.kind === "text" && !!a.particles && !a.append; })) {
+    // No built particle line or particle credits: nothing to measure, so force no layout (most
+    // decks). Publish [] once if this beat had sources before (its particle lines were wiped), so
+    // the host clears them.
+    if (![...built.current].some(([i, e]) => {
+      const a = timeline[i];
+      return (a?.kind === "text" && !!a.particles && !a.append) || (a?.kind === "credits" && !!a.particles && !!e.credits);
+    })) {
       if (!textSourcesRef.current.length) return false;
       textSourcesRef.current = [];
       return true;
@@ -1054,6 +1133,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       const entry = built.current.get(i)!;
       const a = timeline[i];
       if (!sr || !(sr.width > 0 && sr.height > 0)) continue;
+      if (a?.kind === "credits") { if (a.particles && entry.credits) out.push(...creditSources(a, i, entry.credits, windows[i].start, sr)); continue; }
       // Ruling F11: an `append` fragment is not measured — a known limitation (particles on an
       // appended fragment are ignored; its words never emit).
       if (a?.kind !== "text" || !a.particles || a.append) continue;
