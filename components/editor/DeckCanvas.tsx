@@ -6,6 +6,8 @@ import { renderBeatAt } from "@/engine/authoring/seek";
 import { beatDuration } from "@/engine/authoring/beat-clock";
 import { deckLayout } from "@/engine/authoring/deck-clock";
 import { cameraAt, cameraEvents, cameraTransform } from "@/engine/authoring/camera-clock";
+import { fadeAt, fadeEvents } from "@/engine/authoring/fade-clock";
+import { paintFadeOverlay } from "@/engine/components/fade-overlay";
 import type { Action } from "@/engine/deck/types";
 import { useEditor } from "@/lib/editor/store";
 import { descriptorFor } from "@/lib/editor/registry";
@@ -14,6 +16,9 @@ import { beatLocation, type FlatBeat } from "@/lib/editor/flatten-beats";
 import { ObjectsLayer } from "./ObjectsLayer";
 import { ObjectStage, type ObjectStageHandle } from "./ObjectStage";
 import { CameraPick, effectiveZoom, type CameraPickPoint } from "./CameraPick";
+
+/** The editor previews a screen fade at most this strong so the beat stays editable (spec §4). */
+export const CANVAS_FADE_CAP = 0.5;
 
 export interface CanvasHandle { seek: (t: number) => void; play: () => void; pause: () => void; }
 
@@ -25,6 +30,8 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     const objStage = useRef<ObjectStageHandle>(null);
     const notes = useRef<NoteFieldHandle>(null);
     const notesWorld = useRef<HTMLDivElement>(null);
+    const fadeEl = useRef<HTMLDivElement>(null);
+    const lastFade = useRef("");
     const lastCamera = useRef("none"); // last transform written to the notes world ("none" = never written)
     const t = useRef(0);
     const raf = useRef<number | null>(null);
@@ -50,14 +57,16 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     }, [doc, sceneIdx, beatIndex]);
     // draw() reads the camera inputs through a ref refreshed every render: play()'s rAF loop closes
     // over the draw from the render that started it, and must still see a pick or a doc edit.
-    const cam = useRef({ picking, camEvents, beatStart });
-    useLayoutEffect(() => { cam.current = { picking, camEvents, beatStart }; });
+    const fadeEv = useMemo(() => (doc ? fadeEvents(doc) : []), [doc]);
+    const cam = useRef({ picking, camEvents, beatStart, fadeEv });
+    useLayoutEffect(() => { cam.current = { picking, camEvents, beatStart, fadeEv }; });
     const dur = () => (flat ? beatDuration(flat.beat.timeline) : 0);
     const draw = () => {
       const c = cam.current;
       const tf = c.picking ? "none" : cameraTransform(cameraAt(c.camEvents, c.beatStart + t.current));
       if (tf !== lastCamera.current && notesWorld.current) { lastCamera.current = tf; notesWorld.current.style.transform = tf; }
       art.current?.setCamera(tf);
+      if (fadeEl.current) lastFade.current = paintFadeOverlay(fadeEl.current, fadeAt(c.fadeEv, c.beatStart + t.current), lastFade.current, CANVAS_FADE_CAP);
       if (textHost.current && flat) renderBeatAt(flat.beat.timeline, t.current, { textHost: textHost.current, art: art.current, setNight, entryArt: flat.beat.art });
       if (scene) objStage.current?.renderAt(scene, beatIndex, t.current);
       if (scene) notes.current?.renderAt(scene, beatIndex, t.current);
@@ -80,7 +89,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
     }), [flat, onTime]);
 
     useEffect(() => { cancel(); t.current = 0; setPreview(false); draw(); onTime?.(0, dur()); return cancel; }, [flat]);
-    useEffect(() => { draw(); }, [scene, beatIndex, camEvents, beatStart]);
+    useEffect(() => { draw(); }, [scene, beatIndex, camEvents, beatStart, fadeEv]);
     // Picking pauses canvas playback: the pick reads against a still, full-frame stage.
     useEffect(() => { if (picking) cancel(); draw(); }, [picking]);
 
@@ -108,6 +117,9 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
             explicitly (NoteField, ObjectStage, ObjectsLayer, PosHandle) — match that convention
             so this box doesn't silently swallow clicks meant for a future lower layer. */}
         <div className="cin" style={{ position: "absolute", inset: 0, zIndex: 3, pointerEvents: "none" }}><div className="cin__stage"><div ref={textHost} className="cin__text" style={{ position: "absolute", inset: 0, maxWidth: "none" }} data-testid="canvas-text" /></div></div>
+        {/* Screen fade preview, capped at 50% so the beat stays editable (spec §4). z 4: over art, notes and
+            text; under the pos handle (5) and objects (6). */}
+        <div className="deck__fade" ref={fadeEl} aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 4 }} />
         <ObjectStage ref={objStage} scene={scene ?? { id: "", beats: [] }} active={preview} />
         <PosHandle hostRef={host} redraw={draw} />
         {!preview && <ObjectsLayer hostRef={host} />}

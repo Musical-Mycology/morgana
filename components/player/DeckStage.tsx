@@ -8,6 +8,8 @@ import { flattenStory } from "@/engine/deck/flatten";
 import { deckLayout, locate, type DeckLayout, type Located } from "@/engine/authoring/deck-clock";
 import { artAt, artEvents, nightAt, nightEvents } from "@/engine/authoring/art-clock";
 import { cameraAt, cameraEvents, cameraTransform } from "@/engine/authoring/camera-clock";
+import { fadeAt, fadeEvents } from "@/engine/authoring/fade-clock";
+import { paintFadeOverlay } from "@/engine/components/fade-overlay";
 import type { ClipMode } from "@/engine/components/video-sync";
 import type { Framing } from "@/engine/deck/types";
 
@@ -61,6 +63,7 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   const artEv = useMemo(() => artEvents(doc), [doc]);
   const nightTl = useMemo(() => nightEvents(doc), [doc]);
   const camEv = useMemo(() => cameraEvents(doc), [doc]);
+  const fadeEv = useMemo(() => fadeEvents(doc), [doc]);
   const transport = useRef<SlideTransport>(null);
   const artRef = useRef<ArtStageHandle>(null);
   const T = useRef(Math.max(0, Math.min(layout.total, initialT)));
@@ -77,6 +80,13 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   const paintArt = useCallback(() => {
     artRef.current?.renderState(artAt(artEv, T.current), nightAt(nightTl, T.current), T.current, clipMode.current);
   }, [artEv, nightTl]);
+
+  const fadeEl = useRef<HTMLDivElement>(null);
+  const lastFade = useRef("");
+  /** Paint the screen fade at T (spec §4): one overlay above text, outside every camera world. */
+  const paintFade = useCallback(() => {
+    if (fadeEl.current) lastFade.current = paintFadeOverlay(fadeEl.current, fadeAt(fadeEv, T.current), lastFade.current);
+  }, [fadeEv]);
 
   /** Set the framing at T and paint the ArtStage world (written only when the string changes).
    *  The beat's own world layers pick cameraRef up in their paint, which the seek triggers. */
@@ -99,7 +109,8 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
     else if (next && next.flatIdx != null) transport.current?.seek(next.localT, beatClipClock(layout, next, T.current));
     setDisplayT(T.current);
     paintArt();
-  }, [layout, paintArt, paintCamera]);
+    paintFade();
+  }, [layout, paintArt, paintCamera, paintFade]);
 
   // Mount (and a new doc): set + paint the framing at the current T. Declared before the seek
   // effect below so a doc change re-seeks the beat with the new framing already in the ref.
@@ -116,6 +127,7 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
 
   // Mount (and a new doc): paint art + nightlight at the current T before the first frame shows.
   useLayoutEffect(() => { paintArt(); }, [paintArt]);
+  useLayoutEffect(() => { paintFade(); }, [paintFade]);
 
   const hasCamera = camEv.length > 0;
   const stage = (
@@ -129,6 +141,9 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
       {hasCamera && <style>{`[data-camera] .artstage__layer, [data-camera] .notefield__stage > * { will-change: auto !important; }`}</style>}
       <ArtStage ref={artRef} nightlight={initialNight} reduced={false} transparentBg />
       {loc && loc.flatIdx != null && <Stage doc={doc} flatIdx={loc.flatIdx} transport={transport} clipModeRef={clipMode} cameraRef={cameraRef} />}
+      {/* The screen fade (sub-project 6): the LAST child, above text and outside every camera world. No
+          display/opacity in this style prop: paintFadeOverlay owns them (React never rewrites them). */}
+      <div className="deck__fade" ref={fadeEl} aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 50 }} />
     </div>
   );
   return { apply, T, displayT, loc, layout, stage, clipMode, cameraRef };
