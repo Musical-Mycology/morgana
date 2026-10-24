@@ -16,8 +16,9 @@ import { formatCounterValue, counterValueAt } from "@/engine/deck/counter";
 import { mediaStateAt, type MediaFold, type MediaRenderState } from "@/engine/deck/media-state";
 import {
   flyUp, fadeIn, fadeSide, dotFade, rotateItemAt, lineAndDots,
-  letterFly, letterUp, wordUp, blurIn, typewriter,
+  letterFly, letterUp, wordUp, blurIn, typewriter, drawIn,
 } from "../effects/cinematic-anim";
+import { DRAW_DASH_EM, DRAW_STROKE_EM, DRAW_VARIANT, drawText } from "../effects/draw-state";
 import { foldAt, rebuildBoundary, beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
 import { cameraAt, cameraTransform, FULL_FRAME, type CameraEvent } from "@/engine/authoring/camera-clock";
 
@@ -362,6 +363,41 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return p;
   }
 
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  /** A "draw" line (spec §1): a hidden HTML ghost of the text reserves the line's layout, so boxes,
+   *  alignment and `pos` behave exactly as for an HTML line, and an inline SVG <text> over it holds
+   *  one <tspan> per glyph for drawIn to trace. One row: newlines become spaces (drawText). */
+  function appendDrawLine(host: HTMLElement, a: Extract<Action, { kind: "text" }>): HTMLElement {
+    const text = drawText(a.value);
+    const p = document.createElement("p");
+    p.className = `cin__line cin__line--${a.size ?? "lg"} cin__line--draw${a.tone === "dark" ? " cin__line--dark" : ""}`;
+    if (a.align) p.style.textAlign = a.align;
+    p.setAttribute("aria-label", text);
+    const wrap = document.createElement("span");
+    wrap.className = "cin__draw-wrap";
+    const ghost = document.createElement("span");
+    ghost.className = "cin__draw-ghost";
+    ghost.textContent = text;
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", DRAW_VARIANT === "mask" ? "cin__draw cin__draw--mask" : "cin__draw");
+    svg.setAttribute("aria-hidden", "true");
+    const t = document.createElementNS(SVG_NS, "text");
+    t.setAttribute("x", "0");
+    t.setAttribute("y", "0.075em"); // the HTML line box's half-leading at line-height 1.15
+    t.setAttribute("dominant-baseline", "text-before-edge");
+    for (const ch of Array.from(text)) {
+      const span = document.createElementNS(SVG_NS, "tspan");
+      span.textContent = ch;
+      t.appendChild(span);
+    }
+    svg.appendChild(t);
+    wrap.append(ghost, svg);
+    p.appendChild(wrap);
+    host.appendChild(p);
+    currentLine.current = p;
+    return p;
+  }
+
   /** Append an inline fragment to the current line (text action `append`); the caller runs
    *  the reveal effect on the returned span. Falls back to a fresh line if none exists. */
   function appendFragment(value: string): HTMLElement {
@@ -627,6 +663,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   function buildTextEffect(el: HTMLElement, effIn: TextIn, a: Extract<Action, { kind: "text" }>): gsap.core.Timeline {
     const dir = a.align === "right" ? "right" : "left"; // letterFly follows justification
     const tl =
+      effIn === "draw" ? drawIn(el, a.value.length, a.speed) :
       effIn === "flyUp" ? flyUp(el, a.speed) :
       effIn === "fadeSide" ? fadeSide(el, a.speed) :
       effIn === "cursive" ? typewriter(el, a.speed ?? 0.2) :
@@ -642,17 +679,23 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   /** Build one text action's element + its real reveal timeline, paused at 0 — the only place
    *  text elements/timelines are built (design spec §7b §4.2). */
   function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement } {
-    const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive"];
-    const effIn: TextIn = hasInlineMarkup(a.value) && perPiece.includes(a.in) ? "fade" : a.in;
+    const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive", "draw"];
+    // Markup, and inline `append` fragments, cannot be drawn glyph-by-glyph: they reveal with "fade".
+    // So do dotted and empty draw lines (the dots live in HTML; an empty line has no outline).
+    const effIn: TextIn = (hasInlineMarkup(a.value) && perPiece.includes(a.in)) || (a.in === "draw" && (a.append || a.dots || !a.value)) ? "fade" : a.in;
     // instantText / no-reveal lines have no entrance: they render at rest, and their dots
     // render already-faded-in via `instant`.
     const instant = !!(instantText && !a.reveal);
     // `box` is only created (and only tracked) for a non-append, `pos`-bearing line — capture
     // it so resetFrom can tear it down alongside `el` (see the `built` ref's comment).
     let box: HTMLElement | undefined;
+    const parent = () => (a.pos ? (box = makeLineBox(a.pos, a.align)) : host);
+    // An instant draw line renders as a plain HTML line (no entrance to trace).
     const el = a.append
       ? appendFragment(a.value)
-      : appendText(a.pos ? (box = makeLineBox(a.pos, a.align)) : host, a.value, a.size, a.align, a.dots, instant, a.tone);
+      : effIn === "draw" && !instant
+        ? appendDrawLine(parent(), a)
+        : appendText(parent(), a.value, a.size, a.align, a.dots, instant, a.tone);
     if (a.in === "cursive") el.classList.add("cin__line--cursive");
     if (instant) return { el, tl: null, box };
     const tl = buildTextEffect(el, effIn, a);
@@ -1097,6 +1140,17 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
            LIGHT art panel (e.g. the closing musicians). Mirrors the intro's day treatment. */
         .cin__line--dark { color: var(--color-mm-dark-brown); text-shadow: 0 1px 12px rgba(255,247,235,0.6); }
         .cin__line--cursive { font-family: var(--font-cursive); font-size: ${CURSIVE_SIZE}; font-weight: 700; }
+        /* "draw" lines (sub-project 6): the ghost reserves layout; the SVG over it is traced. */
+        .cin__line--draw { position: relative; }
+        .cin__draw-wrap { position: relative; display: inline-block; white-space: pre; }
+        .cin__draw-ghost { visibility: hidden; }
+        .cin__draw { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+        .cin__draw text { fill: currentColor; stroke: currentColor; stroke-width: ${DRAW_STROKE_EM}em; white-space: pre; }
+        .cin__draw tspan { stroke-dasharray: ${DRAW_DASH_EM}em; stroke-dashoffset: calc(var(--d, 1) * ${DRAW_DASH_EM}em);
+          fill-opacity: var(--f, 0); stroke-opacity: var(--s, 1); }
+        .cin__draw--mask { -webkit-mask-image: linear-gradient(90deg, #000 calc(var(--sweep, 0) * 108% - 8%), transparent calc(var(--sweep, 0) * 108%));
+          mask-image: linear-gradient(90deg, #000 calc(var(--sweep, 0) * 108% - 8%), transparent calc(var(--sweep, 0) * 108%)); }
+        .cin__draw--mask tspan { stroke-dasharray: none; stroke-dashoffset: 0; }
         /* Inline links inside narration. The stage is pointer-events:none, so links must
            opt back in to be clickable (same trick as .cin__cta). */
         .cin__link { pointer-events: auto; cursor: pointer; color: var(--color-mm-gold);
