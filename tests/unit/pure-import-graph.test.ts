@@ -41,6 +41,7 @@ test.each([
   "engine/authoring/deck-clock.ts",
   "lib/timing/clock-format.ts",
   "engine/authoring/art-clock.ts",
+  "engine/authoring/fade-clock.ts",
   "lib/store/media-sniff.ts",
   "engine/deck/media-ref.ts",
   "engine/deck/clip-clock.ts",
@@ -62,6 +63,7 @@ test.each([
   "lib/editor/lint.ts",
   "lib/editor/media-refs.ts",
   "engine/authoring/camera-clock.ts",
+  "engine/authoring/fade-clock.ts",
   "engine/deck/credits.ts",
 ])("%s has a browser-safe runtime import graph (no Node builtins)", (rel) => {
   const offenders = [...runtimeGraph(resolve(ROOT, rel))]
