@@ -1123,7 +1123,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // A face that started loading after `ready` resolved (/play and the editor preload nothing)
       // changes the metrics just measured: measure once more behind the new `ready`. On /render
       // every face is preloaded (status "loaded"), so this never runs there.
-      if (typeof document !== "undefined" && document.fonts?.status === "loading") {
+      // Only when `ready` is a different promise than the one this pass awaited: a FontFaceSet whose
+      // status stays "loading" while `ready` is still the resolved one would otherwise chain forever.
+      if (typeof document !== "undefined" && document.fonts?.status === "loading" && document.fonts.ready !== fonts) {
         layoutRev.current++;
         scheduleMeasure();
       }

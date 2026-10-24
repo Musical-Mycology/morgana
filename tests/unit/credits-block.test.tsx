@@ -226,6 +226,21 @@ describe("late fonts", () => {
     expect(roll(container)!.style.transform).toBe("translateY(-100px)");
   });
 
+  test("a non-conforming FontFaceSet (status stuck at loading, ready never swapped) measures once, with no chain", async () => {
+    let reads = 0;
+    const stuck = Promise.resolve();
+    Object.defineProperty(document, "fonts", {
+      value: { status: "loading", get ready() { if (++reads > 50) throw new Error("re-measure chain"); return stuck; } },
+      configurable: true,
+    });
+    const { transport, container } = mount(timeline());
+    act(() => transport.current!.seek(2));
+    await act(async () => { await transport.current!.sourcesReady(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });  // let any chained pass run
+    expect(roll(container)!.style.transform).toBe("translateY(50px)");
+    expect(reads).toBeLessThanOrEqual(3);                       // one pass: its schedule + the guard's comparison
+  });
+
   test("loaded (every face preloaded, as on /render): no second measurement", async () => {
     fonts.status = "loaded";
     fonts.ready = Promise.resolve();
