@@ -139,7 +139,7 @@ function validateCameraActions(scene: Scene, si: number, e: string[]): void {
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-/** Validate credits, screen_fade, and text/credits particles (sub-project 6). */
+/** Validate credits, screen_fade, note_emitter numbers, and text/credits particles (sub-project 6). */
 function validateCreditsAndFades(scene: Scene, si: number, e: string[]): void {
   scene?.beats?.forEach((b, bi) => {
     b?.timeline?.forEach((a: Record<string, unknown>, ai) => {
@@ -160,6 +160,10 @@ function validateCreditsAndFades(scene: Scene, si: number, e: string[]): void {
             && x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= 1 + 1e-9 && y + h <= 1 + 1e-9;
           if (!ok) e.push(`${at}.area must lie within 0–1 with positive size`);
         }
+      }
+      if (a?.kind === "note_emitter") {
+        if (!finite(a.freq) || a.freq < 0) e.push(`${at}.freq must be a finite number ≥ 0`);
+        if (!finite(a.decay) || a.decay < 0) e.push(`${at}.decay must be a finite number ≥ 0`);
       }
       if (a?.kind === "screen_fade") {
         if (!finite(a.to) || a.to < 0 || a.to > 1) e.push(`${at}.to must be 0–1`);

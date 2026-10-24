@@ -82,7 +82,7 @@ export function emitterSpritesAt(
   elapsed: number,
 ): NoteSpriteState[] {
   const freq = a.freq;
-  if (!(freq > 0) || !(a.decay > 0) || elapsed < 0) return [];
+  if (!(freq > 0) || !Number.isFinite(freq) || !(a.decay > 0) || elapsed < 0) return [];
   const D = emitterDecaySeconds(a.decay);
   const P = Math.min(Math.ceil(D * freq) + 1, MAX_SPRITES_PER_SOURCE);
   // live iff 0 ≤ elapsed − i/freq < D
@@ -93,7 +93,8 @@ export function emitterSpritesAt(
   const fadeSpan = 0.4 * D;
 
   const out: NoteSpriteState[] = [];
-  for (let i = iMin; i <= iMax; i++) {
+  // At most P sprites whatever the i arithmetic does: at freq > ~2^53, i++ is a no-op.
+  for (let k = 0, i = iMin; k < P && i <= iMax; k++, i++) {
     const age = elapsed - i / freq;
     const rnd = mulberry32(hash32(srcIdx, i));
     const spread = (rnd() * 2 - 1) * (a.var ?? 0);
@@ -232,7 +233,7 @@ export function textSpritesAt(src: TextSource, srcIdx: number, t: number): NoteS
   const fadeSpan = 0.4 * D;
 
   const out: NoteSpriteState[] = [];
-  for (let i = iMin; i <= last; i++) {
+  for (let k = 0, i = iMin; k < P && i <= last; k++, i++) {   // capped at P: see emitterSpritesAt
     const birth = i / rate;
     const age = t - birth;
     const rnd = mulberry32(hash32(TEXT_SEED + srcIdx, i));
