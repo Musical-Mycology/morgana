@@ -4,6 +4,7 @@ import type { ArtAsset, Beat, Framing, Scene } from "@/engine/deck/types";
 import type { DeckChrome } from "@/engine/deck-doc";
 import { ArtStage, type ArtStageHandle } from "@/engine/components/ArtStage";
 import { NoteField, type NoteFieldHandle } from "@/engine/components/NoteField";
+import type { TextSource } from "@/engine/components/effects/note-state";
 import { beatFraming, CinematicSlide, type BeatCamera, type SlideTransport } from "@/engine/components/layouts/CinematicSlide";
 import { cameraTransform } from "./camera-clock";
 import { ObjectStage, type ObjectStageHandle } from "@/components/editor/ObjectStage";
@@ -48,6 +49,8 @@ export function BeatStage({
   const objStage = useRef<ObjectStageHandle>(null);
   const notesWorld = useRef<HTMLDivElement>(null);
   const objectsWorld = useRef<HTMLDivElement>(null);
+  const noteText = useRef<HTMLDivElement>(null); // text-particle sprites: fixed, never the camera
+  const textSources = useRef<TextSource[]>([]); // CinematicSlide publishes measured sources here
   const lastCamera = useRef("none"); // last transform written to the .beat__world pair ("none" = never written)
   const [night, setNight] = useState(beat.nightlight ?? 0);
 
@@ -78,7 +81,7 @@ export function BeatStage({
     art.current?.setCamera(tf);
     if (!scene) return; // ObjectStage/NoteField are only meaningful with a scene to read from
     objStage.current?.renderAt(scene, beatIndex, t);
-    notes.current?.renderAt(scene, beatIndex, t);
+    notes.current?.renderAt(scene, beatIndex, t, textSources.current);
   }, [scene, beatIndex, cameraRef, camera]);
 
   return (
@@ -97,13 +100,19 @@ export function BeatStage({
           explicit on both and the CinematicSlide wrapper below sets none, so this ordering has no
           effect on paint/stacking — only on effect timing. */}
       <div className="beat__world" ref={notesWorld} style={{ ...WORLD_STYLE, zIndex: 2 }}>
-        <NoteField ref={notes} reduced={false} />
+        <NoteField ref={notes} reduced={false} textHost={noteText} />
       </div>
       <div className="beat__world" ref={objectsWorld} style={{ ...WORLD_STYLE, zIndex: 6 }}>
         {scene && <ObjectStage ref={objStage} scene={scene} active />}
       </div>
+      {/* Text particles (sub-project 6): FIXED, never the camera — text never moves (sub-5), so its notes
+          stay on its words through a camera move. z 2 after the notes world (above emitter notes), before
+          the text wrapper (below the text). */}
+      <div aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2, overflow: "hidden" }}>
+        <div className="notefield__text" ref={noteText} />
+      </div>
       <div style={{ position: "absolute", inset: 0 }}>
-        <CinematicSlide slots={{ sceneId, beat }} animate={animate} runtime={runtime} chrome={chrome} transport={transport} onTime={paint} autoplay={autoplay} clipModeRef={clipModeRef} cameraRef={cameraRef} camera={camera} />
+        <CinematicSlide slots={{ sceneId, beat }} animate={animate} runtime={runtime} chrome={chrome} transport={transport} onTime={paint} autoplay={autoplay} clipModeRef={clipModeRef} cameraRef={cameraRef} camera={camera} textSourcesRef={textSources} />
       </div>
     </div>
   );

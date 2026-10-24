@@ -65,7 +65,7 @@ export const REQUIRED_SLOTS: Record<LayoutId, string[]> = {
   cinematic: ["sceneId", "beat"],
 };
 
-import type { StoryAsset } from "./story-assets";
+import type { NoteColor, StoryAsset } from "./story-assets";
 import type { MediaRef } from "./media-ref";
 
 /** An art layer: a story panel key or a reference to this deck's uploaded media (spec §2). */
@@ -93,7 +93,8 @@ export interface ArtTransition {
 
 export type TextIn =
   // line-level
-  | "flyUp" | "fade" | "fadeSide" | "cursive"
+  // draw: SVG outline stroke, then fill (sub-project 6)
+  | "flyUp" | "fade" | "fadeSide" | "cursive" | "draw"
   // per-letter / per-word (GSAP SplitText). letterFly direction follows `align`.
   | "letterFly" | "letterUp" | "wordUp" | "blurIn" | "typewriter";
 export type TextSize = "lg" | "md" | "sm";
@@ -116,6 +117,15 @@ export type CameraEase = "inOut" | "in" | "out" | "linear";
 /** A camera framing: the world-space point at screen center (x, y: 0–1) and the zoom (1–8). */
 export interface Framing { x: number; y: number; zoom: number }
 
+/** Note particles off a text line or credit lines (sub-project 6). `color`: a NoteColor name
+ *  (NOTE_TINTS[c].fill) or any CSS hex, default "cream"; `rate`: notes/sec, 1–30, default 6;
+ *  `rise`: travel-distance multiplier, default 1. */
+export interface TextParticles { color?: NoteColor | string; rate?: number; rise?: number }
+/** One credit: an optional role line, then one line per name. */
+export interface CreditItem { role?: string; names: string[] }
+/** The credits roll's clip area on the stage, 0–1 (top-left x/y, size w/h). */
+export interface CreditsArea { x: number; y: number; w: number; h: number }
+
 /** One auto-played step inside a beat's timeline. */
 export type Action =
   // append: reveal this fragment INLINE on the current line (same sentence) instead of a
@@ -125,7 +135,7 @@ export type Action =
   // on a LIGHT art panel (e.g. the closing musicians).
   // reveal: force this line's `in` animation even when the deck suppresses text-in transitions
   // (instantText, the investor deck) — opts a single line back into motion.
-  | { kind: "text"; value: string; in: TextIn; size?: TextSize; align?: TextAlign; speed?: number; dots?: true; pos?: StagePoint; append?: true; tone?: SlideTheme; screenOnly?: true; reveal?: true }
+  | { kind: "text"; value: string; in: TextIn; size?: TextSize; align?: TextAlign; speed?: number; dots?: true; pos?: StagePoint; append?: true; tone?: SlideTheme; screenOnly?: true; reveal?: true; particles?: TextParticles }
   | { kind: "rotateList"; items: string[]; size?: TextSize }
   | { kind: "clear" }
   | { kind: "art"; art: ArtTransition }
@@ -184,6 +194,13 @@ export type Action =
   | { kind: "obj_out"; target: string; out?: ObjectOut; durationMs?: number }
   // Reveal the closing "Watch again" button. The fin beat keeps it hidden until
   // this fires (mirrors reveal_arrows).
+  // Credits roll (sub-project 6): one block in the fixed text layer, clipped to `area` (default
+  // {0.2, 0.32, 0.6, 0.63}) with soft edges, rolling linearly from just below the area to just above
+  // it over durationMs (the beat waits for it). particles: notes off each credit line.
+  | { kind: "credits"; items: CreditItem[]; area?: CreditsArea; durationMs: number; particles?: TextParticles }
+  // Fade the whole frame to `to` (0–1) in `color` (default #000) over durationMs (default 1000;
+  // 0 = cut). Occupies no beat time; the level holds across beats and scenes until the next fade.
+  | { kind: "screen_fade"; to: number; color?: string; durationMs?: number }
   | { kind: "reveal_again" };
 
 /** One row in a data panel (e.g. a ledger line or a metric). */

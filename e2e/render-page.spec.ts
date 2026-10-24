@@ -2,6 +2,9 @@ import { expect, test, type APIRequestContext } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { cameraAt, cameraEvents, cameraTransform } from "../engine/authoring/camera-clock";
+import { deckLayout } from "../engine/authoring/deck-clock";
+import { fadeAt, fadeEvents } from "../engine/authoring/fade-clock";
+import { DRAW_VARIANT } from "../engine/components/effects/draw-state";
 import type { DeckDoc } from "../engine/deck-doc";
 
 // Per-worker deck id (set in beforeEach): --repeat-each runs copies in parallel workers, which must not share a deck.
@@ -599,6 +602,199 @@ test.describe("camera", () => {
     await frame(3.3);
     await frame(reT);
     expect((await page.screenshot()).equals(shots.get(reT)!), `backward to T=${reT}`).toBe(true);
+  });
+});
+
+// Notes without a camera: note sprites animate their own scale and opacity, and Chromium's raster
+// history made a stepped frame differ from the same frame jumped to (up to 47 levels), camera or not.
+test.describe("notes", () => {
+  // Byte-equality is the render's contract: a flaky mismatch must fail, never pass on a CI retry.
+  test.describe.configure({ retries: 0 });
+  let noteId = "";
+  test.beforeEach(async ({ request }, info) => {
+    noteId = `e2e-render-notes-${info.parallelIndex}`;
+    await request.delete(`/api/decks/${noteId}`).catch(() => {});
+    await request.post("/api/decks", { data: { id: noteId, title: "Notes" } });
+  });
+  test.afterEach(async ({ request }) => { await request.delete(`/api/decks/${noteId}`); });
+
+  test("notes without a camera: stepped, jumped and backward-jumped frames are byte-equal", async ({ page, request }) => {
+    const still = await upload(request, noteId, "still.png", "image/png");
+    const doc = { version: 1, meta: { id: noteId, title: "Notes" }, scenes: [{ id: "s1",
+      objects: [
+        { id: "words", kind: "text", text: "Object words", transform: { x: 0.5, y: 0.5, w: 0.3, h: 0.1 }, style: { size: "md", color: "#ffffff" } },
+        { id: "ring", kind: "shape", shape: "ellipse", stroke: { color: "#ffe08a", width: 0.004 }, transform: { x: 0.36, y: 0.62, w: 0.12, h: 0.12 } },
+      ],
+      beats: [{ id: "a", art: { to: still, mode: "cut" }, timeline: [
+        { kind: "note_emitter", color: "#3FFBFF", pos: { x: 0.42, y: 0.66 }, dir: 0, var: 40, decay: 3000, freq: 5 },
+        { kind: "wait", ms: 3500 },
+      ] }] }] };
+    expect((await request.put(`/api/decks/${noteId}`, { data: doc })).status()).toBe(200);
+    expect(cameraEvents(doc as unknown as DeckDoc)).toHaveLength(0);
+    // Storyboard glyphs may be absent from a checkout (an unloaded mask paints nothing): serve a
+    // fine-lined glyph for every note so the sprites really draw.
+    const glyph = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g fill="none" stroke="#fff" stroke-width="2">
+      <ellipse cx="22" cy="48" rx="10" ry="7"/><path d="M32 48V8l18 8"/><path d="M8 20h48M8 26h48M8 32h48"/></g></svg>`;
+    await page.route("**/storyboard/notes/**", (r) => r.fulfill({ contentType: "image/svg+xml", body: glyph }));
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto(`/render?deck=${noteId}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+    const frame = (t: number) => page.evaluate(async (t) => {
+      const r = window.__morganaRender!;
+      if (!r.ready) throw new Error("not ready");
+      await r.renderFrame(t);
+    }, t);
+    const capture = async () => {
+      const png = await page.screenshot();
+      const dom = await page.evaluate(() => ({
+        notes: [...document.querySelectorAll<HTMLElement>("[data-render-root] .notefield__stage > *")]
+          .filter((e) => e.style.display !== "none").map((e) => [e.style.left, e.style.top, e.style.opacity, e.style.transform]),
+      }));
+      return { png, dom };
+    };
+
+    const ts: number[] = [];
+    for (let t = 0; t <= 3.0 + 1e-9; t += 1 / 10) ts.push(Math.round(t * 10) / 10);
+    const stepped = new Map<number, Awaited<ReturnType<typeof capture>>>();
+    for (const t of ts) {
+      await frame(t);
+      if (t === 1.5 || t === 3.0) stepped.set(t, await capture());
+    }
+    const mid = stepped.get(1.5)!, late = stepped.get(3.0)!;
+    // Sanity: notes are on screen in both frames, and the frames differ.
+    expect(mid.dom.notes.length).toBeGreaterThan(3);
+    expect(late.dom.notes.length).toBeGreaterThan(3);
+    expect(mid.png.equals(late.png)).toBe(false);
+
+    for (const [T, want] of [[1.5, mid], [3.0, late]] as const) {
+      await frame(0);
+      await frame(T);
+      const jumped = await capture();
+      expect(jumped.dom, `jump T=${T}`).toEqual(want.dom);
+      expect(jumped.png.equals(want.png), `jump T=${T}`).toBe(true);
+    }
+    // Backward: 3.0 → 1.5.
+    await frame(3.0);
+    await frame(1.5);
+    const back = await capture();
+    expect(back.dom).toEqual(mid.dom);
+    expect(back.png.equals(mid.png), "backward jump T=1.5").toBe(true);
+  });
+});
+
+// Sub-project 6: a drawn title with particles, an HTML (letterFly) and a cursive particle line, a
+// credits roll with particles, and a fade to black.
+test.describe("credits", () => {
+  // Byte-equality is the render's contract: a flaky mismatch must fail, never pass on a CI retry.
+  test.describe.configure({ retries: 0 });
+  let creditsId = "";
+  test.beforeEach(async ({ request }, info) => {
+    creditsId = `e2e-render-credits-${info.parallelIndex}`;
+    await request.delete(`/api/decks/${creditsId}`).catch(() => {});
+    await request.post("/api/decks", { data: { id: creditsId, title: "Credits" } });
+  });
+  test.afterEach(async ({ request }) => { await request.delete(`/api/decks/${creditsId}`); });
+
+  test("draw, particle lines, roll + particles and fade: stepped, jumped and backward-jumped frames are byte-equal; the last frame is pure black", async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const still = await upload(request, creditsId, "still.png", "image/png");
+    // The drawn title holds wide/complex glyphs (W, @, g): the 12em dash bound must cover them. 7 chars → 1.06 s.
+    const TITLE = "W@gging";
+    // Title draws over 0–1.06 s; "Spores" letter-flies over 1.06–2.06 s ((0.5 + 6·0.03) / 0.68); "fin" types
+    // in the cursive face over 2.06–3.06 s ((0.1 + 3·0.045) / 0.235); the roll runs 3.06–7.06 s; the fade
+    // runs 7.06–8.06 s (under the wait); the deck ends at 8.56 s.
+    const doc = { version: 1, meta: { id: creditsId, title: "Credits" }, scenes: [{ id: "s1", beats: [{ id: "a", art: { to: still, mode: "cut" }, timeline: [
+      { kind: "text", value: TITLE, in: "draw", align: "center", pos: { x: 0.5, y: 0.06 }, particles: { color: "cyan", rate: 8 } },
+      // Ruling F3: an HTML particle line mid-SplitText must measure as it does at rest.
+      { kind: "text", value: "Spores", in: "letterFly", speed: 0.68, align: "center", pos: { x: 0.5, y: 0.2 }, particles: { color: "pink", rate: 8 } },
+      // A particle line in a second face (the script face): its metrics, not a fallback's, place the sources.
+      { kind: "text", value: "fin", in: "cursive", speed: 0.235, align: "left", pos: { x: 0.03, y: 0.55 }, particles: { color: "cream", rate: 8 } },
+      { kind: "credits", items: [{ role: "Directed by", names: ["Ann Lee"] }, { role: "Music", names: ["Bo Chen", "Cy Diaz"] }, { names: ["Thanks for watching"] }],
+        durationMs: 4000, particles: { color: "lime", rate: 6 } },
+      { kind: "screen_fade", to: 1, durationMs: 1000 },
+      { kind: "wait", ms: 1500 },
+    ] }] }] };
+    expect((await request.put(`/api/decks/${creditsId}`, { data: doc })).status()).toBe(200);
+    const d = doc as unknown as DeckDoc;
+    const TOTAL = deckLayout(d).total;
+    const MID_DRAW = 0.5, MID_FLY = 1.5, MID_CURSIVE = 2.5, MID_ROLL = 5.0, MID_FADE = 7.6;
+    expect(TOTAL).toBeCloseTo(8.56, 9);
+    // Storyboard glyphs may be absent from a checkout (an unloaded mask paints nothing): serve a
+    // fine-lined glyph for every note so the sprites really draw.
+    const glyph = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g fill="none" stroke="#fff" stroke-width="2">
+      <ellipse cx="22" cy="48" rx="10" ry="7"/><path d="M32 48V8l18 8"/><path d="M8 20h48M8 26h48M8 32h48"/></g></svg>`;
+    await page.route("**/storyboard/notes/**", (r) => r.fulfill({ contentType: "image/svg+xml", body: glyph }));
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto(`/render?deck=${creditsId}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+    const frame = (t: number) => page.evaluate(async (t) => {
+      const r = window.__morganaRender!;
+      if (!r.ready) throw new Error("not ready");
+      await r.renderFrame(t);
+    }, t);
+    const capture = async () => {
+      const png = await page.screenshot();
+      const dom = await page.evaluate(() => {
+        const q = (s: string) => document.querySelector<HTMLElement>(`[data-render-root] ${s}`);
+        const fade = q(".deck__fade");
+        return {
+          draw: [...document.querySelectorAll<SVGElement>("[data-render-root] .cin__draw tspan")].map((e) => [e.style.getPropertyValue("--d"), e.style.getPropertyValue("--f")]),
+          // Each built line's text and how many elements it holds (a SplitText line is split into many).
+          lines: [...document.querySelectorAll<HTMLElement>("[data-render-root] .cin__line")].map((e) => [e.textContent, e.querySelectorAll("*").length]),
+          roll: q(".cin__credits-roll")?.style.transform ?? null,
+          text: [...document.querySelectorAll<HTMLElement>("[data-render-root] .notefield__text > *")]
+            .filter((e) => e.style.display !== "none").map((e) => [e.style.left, e.style.top, e.style.opacity, e.style.transform]),
+          fade: fade ? [fade.style.display, fade.style.opacity, fade.style.background] : null,
+        };
+      });
+      return { png, dom };
+    };
+
+    const ts: number[] = [];
+    for (let i = 0; i <= 85; i++) ts.push(i / 10);
+    ts.push(TOTAL);
+    const stepped = new Map<number, Awaited<ReturnType<typeof capture>>>();
+    for (const t of ts) {
+      await frame(t);
+      if ([MID_DRAW, MID_FLY, MID_CURSIVE, MID_ROLL, MID_FADE, TOTAL].includes(t)) stepped.set(t, await capture());
+    }
+    const draw = stepped.get(MID_DRAW)!, fly = stepped.get(MID_FLY)!, cursive = stepped.get(MID_CURSIVE)!;
+    const roll = stepped.get(MID_ROLL)!, fade = stepped.get(MID_FADE)!, last = stepped.get(TOTAL)!;
+
+    // Sanity: each compared frame really is mid-effect.
+    expect(draw.dom.draw.length).toBe(TITLE.length);
+    if (DRAW_VARIANT === "dash") expect(draw.dom.draw.some(([dd]) => Number(dd) > 0 && Number(dd) < 1)).toBe(true);
+    expect(draw.dom.draw.every(([, f]) => f === "0")).toBe(true);          // fill not started
+    expect(draw.dom.text.length).toBeGreaterThan(0);                       // title particles already flying
+    const line = (c: typeof draw, s: string) => c.dom.lines.find(([v]) => v === s);
+    expect(line(fly, "Spores")).toBeTruthy();                              // letterFly in flight (split)
+    expect(line(fly, "Spores")![1]).toBeGreaterThan(line(roll, "Spores")![1] as number);
+    expect(fly.dom.text.length).toBeGreaterThan(draw.dom.text.length);
+    expect(line(cursive, "fin")).toBeTruthy();
+    expect(roll.dom.roll).toMatch(/^translateY\(-?[\d.]+px\)$/);
+    expect(roll.dom.text.length).toBeGreaterThan(3);
+    expect(fade.dom.fade![0]).toBe("block");
+    expect(Number(fade.dom.fade![1])).toBeCloseTo(fadeAt(fadeEvents(d), MID_FADE).level, 5);
+    expect(last.dom.fade!.slice(0, 2)).toEqual(["block", "1"]);
+    expect(draw.png.equals(roll.png)).toBe(false);
+
+    for (const [T, want] of [[MID_DRAW, draw], [MID_FLY, fly], [MID_CURSIVE, cursive], [MID_ROLL, roll], [MID_FADE, fade], [TOTAL, last]] as const) {
+      await frame(0);
+      await frame(T);
+      const jumped = await capture();
+      expect(jumped.dom, `jump T=${T}`).toEqual(want.dom);
+      expect(jumped.png.equals(want.png), `jump T=${T}`).toBe(true);
+    }
+    // Backward: mid-fade → mid-draw (the overlay goes away, the title re-draws).
+    await frame(MID_FADE);
+    await frame(MID_DRAW);
+    const back = await capture();
+    expect(back.dom).toEqual(draw.dom);
+    expect(back.png.equals(draw.png), `backward jump T=${MID_DRAW}`).toBe(true);
+
+    // The last frame is pure black: byte-equal to a black page of the same size.
+    await page.setContent(`<!doctype html><html><body style="margin:0;background:#000"></body></html>`);
+    expect(last.png.equals(await page.screenshot()), "the last frame is pure black").toBe(true);
   });
 });
 

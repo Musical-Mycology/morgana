@@ -14,6 +14,16 @@ vi.mock("@/engine/components/video-sync", async (importOriginal) => {
   return { ...real, pendingVideoSeeks: () => { seeks.calls++; return seeks.impl ? seeks.impl() : real.pendingVideoSeeks(); } };
 });
 
+// sourcesReady is wrapped: test-gateable, and it records how many clip-seek awaits came before it.
+const sources = vi.hoisted(() => ({ gate: null as null | Promise<void>, seeksAtCall: -1 }));
+vi.mock("@/components/player/DeckStage", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/components/player/DeckStage")>();
+  return { ...real, useDeckStage: (...args: Parameters<typeof real.useDeckStage>) => {
+    const r = real.useDeckStage(...args);
+    return { ...r, sourcesReady: () => { sources.seeksAtCall = seeks.calls; return sources.gate ?? r.sourcesReady(); } };
+  } };
+});
+
 // jsdom has neither HTMLImageElement.decode nor document.fonts. `decoded` records every decode
 // (detached preload Images included); a src matching `broken` rejects.
 let broken: RegExp | null = null;
@@ -25,7 +35,7 @@ beforeAll(() => {
   };
   Object.defineProperty(document, "fonts", { value: { ready: Promise.resolve() }, configurable: true });
 });
-beforeEach(() => { broken = null; decoded.length = 0; seeks.impl = null; seeks.calls = 0; });
+beforeEach(() => { broken = null; decoded.length = 0; seeks.impl = null; seeks.calls = 0; sources.gate = null; sources.seeksAtCall = -1; });
 afterEach(cleanup);
 
 type Ready = Extract<NonNullable<Window["__morganaRender"]>, { ready: true }>;
@@ -101,6 +111,32 @@ test("renderFrame waits for pending clip seeks; their failed srcs join (and dedu
   expect((await r.renderFrame(3.0)).failed).toEqual(["http://x/media/b.webm"]);
 });
 
+test("renderFrame awaits the beat's text sources after the clip seeks and before decoding images", async () => {
+  render(<RenderStage doc={D} />);
+  const r = await ready();
+  let release!: () => void;
+  sources.gate = new Promise<void>((res) => { release = res; });
+  decoded.length = 0;
+  let done = false;
+  const p = r.renderFrame(2.95).then(() => { done = true; });
+  await waitFor(() => expect(sources.seeksAtCall).toBeGreaterThan(0));
+  expect(sources.seeksAtCall).toBe(seeks.calls);                  // pendingVideoSeeks came first
+  await new Promise((res) => setTimeout(res, 50));
+  expect(done).toBe(false);
+  expect(decoded.filter((s) => /\/storyboard\/panels\//.test(s))).toEqual([]); // no frame <img> decoded yet
+  release();
+  await p;
+  expect(decoded.some((s) => /1\.02\.jpg$/.test(s))).toBe(true);
+});
+
+test("window.__morganaRender keeps its identity across re-renders where only sourcesReady changes", async () => {
+  const { rerender } = render(<RenderStage doc={D} />);
+  const first = await ready();
+  rerender(<RenderStage doc={D} />); // the mock hands back a fresh sourcesReady closure each render
+  rerender(<RenderStage doc={D} />);
+  expect(window.__morganaRender).toBe(first);
+});
+
 test("renderFrame resolves with the art at mid-crossfade opacities", async () => {
   const { container } = render(<RenderStage doc={D} />);
   const r = await ready();
@@ -156,7 +192,8 @@ test("a camera deck's frame forces a full repaint (transient clip-path on the ro
   expect(w.seen.some((s) => s.includes("clip-path"))).toBe(true);
   expect(root.style.clipPath).toBe("");
 });
-test("a camera-less deck's frame never touches the root's clip-path", async () => {
+const styleText = (c: HTMLElement) => Array.from(c.querySelectorAll("style")).map((s) => s.textContent).join("\n");
+test("a deck with neither camera nor notes never touches the root's clip-path and drops no hints", async () => {
   const { container } = render(<RenderStage doc={D} />);
   const r = await ready();
   const root = container.querySelector<HTMLElement>("[data-render-root]")!;
@@ -165,4 +202,67 @@ test("a camera-less deck's frame never touches the root's clip-path", async () =
   await Promise.resolve();
   w.stop();
   expect(w.seen.some((s) => s.includes("clip-path"))).toBe(false);
+  expect(styleText(container)).not.toMatch(/will-change: auto/);
+  expect(container.querySelector("[data-camera]")).toBeNull();
+});
+
+// Note sprites animate their own scale and opacity, so a camera-less note deck had the same
+// stepped-vs-jumped raster history: in /render it gets the full raster (clip-path) AND drops the
+// will-change hints, under html[data-render="1"] only (each half alone still differed).
+test("a camera-less note deck's frame forces a full repaint and drops the hints, scoped to /render", async () => {
+  const NOTED: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s0", beats: [
+    { id: "a", timeline: [{ kind: "note_emitter", color: "#fff", pos: { x: 0.5, y: 0.5 }, dir: 0, decay: 1000, freq: 2 }, { kind: "wait", ms: 2000 }] },
+  ] }] };
+  const { container } = render(<RenderStage doc={NOTED} />);
+  const r = await ready();
+  const root = container.querySelector<HTMLElement>("[data-render-root]")!;
+  const w = clipWrites(root);
+  await r.renderFrame(1);
+  await Promise.resolve();
+  w.stop();
+  expect(w.seen.some((s) => s.includes("clip-path"))).toBe(true);
+  expect(root.style.clipPath).toBe("");
+  const css = styleText(container);
+  expect(css).toMatch(/html\[data-render="1"\] \[data-render-root\] \.artstage__layer/);
+  expect(css).toMatch(/html\[data-render="1"\] \[data-render-root\] \.notefield__stage > \*/);
+  expect(css).toMatch(/html\[data-render="1"\] \[data-render-root\] \.notefield__text > \*/);
+  expect(css).toMatch(/will-change: auto !important/);
+  expect(container.querySelector("[data-camera]")).toBeNull(); // the camera flag stays camera-only
+});
+test("a deck with camera AND notes: the full raster still runs, and RenderStage adds no hint-drop style of its own (DeckStage's data-camera covers it)", async () => {
+  const BOTH: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s0", beats: [
+    { id: "a", timeline: [
+      { kind: "note_emitter", color: "#fff", pos: { x: 0.5, y: 0.5 }, dir: 0, decay: 1000, freq: 2 },
+      { kind: "camera", to: { zoom: 2 }, durationMs: 0 }, { kind: "wait", ms: 2000 },
+    ] },
+  ] }] };
+  const { container } = render(<RenderStage doc={BOTH} />);
+  const r = await ready();
+  const root = container.querySelector<HTMLElement>("[data-render-root]")!;
+  const w = clipWrites(root);
+  await r.renderFrame(1);
+  await Promise.resolve();
+  w.stop();
+  expect(w.seen.some((s) => s.includes("clip-path"))).toBe(true);
+  expect(root.style.clipPath).toBe("");
+  const css = styleText(container);
+  expect(css).not.toMatch(/\[data-render-root\] \.(artstage__layer|notefield__stage)/); // the !hasCamera guard: no RenderStage rule
+  expect(css).toMatch(/\[data-camera\] \.notefield__stage > \*/); // DeckStage's camera rule does it
+  expect(css).toMatch(/\[data-camera\] \.notefield__text > \*/);
+  expect(container.querySelector("[data-camera]")).not.toBeNull();
+});
+
+test("a deck whose only note source is text particles gets the full raster and the hint drop", async () => {
+  const TEXTY: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s0", beats: [
+    { id: "a", timeline: [{ kind: "text", value: "Notes off me", in: "fade", particles: {} }, { kind: "wait", ms: 2000 }] },
+  ] }] };
+  const { container } = render(<RenderStage doc={TEXTY} />);
+  const r = await ready();
+  const root = container.querySelector<HTMLElement>("[data-render-root]")!;
+  const w = clipWrites(root);
+  await r.renderFrame(1);
+  await Promise.resolve();
+  w.stop();
+  expect(w.seen.some((s) => s.includes("clip-path"))).toBe(true);
+  expect(styleText(container)).toMatch(/html\[data-render="1"\] \[data-render-root\] \.notefield__text > \*/);
 });

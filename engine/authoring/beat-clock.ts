@@ -5,27 +5,32 @@
  *  This is the single source of truth for when anything happens in a beat
  *  (design spec §7b D2). Never derive a duration by reading a built GSAP timeline. */
 import type { Action, TextIn } from "@/engine/deck/types";
+import { drawDuration, isDrawnLine } from "@/engine/components/effects/draw-state";
 
 // Mirrors INTRO_DUR + introDuration() in CinematicSlide.tsx so windows match playback timing.
-const INTRO_DUR: Record<TextIn, number> = {
+const INTRO_DUR: Record<Exclude<TextIn, "draw">, number> = {
   flyUp: 0.6, fade: 0.8, fadeSide: 0.7, cursive: 1.0,
   letterFly: 1.6, letterUp: 1.6, wordUp: 1.3, blurIn: 1.6, typewriter: 1.5,
 };
 const DOTFADE_TAIL = 2.02;
 
-export function introDuration(a: { in: TextIn; value: string; dots?: true; speed?: number }): number {
+export function introDuration(a: { in: TextIn; value: string; dots?: true; append?: true; speed?: number }): number {
   const sp = a.speed ?? (a.in === "cursive" ? 0.2 : 1);
+  // draw: per-character outline + one fill phase (draw-state.ts). A dotted, empty or append draw
+  // line is not drawn: it reveals (and is timed, dots tail included) exactly as "fade".
+  if (isDrawnLine(a)) return drawDuration(a.value.length, sp);
+  const inStyle: Exclude<TextIn, "draw"> = a.in === "draw" ? "fade" : a.in;
   const chars = a.value.length;
   const words = a.value.trim().split(/\s+/).length;
   let base: number;
-  switch (a.in) {
+  switch (inStyle) {
     case "cursive":
     case "typewriter": base = 0.1 + chars * 0.045; break;
     case "letterFly":
     case "letterUp":
     case "blurIn": base = 0.5 + chars * 0.03; break;
     case "wordUp": base = 0.6 + words * 0.08; break;
-    default: base = INTRO_DUR[a.in];
+    default: base = INTRO_DUR[inStyle];
   }
   return (base + (a.dots ? DOTFADE_TAIL : 0)) / sp;
 }
@@ -40,12 +45,13 @@ export function actionDuration(a: Action): number {
     case "counter_to":
     case "counter_add": return (a.durationMs ?? 800) / 1000;
     case "media": return (a.durationMs ?? 600) / 1000;
+    case "credits": return a.durationMs / 1000;
     case "media_move": return (a.durationMs ?? 800) / 1000;
     case "media_out": return (a.durationMs ?? 500) / 1000;
     case "obj_reveal": return (a.durationMs ?? 600) / 1000;
     case "obj_move": return (a.durationMs ?? 800) / 1000;
     case "obj_out": return (a.durationMs ?? 500) / 1000;
-    default: return 0; // art / notes / nightlight / clear / gates: instantaneous side-effects
+    default: return 0; // art / notes / nightlight / camera / screen_fade / clear / gates: instantaneous side-effects
   }
 }
 
