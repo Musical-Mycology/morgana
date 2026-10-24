@@ -334,3 +334,10 @@ test("a camera-less note deck: the deck stage gets no data-camera and no will-ch
   const css = Array.from(container.querySelectorAll("style")).map((s) => s.textContent).join("\n");
   expect(css).not.toMatch(/will-change: auto/);
 });
+
+test("sourcesReady resolves (it delegates to the mounted beat's transport)", async () => {
+  let ready!: () => Promise<void>;
+  function SrcHost({ doc }: { doc: DeckDoc }) { const s = useDeckStage(doc, 0); ready = s.sourcesReady; return <div>{s.stage}</div>; }
+  render(<SrcHost doc={D} />);
+  await expect(act(async () => { await ready(); })).resolves.toBeUndefined();
+});

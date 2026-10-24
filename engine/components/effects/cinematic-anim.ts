@@ -1,5 +1,6 @@
 import gsap from "gsap";
 import { SplitText } from "gsap/SplitText";
+import { DRAW_VARIANT, drawDuration, drawGlyphAt, drawSweepAt } from "./draw-state";
 
 // SplitText ships free in gsap >= 3.13. Register once (guard for SSR import safety).
 if (typeof window !== "undefined") gsap.registerPlugin(SplitText);
@@ -126,4 +127,29 @@ export function typewriter(el: HTMLElement, speed = 1): gsap.core.Timeline {
   const tl = gsap.timeline({ onComplete: () => split.revert() });
   tl.from(split.chars, { opacity: 0, duration: 0.01, ease: "none", stagger: 0.045 / speed });
   return tl;
+}
+
+const r4 = (n: number) => String(Math.round(n * 1e4) / 1e4);
+
+/** "draw": trace each glyph's outline, then fill (spec §1). A paused-seekable timeline over a proxy
+ *  clock; every frame paints the per-glyph state from the pure drawGlyphAt as CSS custom properties
+ *  (--d dash fraction, --f fill-opacity, --s stroke-opacity; --sweep on the svg for "mask"), which
+ *  CinematicSlide's CSS turns into stroke-dashoffset / fill-opacity / stroke-opacity / mask-image.
+ *  `chars` is the line's value.length, so the timing matches introDuration exactly. */
+export function drawIn(el: HTMLElement, chars: number, speed = 1): gsap.core.Timeline {
+  const svg = el.querySelector<SVGSVGElement>(".cin__draw");
+  const glyphs = svg ? Array.from(svg.querySelectorAll<SVGTSpanElement>("tspan")) : [];
+  const clock = { t: 0 };
+  const paint = () => {
+    if (DRAW_VARIANT === "mask") svg?.style.setProperty("--sweep", r4(drawSweepAt(chars, clock.t, speed)));
+    glyphs.forEach((g, i) => {
+      const s = drawGlyphAt(i, chars, clock.t, speed);
+      if (DRAW_VARIANT === "dash") g.style.setProperty("--d", r4(s.dash));
+      g.style.setProperty("--f", r4(s.fill));
+      g.style.setProperty("--s", r4(s.stroke));
+    });
+  };
+  paint();
+  const D = drawDuration(chars, speed);
+  return gsap.timeline().to(clock, { t: D, duration: D, ease: "none", onUpdate: paint });
 }

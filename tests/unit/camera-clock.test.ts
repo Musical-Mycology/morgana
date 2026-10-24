@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  CAMERA_DEFAULT_MS, FULL_FRAME, cameraAt, cameraEase, cameraEvents, cameraTransform, clampFraming, hasNoteActions,
+  CAMERA_DEFAULT_MS, FULL_FRAME, cameraAt, cameraEase, cameraEvents, cameraTransform, clampFraming, hasNoteSources,
   type CameraEvent,
 } from "@/engine/authoring/camera-clock";
 import { power2InOut } from "@/engine/authoring/art-clock";
@@ -180,23 +180,32 @@ describe("cameraTransform", () => {
   });
 });
 
-describe("hasNoteActions", () => {
+describe("hasNoteSources", () => {
   const emitter: Action = { kind: "note_emitter", color: "#fff", pos: { x: 0.5, y: 0.5 }, dir: 0, decay: 1000, freq: 2 };
   const circle: Action = { kind: "note_circle", pos: { x: 0.5, y: 0.5 }, width: 0.2, height: 0.2, hex: ["#fff"] };
   test("a note_emitter or note_circle in any beat (any scene) counts", () => {
-    expect(hasNoteActions(deck([{ id: "s", beats: [{ id: "a", timeline: [{ kind: "wait", ms: 100 }, emitter] }] }]))).toBe(true);
-    expect(hasNoteActions(deck([
+    expect(hasNoteSources(deck([{ id: "s", beats: [{ id: "a", timeline: [{ kind: "wait", ms: 100 }, emitter] }] }]))).toBe(true);
+    expect(hasNoteSources(deck([
       { id: "s0", beats: [{ id: "a", timeline: [{ kind: "wait", ms: 100 }] }] },
       { id: "s1", beats: [{ id: "b", timeline: [] }, { id: "c", timeline: [circle] }] },
     ]))).toBe(true);
   });
+  test("a text or credits action with particles counts; without particles it does not", () => {
+    const line = (particles?: object): Action => ({ kind: "text", value: "Hi", in: "fade", ...(particles ? { particles } : {}) }) as Action;
+    expect(hasNoteSources(deck([{ id: "s", beats: [{ id: "a", timeline: [line({ rate: 6 })] }] }]))).toBe(true);
+    expect(hasNoteSources(deck([{ id: "s", beats: [{ id: "a", timeline: [line({})] }] }]))).toBe(true);
+    expect(hasNoteSources(deck([{ id: "s", beats: [{ id: "a", timeline: [line()] }] }]))).toBe(false);
+    const credits = (particles?: object): Action => ({ kind: "credits", items: [{ names: ["A"] }], durationMs: 1000, ...(particles ? { particles } : {}) }) as Action;
+    expect(hasNoteSources(deck([{ id: "s", beats: [{ id: "a", timeline: [credits({ color: "lime" })] }] }]))).toBe(true);
+    expect(hasNoteSources(deck([{ id: "s", beats: [{ id: "a", timeline: [credits()] }] }]))).toBe(false);
+  });
   test("a note action past a pinned scene's cut still counts (the reach rule is ignored on purpose: the gate only has to be safe)", () => {
     const d = deck([{ id: "s", durationSec: 1, beats: [{ id: "a", timeline: [{ kind: "wait", ms: 2000 }, emitter] }] }]);
     expect(cameraEvents(deck([{ id: "s", durationSec: 1, beats: [{ id: "a", timeline: [{ kind: "wait", ms: 2000 }, cam({ zoom: 2 })] }] }]))).toEqual([]); // cameraEvents does apply it
-    expect(hasNoteActions(d)).toBe(true);
+    expect(hasNoteSources(d)).toBe(true);
   });
   test("a deck with neither (camera, text, waits) has none", () => {
-    expect(hasNoteActions(deck([{ id: "s", beats: [{ id: "a", timeline: [cam({ zoom: 2 }), { kind: "wait", ms: 100 }] }] }]))).toBe(false);
-    expect(hasNoteActions(deck([]))).toBe(false);
+    expect(hasNoteSources(deck([{ id: "s", beats: [{ id: "a", timeline: [cam({ zoom: 2 }), { kind: "wait", ms: 100 }] }] }]))).toBe(false);
+    expect(hasNoteSources(deck([]))).toBe(false);
   });
 });

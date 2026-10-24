@@ -36,15 +36,19 @@ function runtimeGraph(entry: string, seen = new Set<string>()): Set<string> {
 // except this test (see docs/MM_MORGANA.md, note-state purity import rule).
 test.each([
   "engine/components/effects/note-state.ts",
+  "engine/components/effects/draw-state.ts",
   "lib/editor/object-state.ts",
   "engine/authoring/deck-clock.ts",
   "lib/timing/clock-format.ts",
   "engine/authoring/art-clock.ts",
+  "engine/authoring/fade-clock.ts",
   "lib/store/media-sniff.ts",
   "engine/deck/media-ref.ts",
   "engine/deck/clip-clock.ts",
   "engine/deck/media-state.ts",
   "engine/authoring/camera-clock.ts",
+  "engine/deck/credits.ts",
+  "lib/editor/credits-text.ts",
 ])("%s has a DOM-free runtime import graph", (rel) => {
   const offenders = [...runtimeGraph(resolve(ROOT, rel))]
     .filter((f) => DOM_TOKENS.test(readFileSync(f, "utf8")))
@@ -59,6 +63,8 @@ test.each([
   "lib/editor/lint.ts",
   "lib/editor/media-refs.ts",
   "engine/authoring/camera-clock.ts",
+  "engine/authoring/fade-clock.ts",
+  "engine/deck/credits.ts",
 ])("%s has a browser-safe runtime import graph (no Node builtins)", (rel) => {
   const offenders = [...runtimeGraph(resolve(ROOT, rel))]
     .filter((f) => NODE_IMPORT.test(readFileSync(f, "utf8")))

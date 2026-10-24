@@ -78,9 +78,11 @@ export function cameraTransform(f: Framing): string {
   return `translate(${r6((0.5 - f.x * f.zoom) * 100)}%, ${r6((0.5 - f.y * f.zoom) * 100)}%) scale(${r6(f.zoom)})`;
 }
 
-/** Whether any beat timeline emits note particles (`note_emitter` / `note_circle`). Note sprites
- *  animate their own scale, so — like a camera deck — a note deck needs a full raster per frame
- *  in /render to be the same stepped or jumped (RenderStage's full-raster gate). */
-export function hasNoteActions(doc: DeckDoc): boolean {
-  return doc.scenes.some((s) => s.beats.some((b) => b.timeline.some((a) => a.kind === "note_emitter" || a.kind === "note_circle")));
+/** Whether any beat emits note particles: a `note_emitter` / `note_circle`, or a `text` / `credits`
+ *  action with `particles` (sub-project 6). Note sprites animate their own scale, so — like a camera
+ *  deck — such a deck needs a full raster per frame in /render to be the same stepped or jumped
+ *  (RenderStage's full-raster gate). The reach rule is ignored on purpose: the gate only has to be safe. */
+export function hasNoteSources(doc: DeckDoc): boolean {
+  return doc.scenes.some((s) => s.beats.some((b) => b.timeline.some((a) =>
+    a.kind === "note_emitter" || a.kind === "note_circle" || ((a.kind === "text" || a.kind === "credits") && !!a.particles))));
 }

@@ -5,7 +5,7 @@ import type { DeckDoc } from "@/engine/deck-doc";
 import { NOTE_GLYPHS } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { pendingVideoSeeks } from "@/engine/components/video-sync";
-import { cameraEvents, hasNoteActions } from "@/engine/authoring/camera-clock";
+import { cameraEvents, hasNoteSources } from "@/engine/authoring/camera-clock";
 import { useDeckStage } from "./DeckStage";
 
 /** What one rendered frame reports back: image or clip srcs that failed for the FIRST time
@@ -36,11 +36,15 @@ function preloadImage(src: string): Promise<void> {
 /** Chrome-free, fixed-size stage for the MP4 renderer (spec §3). The CLI calls
  *  window.__morganaRender.renderFrame(T) and screenshots only after it resolves. */
 export function RenderStage({ doc }: { doc: DeckDoc }) {
-  const { apply, layout, stage } = useDeckStage(doc, 0);
+  const { apply, layout, stage, sourcesReady } = useDeckStage(doc, 0);
+  // Read through a ref: renderFrame must always await the CURRENT beat's sources, but listing
+  // sourcesReady in the effect deps would recreate window.__morganaRender (and reload the glyphs).
+  const sourcesReadyRef = useRef(sourcesReady);
+  sourcesReadyRef.current = sourcesReady;
   const assets = useAssetResolver();
   const root = useRef<HTMLDivElement>(null);
   const hasCamera = useMemo(() => cameraEvents(doc).length > 0, [doc]);
-  const hasNotes = useMemo(() => hasNoteActions(doc), [doc]);
+  const hasNotes = useMemo(() => hasNoteSources(doc), [doc]);
   // Camera decks and note decks get a full raster per frame (below); decks with neither render as before.
   const needsFullRaster = hasCamera || hasNotes;
   useLayoutEffect(() => {
@@ -70,6 +74,9 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
           // Every clip seek this apply issued (stage clipMode is always "seek" here) must present its
           // frame before the screenshot; a clip that errors or never lands is reported, not awaited forever.
           (await pendingVideoSeeks()).forEach(fail);
+          // Text-particle word boxes (and credit block heights) are measured asynchronously, after
+          // fonts, whenever a line is built; a frame is never captured before they exist (spec §2).
+          await sourcesReadyRef.current();
           const imgs = Array.from(document.querySelectorAll<HTMLImageElement>("[data-render-root] img"));
           // A broken image is tolerated: the frame shows what the browser shows; the CLI warns once.
           await Promise.all(imgs.map((img) => img.decode().catch(() => fail(img.currentSrc || img.src))));
@@ -98,6 +105,6 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
         each full raster re-rasters them too (a hinted layer keeps its own raster across the clip).
         Camera decks already drop them in DeckStage; /play and the editor keep them. Both halves are
         needed: the hint drop alone or the clip alone still differed stepped vs jumped. */}
-    {hasNotes && !hasCamera && <style>{`html[data-render="1"] [data-render-root] .artstage__layer, html[data-render="1"] [data-render-root] .notefield__stage > * { will-change: auto !important; }`}</style>}
+    {hasNotes && !hasCamera && <style>{`html[data-render="1"] [data-render-root] .artstage__layer, html[data-render="1"] [data-render-root] .notefield__stage > *, html[data-render="1"] [data-render-root] .notefield__text > * { will-change: auto !important; }`}</style>}
     {stage}</div>;
 }

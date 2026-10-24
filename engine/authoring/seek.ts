@@ -3,6 +3,8 @@ import type { ArtClips, ArtStageHandle } from "@/engine/components/ArtStage";
 import { beatTimeline } from "@/engine/authoring/beat-clock";
 import { applyArt } from "@/engine/deck/flatten";
 import { isMediaRef, type MediaRef } from "@/engine/deck/media-ref";
+import { buildCreditsBlock } from "@/engine/components/credits-block";
+import { creditsOffset } from "@/engine/deck/credits";
 
 export interface SeekCtx {
   textHost: HTMLElement; art: ArtStageHandle | null; setNight?: (n: number) => void;
@@ -65,6 +67,14 @@ function applyAt(a: Action, p: number, ctx: SeekCtx, artClips?: ArtClips): void 
       // clock here the host (the editor canvas, library thumbnails: `clipPlayback={false}`)
       // shows each clip's in-point frame.
       if (p >= 1) ctx.art?.snap(layers, artClips); else ctx.art?.show(layers, "fade", 1, artClips);
+      break;
+    }
+    case "credits": {
+      // Editor canvas: the same block, at the offset the beat-local progress implies.
+      const { block, roll } = buildCreditsBlock(a);
+      ctx.textHost.appendChild(block);
+      const v = Math.round(creditsOffset(p * (a.durationMs / 1000), a.durationMs, roll.offsetHeight, block.clientHeight) * 100) / 100;
+      roll.style.transform = `translateY(${v === 0 ? 0 : v}px)`;
       break;
     }
     case "clear":
