@@ -145,3 +145,13 @@ describe("helpers", () => {
     expect(textSourceEnd(tl, 5)).toBeUndefined();
   });
 });
+
+describe("textSpritesAt bounded loop", () => {
+  test("an astronomically large rate returns within the pool cap and terminates", () => {
+    for (const rate of [1e300, 1e17]) {
+      const n = textSpritesAt(src({ rate, end: undefined }), 0, 5).length;
+      expect(n).toBeGreaterThan(0);
+      expect(n).toBeLessThanOrEqual(MAX_SPRITES_PER_SOURCE);
+    }
+  });
+});
