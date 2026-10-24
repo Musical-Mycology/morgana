@@ -58,6 +58,9 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
    *  layer reads it at its own paint time: the ArtStage world here, tiles and notes/objects in
    *  the beat. A ref, so a framing change never re-renders the memoised Stage. */
   cameraRef: React.MutableRefObject<Framing>;
+  /** Resolves once the mounted beat's text-particle sources for the current DOM are measured
+   *  (CinematicSlide's transport.sourcesReady); resolved when no beat is mounted. */
+  sourcesReady: () => Promise<void>;
 } {
   const layout = useMemo(() => deckLayout(doc), [doc]);
   const artEv = useMemo(() => artEvents(doc), [doc]);
@@ -129,6 +132,8 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
   useLayoutEffect(() => { paintArt(); }, [paintArt]);
   useLayoutEffect(() => { paintFade(); }, [paintFade]);
 
+  const sourcesReady = useCallback(() => transport.current?.sourcesReady() ?? Promise.resolve(), []);
+
   const hasCamera = camEv.length > 0;
   const stage = (
     // overflow: hidden: zoomed world layers (tiles, notes, objects) never spill outside the frame.
@@ -138,7 +143,7 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
     // how the render got there. Camera decks drop those hints; camera-less decks are unchanged.
     <div data-camera={hasCamera ? "1" : undefined} style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--color-mm-dark-brown)" }}>
       {/* !important: a note sprite's will-change is an inline style (makeNoteHex). */}
-      {hasCamera && <style>{`[data-camera] .artstage__layer, [data-camera] .notefield__stage > * { will-change: auto !important; }`}</style>}
+      {hasCamera && <style>{`[data-camera] .artstage__layer, [data-camera] .notefield__stage > *, [data-camera] .notefield__text > * { will-change: auto !important; }`}</style>}
       <ArtStage ref={artRef} nightlight={initialNight} reduced={false} transparentBg />
       {loc && loc.flatIdx != null && <Stage doc={doc} flatIdx={loc.flatIdx} transport={transport} clipModeRef={clipMode} cameraRef={cameraRef} />}
       {/* The screen fade (sub-project 6): the LAST child, above text and outside every camera world. No
@@ -146,5 +151,5 @@ export function useDeckStage(doc: DeckDoc, initialT: number): {
       <div className="deck__fade" ref={fadeEl} aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 50 }} />
     </div>
   );
-  return { apply, T, displayT, loc, layout, stage, clipMode, cameraRef };
+  return { apply, T, displayT, loc, layout, stage, clipMode, cameraRef, sourcesReady };
 }
