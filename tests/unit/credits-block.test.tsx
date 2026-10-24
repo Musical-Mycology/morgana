@@ -201,3 +201,41 @@ describe("resize", () => {
     expect(roll(container)!.style.transform).toBe("translateY(50px)");
   });
 });
+
+// M2: a face that starts loading after fonts.ready resolved (/play, editor: nothing is preloaded)
+// gets one more measurement behind the new ready.
+describe("late fonts", () => {
+  const fonts = { status: "loaded" as FontFaceSetLoadStatus, ready: Promise.resolve() as Promise<unknown> };
+  beforeEach(() => Object.defineProperty(document, "fonts", { value: fonts, configurable: true }));
+  afterEach(() => { delete (document as unknown as { fonts?: unknown }).fonts; });
+  const timeline = (): Action[] => [{ kind: "wait", ms: 1000 }, credits, { kind: "wait", ms: 500 }];
+
+  test("still loading after the measurement: re-measure behind the new fonts.ready", async () => {
+    fonts.status = "loading";
+    fonts.ready = Promise.resolve();
+    const { transport, container } = mount(timeline());
+    act(() => transport.current!.seek(2));
+    let release!: () => void;
+    fonts.ready = new Promise<void>((r) => { release = r; });  // the late face's ready
+    await act(async () => { await transport.current!.sourcesReady(); });
+    expect(roll(container)!.style.transform).toBe("translateY(50px)");
+    rollH = 1000;                                                // the late face loads: the roll grows
+    fonts.status = "loaded";
+    release();
+    await act(async () => { await transport.current!.sourcesReady(); });
+    expect(roll(container)!.style.transform).toBe("translateY(-100px)");
+  });
+
+  test("loaded (every face preloaded, as on /render): no second measurement", async () => {
+    fonts.status = "loaded";
+    fonts.ready = Promise.resolve();
+    const { transport, container } = mount(timeline());
+    act(() => transport.current!.seek(2));
+    const first = transport.current!.sourcesReady();
+    await act(async () => { await first; });
+    expect(transport.current!.sourcesReady()).toBe(first);       // nothing queued after it
+    rollH = 1000;
+    await act(async () => { await transport.current!.sourcesReady(); });
+    expect(roll(container)!.style.transform).toBe("translateY(50px)");
+  });
+});

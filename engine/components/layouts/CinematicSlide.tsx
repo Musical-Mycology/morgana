@@ -1120,6 +1120,13 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // The host repaints notes with the new sources at the same t. Unchanged sources need no
       // repaint (the host already painted with them), so a deck without particles sees no extra onTime.
       if (changed) onTime?.(lastT.current);
+      // A face that started loading after `ready` resolved (/play and the editor preload nothing)
+      // changes the metrics just measured: measure once more behind the new `ready`. On /render
+      // every face is preloaded (status "loaded"), so this never runs there.
+      if (typeof document !== "undefined" && document.fonts?.status === "loading") {
+        layoutRev.current++;
+        scheduleMeasure();
+      }
     });
   }
 
