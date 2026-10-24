@@ -19,7 +19,8 @@
 .ed__layer--hidden .ed__layer-name { opacity: 0.5; }
 .ed__layer--locked .ed__layer-name { font-style: italic; }
 .ed__film { overflow: auto; background: var(--ed-bg-1); border-right: 1px solid var(--ed-line); }
-.ed__canvas { grid-area: canvas; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: hidden; min-height: 0; min-width: 0; background: var(--ed-bg-0); }
+/* A size container: DeckCanvas sizes its 16:9 host against this box (cqw/cqh). */
+.ed__canvas { grid-area: canvas; display: flex; align-items: center; justify-content: center; padding: 16px; overflow: hidden; min-height: 0; min-width: 0; background: var(--ed-bg-0); container-type: size; }
 .ed__inspector { grid-area: inspector; overflow: auto; background: var(--ed-bg-1); border-left: 1px solid var(--ed-line); padding: 12px; }
 .ed__timeline { grid-area: timeline; background: var(--ed-bg-2); border-top: 1px solid var(--ed-line); padding: 12px 14px; }
 .ed__lbl { font-family: var(--ed-disp); letter-spacing: 0.06em; font-size: 11px; color: var(--ed-fg-muted); text-transform: uppercase; padding: 9px 12px 4px; }

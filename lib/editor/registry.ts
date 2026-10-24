@@ -10,8 +10,15 @@ export interface Field {
   accept?: AssetAccept[];
   /** asset: dot-path of the clip options written alongside (art `Record<MediaRef, ClipOpts>`, tile `ClipOpts`). */
   clipKey?: string;
+  /** number: the field may be left out (camera `to`: it inherits). Unset shows empty with an
+   *  "inherit" placeholder; clearing the box deletes the key. */
+  optional?: boolean;
 }
-export interface EffectDescriptor { kind: string; label: string; icon: string; schema: Field[]; seekable: boolean; defaults(): Action; }
+export interface EffectDescriptor {
+  kind: string; label: string; icon: string; schema: Field[]; seekable: boolean; defaults(): Action;
+  /** The inspector offers "Pick on canvas" for this action (camera: writes `to.x`/`to.y`). */
+  pick?: "camera";
+}
 
 const opts = (...vs: string[]) => vs.map((v) => ({ value: v, label: v }));
 const TEXT_INS: TextIn[] = ["flyUp", "fade", "fadeSide", "cursive", "letterFly", "letterUp", "wordUp", "blurIn", "typewriter"];
@@ -39,6 +46,14 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
     { key: "to", label: "Level (0-1)", type: "range", min: 0, max: 1, step: 0.05 },
     { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
   ], defaults: () => ({ kind: "nightlight", to: 0.5 }) },
+  camera: { kind: "camera", label: "Camera", icon: "ti-zoom-in", seekable: true, pick: "camera", schema: [
+    // Optional: a left-out field keeps the framing in effect. A number box, not a slider, so it can be empty.
+    { key: "to.zoom", label: "Zoom (1–8)", type: "number", min: 1, max: 8, step: 0.05, optional: true },
+    { key: "to.x", label: "Center X", type: "number", min: 0, max: 1, step: 0.01, optional: true },
+    { key: "to.y", label: "Center Y", type: "number", min: 0, max: 1, step: 0.01, optional: true },
+    { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
+    { key: "ease", label: "Ease", type: "select", options: opts("inOut", "in", "out", "linear") },
+  ], defaults: () => ({ kind: "camera", to: { zoom: 2, x: 0.5, y: 0.5 }, durationMs: 1200, ease: "inOut" }) },
   click_gate: { kind: "click_gate", label: "Click gate", icon: "ti-hand-click", seekable: true, schema: [],
     defaults: () => ({ kind: "click_gate" }) },
   clear: { kind: "clear", label: "Clear", icon: "ti-eraser", seekable: true, schema: [],

@@ -20,7 +20,7 @@ test("art carries the transition's clip options through to ArtStage", () => {
   const art = {
     show: (...a: unknown[]) => calls.push(["show", ...a]),
     snap: (...a: unknown[]) => calls.push(["snap", ...a]),
-    apply: () => {}, renderState: () => {},
+    apply: () => {}, renderState: () => {}, setCamera: () => {},
   };
   const clips = { "media:a.mp4": { in: 2 } } as const;
   const tl = [{ kind: "art", art: { to: "media:a.mp4", mode: "fade", durationMs: 1000, clips } }, { kind: "wait", ms: 2000 }] as Parameters<typeof renderBeatAt>[0];

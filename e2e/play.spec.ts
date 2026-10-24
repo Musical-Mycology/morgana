@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveBinary } from "../lib/render/ffmpeg";
+import { cameraAt, cameraEvents, cameraTransform } from "../engine/authoring/camera-clock";
+import type { DeckDoc } from "../engine/deck-doc";
 
 const ffmpeg = resolveBinary("ffmpeg", process.env);
 const hasFfmpeg = (() => { const r = spawnSync(ffmpeg, ["-version"], { stdio: "ignore" }); return !r.error && r.status === 0; })();
@@ -167,5 +169,51 @@ test.describe("clips", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+test.describe("camera", () => {
+  // Per-worker deck id: parallel workers (--repeat-each) must not share a deck.
+  let camId = "";
+  test.beforeEach(({}, info) => { camId = `e2e-play-camera-${info.parallelIndex}`; });
+  test.afterEach(async ({ request }) => { await request.delete(`/api/decks/${camId}`); });
+
+  test("the art world follows the deck-time camera: deep-link, then a scrub", async ({ page, request }) => {
+    await request.delete(`/api/decks/${camId}`).catch(() => {});
+    await request.post("/api/decks", { data: { id: camId, title: "Play camera" } });
+    // One 4 s scene: at 0.5 s a 2 s move to {zoom 3, x 0.3, y 0.4}, so both t=1 and t≈1.8 are mid-move.
+    const camDoc = { version: 1, meta: { id: camId, title: "Play camera", timing: { targetSec: 4 } }, scenes: [
+      { id: "s", durationSec: 4, beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
+        { kind: "wait", ms: 500 }, { kind: "camera", to: { zoom: 3, x: 0.3, y: 0.4 }, durationMs: 2000 },
+        { kind: "text", value: "Camera line", in: "fade" }, { kind: "wait", ms: 3000 },
+      ] }] },
+    ] };
+    expect((await request.put(`/api/decks/${camId}`, { data: camDoc })).status()).toBe(200);
+    const ev = cameraEvents(camDoc as unknown as DeckDoc);
+    const world = () => page.evaluate(() => document.querySelector<HTMLElement>("[data-testid=play-stage] .artstage__world")?.style.transform);
+    // `s` as the browser serialises it back from style.transform (Chromium keeps ~6 significant digits).
+    const css = (s: string) => page.evaluate((s) => { const el = document.createElement("div"); el.style.transform = s; return el.style.transform; }, s);
+    const deckT = async () => Number(await page.getByTestId("play-scrub").getAttribute("aria-valuenow"));
+
+    await page.goto(`/play?deck=${camId}&t=1`);
+    await expect(page.getByTestId("play-clock")).toHaveText("0:01.0 / 0:04");
+    expect(await world()).toBe(await css(cameraTransform(cameraAt(ev, 1))));
+
+    // Scrub to ~1.8 s: the bar is pixel-quantised, so the expectation uses the exact deck time it set.
+    const bar = page.getByTestId("play-scrub");
+    const box = (await bar.boundingBox())!;
+    await page.mouse.click(box.x + box.width * (1.8 / 4), box.y + box.height / 2);
+    await expect.poll(async () => Math.abs((await deckT()) - 1.8)).toBeLessThanOrEqual(0.05);
+    const T = await deckT();
+    expect(cameraTransform(cameraAt(ev, T))).not.toBe(cameraTransform(cameraAt(ev, 1)));
+    const want = await css(cameraTransform(cameraAt(ev, T)));
+    expect(await world()).toBe(want);
+    // The tiles' and notes' worlds carry the same framing; the text layer does not move.
+    const rest = await page.evaluate(() => ({
+      cin: document.querySelector<HTMLElement>("[data-testid=play-stage] .cin__world")?.style.transform,
+      beat: [...document.querySelectorAll<HTMLElement>("[data-testid=play-stage] .beat__world")].map((e) => e.style.transform),
+      stage: document.querySelector<HTMLElement>("[data-testid=play-stage] .cin__stage")?.style.transform,
+    }));
+    expect(rest).toEqual({ cin: want, beat: [want, want], stage: "" });
   });
 });

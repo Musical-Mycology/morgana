@@ -111,6 +111,11 @@ export interface EffectCue {
   intensity?: number;
 }
 
+/** Easing for a camera move. */
+export type CameraEase = "inOut" | "in" | "out" | "linear";
+/** A camera framing: the world-space point at screen center (x, y: 0–1) and the zoom (1–8). */
+export interface Framing { x: number; y: number; zoom: number }
+
 /** One auto-played step inside a beat's timeline. */
 export type Action =
   // append: reveal this fragment INLINE on the current line (same sentence) instead of a
@@ -125,6 +130,10 @@ export type Action =
   | { kind: "clear" }
   | { kind: "art"; art: ArtTransition }
   | { kind: "nightlight"; to: number; durationMs?: number }
+  // Pan/zoom the world layers (art, tiles, notes, objects; text stays fixed). Omitted fields keep
+  // their current value. durationMs defaults to 1200 (0 = cut); a framing holds until the next
+  // camera action. Occupies no beat-timeline time.
+  | { kind: "camera"; to: { x?: number; y?: number; zoom?: number }; durationMs?: number; ease?: CameraEase }
   | { kind: "cue"; cue: EffectCue }
   // Placeable directional note emitter. dir = compass degrees (0=up, 90=right, clockwise);
   // var = ± degrees of randomness (0=laser, 180=full circle); decay = note lifetime ms;

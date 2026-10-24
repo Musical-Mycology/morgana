@@ -131,3 +131,38 @@ test("a deck with no duration publishes ready:false instead of a renderer", () =
   render(<RenderStage doc={empty} />);
   expect(window.__morganaRender).toEqual({ ready: false, error: "deck has no duration" });
 });
+
+// Final review I1: under a camera transform, a frame whose paint was only partly invalidated (moving
+// notes over zoomed art or objects) rasterised differently from a full raster, so stepped and jumped
+// renders differed. A camera deck's renderFrame forces a full repaint of the root (a transient
+// clip-path, then cleared); a camera-less deck's frame never touches it.
+function clipWrites(root: HTMLElement) {
+  const seen: string[] = [];
+  const mo = new MutationObserver((recs) => { for (const r of recs) seen.push(r.oldValue ?? "", root.getAttribute("style") ?? ""); });
+  mo.observe(root, { attributes: true, attributeFilter: ["style"], attributeOldValue: true });
+  return { seen, stop: () => mo.disconnect() };
+}
+test("a camera deck's frame forces a full repaint (transient clip-path on the root, cleared before it resolves)", async () => {
+  const CAMD: DeckDoc = { version: 1, meta: { id: "d", title: "D" }, scenes: [{ id: "s0", beats: [
+    { id: "a", timeline: [{ kind: "camera", to: { zoom: 2 }, durationMs: 0 }, { kind: "wait", ms: 2000 }] },
+  ] }] };
+  const { container } = render(<RenderStage doc={CAMD} />);
+  const r = await ready();
+  const root = container.querySelector<HTMLElement>("[data-render-root]")!;
+  const w = clipWrites(root);
+  await r.renderFrame(1);
+  await Promise.resolve();
+  w.stop();
+  expect(w.seen.some((s) => s.includes("clip-path"))).toBe(true);
+  expect(root.style.clipPath).toBe("");
+});
+test("a camera-less deck's frame never touches the root's clip-path", async () => {
+  const { container } = render(<RenderStage doc={D} />);
+  const r = await ready();
+  const root = container.querySelector<HTMLElement>("[data-render-root]")!;
+  const w = clipWrites(root);
+  await r.renderFrame(1);
+  await Promise.resolve();
+  w.stop();
+  expect(w.seen.some((s) => s.includes("clip-path"))).toBe(false);
+});
