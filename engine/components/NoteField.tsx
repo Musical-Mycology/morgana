@@ -5,12 +5,13 @@ import type { Scene } from "@/engine/deck/types";
 import type { StoryAsset } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { makeNoteHex } from "./effects/notes";
-import { noteFieldStateAt, type NoteSpriteState } from "./effects/note-state";
+import { isTextSpriteKey, noteFieldStateAt, type NoteSpriteState, type TextSource } from "./effects/note-state";
 
 export interface NoteFieldHandle {
   /** Paint every live note sprite at (beatIndex, t seconds into that beat).
-   *  The caller owns the clock — this component holds no time state of its own. */
-  renderAt(scene: Scene, beatIndex: number, t: number): void;
+   *  The caller owns the clock — this component holds no time state of its own. `textSources`:
+   *  the beat's measured text-particle sources (sub-project 6), painted into `textHost`. */
+  renderAt(scene: Scene, beatIndex: number, t: number, textSources?: readonly TextSource[]): void;
 }
 
 /** The only place reducer output touches a sprite node. Pure DOM writer. */
@@ -37,9 +38,14 @@ export function applyNoteState(
   }
 }
 
-interface Props { reduced?: boolean }
+interface Props {
+  reduced?: boolean;
+  /** Where text-particle sprites go (BeatStage's fixed .notefield__text, outside the camera's
+   *  world: text never moves, so its notes must not either). Unset → this field's own stage. */
+  textHost?: React.RefObject<HTMLElement | null>;
+}
 
-export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({ reduced }, ref) {
+export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({ reduced, textHost }, ref) {
   const assets = useAssetResolver();
   const assetsRef = useRef(assets);
   assetsRef.current = assets;
@@ -49,24 +55,24 @@ export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({
   useEffect(() => () => { pool.current.forEach((n) => n.remove()); pool.current.clear(); }, []);
 
   useImperativeHandle(ref, () => ({
-    renderAt(scene, beatIndex, t) {
+    renderAt(scene, beatIndex, t, textSources) {
       const host = stage.current;
       if (!host) return;
-      const sprites = reduced ? [] : noteFieldStateAt(scene, beatIndex, t);
+      const sprites = reduced ? [] : noteFieldStateAt(scene, beatIndex, t, textSources);
       const seen = new Set<string>();
       for (const s of sprites) {
         seen.add(s.key);
         let node = pool.current.get(s.key);
         if (!node) {
           node = makeNoteHex(s.hex, s.glyph, assetsRef.current.story);
-          host.appendChild(node);
+          (isTextSpriteKey(s.key) ? (textHost?.current ?? host) : host).appendChild(node);
           pool.current.set(s.key, node);
         }
         applyNoteState(node, s, assetsRef.current.story);
       }
       for (const [key, node] of pool.current) if (!seen.has(key)) node.style.display = "none";
     },
-  }), [reduced]);
+  }), [reduced, textHost]);
 
   return (
     <div aria-hidden className="notefield" data-testid="notefield">
@@ -78,6 +84,9 @@ export const NoteField = forwardRef<NoteFieldHandle, Props>(function NoteField({
            BeatStage is fixed/inset:0 = the viewport), so host-relative positioning put the
            same emitter in different places in each. */
         .notefield__stage { position: absolute; inset: 0; margin: auto;
+          width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16)); }
+        /* Text particles (sub-project 6): BeatStage's fixed .notefield__text, the same 16:9 letterbox. */
+        .notefield__text { position: absolute; inset: 0; margin: auto;
           width: min(100cqw, calc(100cqh * 16 / 9)); height: min(100cqh, calc(100cqw * 9 / 16)); }
       `}</style>
     </div>

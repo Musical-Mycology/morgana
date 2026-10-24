@@ -261,3 +261,12 @@ test("degenerate inputs return [] and never throw", () => {
   expect(noteFieldStateAt(scene([[]]), 0, 0.5)).toEqual([]);            // empty timeline
   expect(noteFieldStateAt({ id: "s" } as Scene, 0, 0.5)).toEqual([]);   // missing beats
 });
+
+test("a non-finite or astronomically large freq returns within the pool cap and terminates", () => {
+  expect(emitterSpritesAt(EM({ freq: Infinity }), 0, 5)).toEqual([]);
+  for (const freq of [1e300, 1e17]) {
+    const n = emitterSpritesAt(EM({ freq }), 0, 5).length;
+    expect(n).toBeGreaterThan(0);
+    expect(n).toBeLessThanOrEqual(MAX_SPRITES_PER_SOURCE);
+  }
+});

@@ -3,8 +3,8 @@
  *  the same time always paints the same frame. See docs/superpowers/specs/
  *  2026-07-27-time-pure-particles-7a-design.md §3. */
 
-import type { Action, Scene } from "@/engine/deck/types";
-import { NOTE_GLYPHS, type NoteGlyph } from "@/engine/deck/story-assets";
+import type { Action, Scene, TextParticles } from "@/engine/deck/types";
+import { NOTE_GLYPHS, NOTE_TINTS, isHexColor, type NoteColor, type NoteGlyph } from "@/engine/deck/story-assets";
 import { beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
 
 /** Reference stage width the engine's px constants were authored against. */
@@ -82,7 +82,7 @@ export function emitterSpritesAt(
   elapsed: number,
 ): NoteSpriteState[] {
   const freq = a.freq;
-  if (!(freq > 0) || !(a.decay > 0) || elapsed < 0) return [];
+  if (!(freq > 0) || !Number.isFinite(freq) || !(a.decay > 0) || elapsed < 0) return [];
   const D = emitterDecaySeconds(a.decay);
   const P = Math.min(Math.ceil(D * freq) + 1, MAX_SPRITES_PER_SOURCE);
   // live iff 0 ≤ elapsed − i/freq < D
@@ -93,7 +93,8 @@ export function emitterSpritesAt(
   const fadeSpan = 0.4 * D;
 
   const out: NoteSpriteState[] = [];
-  for (let i = iMin; i <= iMax; i++) {
+  // At most P sprites whatever the i arithmetic does: at freq > ~2^53, i++ is a no-op.
+  for (let k = 0, i = iMin; k < P && i <= iMax; k++, i++) {
     const age = elapsed - i / freq;
     const rnd = mulberry32(hash32(srcIdx, i));
     const spread = (rnd() * 2 - 1) * (a.var ?? 0);
@@ -155,6 +156,113 @@ export function circleSpritesAt(
   return out;
 }
 
+/** One measured word box, in 0–1 stage fractions. */
+export interface TextRect { x: number; y: number; w: number; h: number }
+/** A source's linear vertical offset over beat time (credit lines), in stage-height fractions. */
+export interface TextScroll { t0: number; dur: number; from: number; to: number }
+/** A text line (or credit line) that emits notes off its words (spec §2). Times are beat-local. */
+export interface TextSource {
+  /** Identity of the emitting line ("a3", or "a5.2" for credit line 2 of action 5); informational. */
+  key: string;
+  /** Stable source index (textSourceIdx): seeds and pool keys derive from it, so they never depend
+   *  on which lines happen to be measured, or in what order. */
+  idx: number;
+  start: number;
+  end?: number;
+  rects: TextRect[];
+  color: string;
+  rate: number;
+  rise: number;
+  scroll?: TextScroll;
+}
+
+/** Text seeds start here: TEXT_SEED + idx never equals an emitter's per-scene srcIdx. */
+export const TEXT_SEED = 0x10000;
+export const TEXT_LIFE = 2.4;
+export const TEXT_SPREAD = 25;
+export const DEFAULT_PARTICLE_RATE = 6;
+export const DEFAULT_PARTICLE_RISE = 1;
+export const DEFAULT_PARTICLE_COLOR: NoteColor = "cream";
+const EPS = 1e-9;
+
+/** Text action i → i << 12; credit line k of action i → (i << 12) + 1 + k (k < 4095). */
+export function textSourceIdx(actionIdx: number, line?: number): number {
+  return (actionIdx << 12) + (line === undefined ? 0 : 1 + line);
+}
+/** Text-particle pool keys are `t${idx}:${slot}`; emitter/ring keys start with a digit. */
+export const isTextSpriteKey = (key: string): boolean => key.startsWith("t");
+
+/** A tint name → its fill; a CSS hex passes through; anything else (unknown name, non-string) → cream. */
+export function resolveParticleColor(c: string | undefined): string {
+  const cream = NOTE_TINTS[DEFAULT_PARTICLE_COLOR].fill;
+  if (typeof c !== "string") return cream;
+  if (Object.prototype.hasOwnProperty.call(NOTE_TINTS, c)) return NOTE_TINTS[c as NoteColor].fill;
+  return isHexColor(c) ? c : cream;
+}
+export function particleOpts(p: TextParticles): Pick<TextSource, "color" | "rate" | "rise"> {
+  const rise = typeof p.rise === "number" && Number.isFinite(p.rise) && p.rise > 0 ? p.rise : DEFAULT_PARTICLE_RISE;
+  return { color: resolveParticleColor(p.color), rate: p.rate ?? DEFAULT_PARTICLE_RATE, rise };
+}
+
+export function scrollOffsetAt(s: TextScroll, t: number): number {
+  const p = s.dur <= 0 ? 1 : clamp01((t - s.t0) / s.dur);
+  return s.from + (s.to - s.from) * p;
+}
+
+const SOURCE_ENDERS = new Set<Action["kind"]>(["clear", "fade_out", "stop_notes"]);
+/** Beat-local start of the first clear / fade_out / stop_notes after `index`, if any. */
+export function textSourceEnd(timeline: Action[], index: number): number | undefined {
+  const w = beatTimeline(timeline);
+  for (let k = index + 1; k < w.length; k++) if (SOURCE_ENDERS.has(w[k].action.kind)) return w[k].start;
+  return undefined;
+}
+
+/** Live note sprites off one text source at beat-local time `t` (spec §2). Same bounce, travel and
+ *  fade curves as emitterSpritesAt, with dir 0 ± TEXT_SPREAD and a TEXT_LIFE lifetime. */
+export function textSpritesAt(src: TextSource, srcIdx: number, t: number): NoteSpriteState[] {
+  const rate = src.rate;
+  if (!(rate > 0) || !Number.isFinite(rate) || src.rects.length === 0 || t < src.start) return [];
+  const D = TEXT_LIFE;
+  const P = Math.min(Math.ceil(D * rate) + 1, MAX_SPRITES_PER_SOURCE);
+  const first = Math.ceil(src.start * rate - EPS);                                         // birth ≥ start
+  let last = Math.floor(t * rate + EPS);                                                    // birth ≤ t
+  if (src.end !== undefined) last = Math.min(last, Math.ceil(src.end * rate - EPS) - 1);   // birth < end
+  const iMin = Math.max(first, Math.floor((t - D) * rate) + 1, last - P + 1);              // alive, newest P
+  const tIn = Math.min(0.4, D * 0.4);
+  const fadeStart = 0.6 * D;
+  const fadeSpan = 0.4 * D;
+
+  const out: NoteSpriteState[] = [];
+  for (let k = 0, i = iMin; k < P && i <= last; k++, i++) {   // capped at P: see emitterSpritesAt
+    const birth = i / rate;
+    const age = t - birth;
+    const rnd = mulberry32(hash32(TEXT_SEED + srcIdx, i));
+    const r = src.rects[Math.min(src.rects.length - 1, Math.floor(rnd() * src.rects.length))];
+    const x0 = r.x + rnd() * r.w;
+    const y0 = r.y + (src.scroll ? scrollOffsetAt(src.scroll, birth) : 0);
+    const spread = (rnd() * 2 - 1) * TEXT_SPREAD;
+    const mult = 0.8 + rnd() * 0.4;
+    const theta = (spread * Math.PI) / 180;
+    const dist = EMIT_SPEED_N * D * mult * src.rise;
+
+    const bounce = backOut2(clamp01(age / tIn));
+    let opacity = clamp01(bounce);
+    if (age >= fadeStart) opacity *= 1 - powerIn1(clamp01((age - fadeStart) / fadeSpan));
+    const travel = powerOut1(clamp01(age / D));
+
+    out.push({
+      key: `t${srcIdx}:${i % P}`,
+      x: x0 + Math.sin(theta) * dist * travel,
+      y: y0 - Math.cos(theta) * dist * STAGE_ASPECT * travel,
+      scale: 0.4 + 0.6 * bounce,
+      opacity,
+      hex: src.color,
+      glyph: randomGlyph(i),
+    });
+  }
+  return out;
+}
+
 type NoteSource =
   | { kind: "emitter"; action: Extract<Action, { kind: "note_emitter" }>; srcIdx: number; startBeat: number; windowStart: number }
   | { kind: "ring"; action: Extract<Action, { kind: "note_circle" }>; srcIdx: number; startBeat: number; windowStart: number };
@@ -186,7 +294,7 @@ function foldBeat(
  *  (stop_notes / stop_circle remove them), then each carried source's phase is
  *  continued across the intervening beat durations. Mirrors objectStateAt's fold,
  *  so there is one cross-beat model in the codebase. */
-export function noteFieldStateAt(scene: Scene, beatIndex: number, tLocal: number): NoteSpriteState[] {
+export function noteFieldStateAt(scene: Scene, beatIndex: number, tLocal: number, textSources?: readonly TextSource[]): NoteSpriteState[] {
   const beats = scene?.beats;
   if (!beats?.length) return [];                                   // zero-beat scenes are legal
   if (beatIndex < 0 || beatIndex >= beats.length) return [];
@@ -207,14 +315,16 @@ export function noteFieldStateAt(scene: Scene, beatIndex: number, tLocal: number
   };
 
   const out: NoteSpriteState[] = [];
-  for (const s of sources) {
-    const sprites = s.kind === "emitter"
-      ? emitterSpritesAt(s.action, s.srcIdx, elapsedOf(s))
-      : circleSpritesAt(s.action, s.srcIdx, elapsedOf(s));
-    // Total cap drops whole trailing sources, so one runaway emitter cannot blank a
-    // scene's rings mid-source.
-    if (out.length + sprites.length > MAX_SPRITES_TOTAL) break;
+  // Total cap drops whole trailing sources (text sources come last), so one runaway source cannot
+  // blank a scene's rings mid-source.
+  let full = false;
+  const add = (sprites: NoteSpriteState[]) => {
+    if (full || out.length + sprites.length > MAX_SPRITES_TOTAL) { full = true; return; }
     out.push(...sprites);
+  };
+  for (const s of sources) {
+    add(s.kind === "emitter" ? emitterSpritesAt(s.action, s.srcIdx, elapsedOf(s)) : circleSpritesAt(s.action, s.srcIdx, elapsedOf(s)));
   }
+  for (const src of textSources ?? []) add(textSpritesAt(src, src.idx, tLocal));
   return out;
 }

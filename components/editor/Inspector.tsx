@@ -6,6 +6,7 @@ import { getObjectAt } from "@/lib/editor/object-tree";
 import { getPath } from "@/lib/editor/paths";
 import { primaryPath } from "@/lib/editor/selection";
 import { objectRefOptions } from "@/lib/editor/object-gating";
+import { DEFAULT_CREDITS_AREA } from "@/engine/deck/credits";
 import { Field } from "./Field";
 import { AnimationsPanel } from "./AnimationsPanel";
 
@@ -77,7 +78,7 @@ export function Inspector() {
         </select>
       </div>
       {d.schema.length === 0 && <p style={{ opacity: 0.6, fontSize: 12 }}>No editable fields.</p>}
-      {d.schema.map((f) => {
+      {d.schema.filter((f) => !f.showIf || !!getPath(action, f.showIf)).map((f) => {
         const spec = f.type === "objectRef"
           ? { ...f, options: objectRefOptions(doc?.scenes.find((sc) => sc.id === sceneId)) }
           : f;
@@ -86,7 +87,19 @@ export function Inspector() {
         const extra = clipKey
           ? { clips: getPath(action, clipKey), onClipsChange: (v: unknown) => updateAction(selected, selectedAction!, clipKey, v) }
           : undefined;
-        return <Field key={f.key} spec={spec} value={getPath(action, f.key)} onChange={(v) => updateAction(selected, selectedAction!, f.key, v)} extra={extra} />;
+        // A credits action with no `area` runs on DEFAULT_CREDITS_AREA. A partial area would fail
+        // validation (and the deck would not save), so the first edit of any Area sub-field seeds the
+        // whole area from the default, then applies that edit — in one write (one undo step).
+        // A cleared Area box (NaN) writes nothing, so it can neither seed nor store a NaN.
+        const isArea = action.kind === "credits" && f.key.startsWith("area.");
+        const areaKey = isArea && !getPath(action, "area") ? f.key.slice(5) : null;
+        const value = areaKey ? (DEFAULT_CREDITS_AREA as unknown as Record<string, number>)[areaKey] : getPath(action, f.key);
+        const onChange = (v: unknown) => {
+          if (isArea && !(typeof v === "number" && Number.isFinite(v))) return;
+          if (areaKey) updateAction(selected, selectedAction!, "area", { ...DEFAULT_CREDITS_AREA, [areaKey]: v });
+          else updateAction(selected, selectedAction!, f.key, v);
+        };
+        return <Field key={f.key} spec={spec} value={value} onChange={onChange} extra={extra} />;
       })}
       {/* The canvas (DeckCanvas → CameraPick) owns the pick itself; this only enters/leaves the mode. */}
       {d.pick === "camera" && (

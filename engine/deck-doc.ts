@@ -1,5 +1,6 @@
 import type { Scene, SceneObject, SlideTreatment } from "@/engine/deck/types";
 import { MEDIA_ID_PATTERN } from "@/engine/deck/media-ref";
+import { isHexColor } from "@/engine/deck/story-assets";
 
 /** Optional host-app chrome, defaulted to none so decks render generic. */
 export interface DeckChrome {
@@ -136,6 +137,52 @@ function validateCameraActions(scene: Scene, si: number, e: string[]): void {
   });
 }
 
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** Validate credits, screen_fade, note_emitter numbers, and text/credits particles (sub-project 6). */
+function validateCreditsAndFades(scene: Scene, si: number, e: string[]): void {
+  scene?.beats?.forEach((b, bi) => {
+    b?.timeline?.forEach((a: Record<string, unknown>, ai) => {
+      const at = `scenes[${si}].beats[${bi}].timeline[${ai}]`;
+      if (a?.kind === "credits") {
+        const items = a.items;
+        if (!Array.isArray(items) || items.length === 0) e.push(`${at}.items must be a non-empty array`);
+        else items.forEach((it: Record<string, unknown>, k) => {
+          if (!it || typeof it !== "object") { e.push(`${at}.items[${k}] must be an object`); return; }
+          if (it.role !== undefined && typeof it.role !== "string") e.push(`${at}.items[${k}].role must be a string`);
+          if (!Array.isArray(it.names) || !it.names.every((n) => typeof n === "string")) e.push(`${at}.items[${k}].names must be an array of strings`);
+        });
+        if (!finite(a.durationMs) || a.durationMs <= 0) e.push(`${at}.durationMs must be a finite number > 0`);
+        if (a.area !== undefined) {
+          const r = (a.area ?? {}) as Record<string, unknown>;
+          const [x, y, w, h] = [r.x, r.y, r.w, r.h];
+          const ok = finite(x) && finite(y) && finite(w) && finite(h)
+            && x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= 1 + 1e-9 && y + h <= 1 + 1e-9;
+          if (!ok) e.push(`${at}.area must lie within 0–1 with positive size`);
+        }
+      }
+      if (a?.kind === "note_emitter") {
+        if (!finite(a.freq) || a.freq < 0) e.push(`${at}.freq must be a finite number ≥ 0`);
+        if (!finite(a.decay) || a.decay < 0) e.push(`${at}.decay must be a finite number ≥ 0`);
+      }
+      if (a?.kind === "screen_fade") {
+        if (!finite(a.to) || a.to < 0 || a.to > 1) e.push(`${at}.to must be 0–1`);
+        if (a.durationMs !== undefined && (!finite(a.durationMs) || a.durationMs < 0)) e.push(`${at}.durationMs must be a finite number ≥ 0`);
+        if (a.color !== undefined && typeof a.color !== "string") e.push(`${at}.color must be a string`);
+        else if (a.color !== undefined && !isHexColor(a.color)) e.push(`${at}.color must be a hex colour (#rgb, #rgba, #rrggbb or #rrggbbaa)`);
+      }
+      if ((a?.kind === "text" || a?.kind === "credits") && a.particles !== undefined) {
+        const p = a.particles;
+        if (!p || typeof p !== "object" || Array.isArray(p)) e.push(`${at}.particles must be an object`);
+        else {
+          const rate = (p as Record<string, unknown>).rate;
+          if (rate !== undefined && (!finite(rate) || rate < 1 || rate > 30)) e.push(`${at}.particles.rate must be 1–30`);
+        }
+      }
+    });
+  });
+}
+
 export function validateDeckDoc(obj: unknown): { ok: boolean; errors: string[] } {
   const e: string[] = [];
   const d = obj as Partial<DeckDoc>;
@@ -176,6 +223,7 @@ export function validateDeckDoc(obj: unknown): { ok: boolean; errors: string[] }
     validateSceneObjects(s?.objects, `scenes[${i}]`, new Set<string>(), 1, e);
     validateSceneActionTargets(s, i, e);
     validateCameraActions(s, i, e);
+    validateCreditsAndFades(s, i, e);
   });
   return { ok: e.length === 0, errors: e };
 }

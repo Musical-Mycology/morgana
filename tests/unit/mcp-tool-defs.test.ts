@@ -79,3 +79,12 @@ test("set_soundtrack does not promise exported video yet; update_meta points sou
   expect(byName.set_soundtrack.description).not.toMatch(/in exported video/);
   expect(byName.update_meta.description).toMatch(/soundtrack.*skips the media-list check.*use set_soundtrack/i);
 });
+
+test("action docs describe draw, particles, credits and screen_fade", () => {
+  for (const name of ["insert_action_after", "update_action"]) {
+    const d = TOOL_DEFS.find((t) => t.name === name)!.description;
+    for (const word of ["\"draw\"", "particles", "credits", "screen_fade"]) expect(d, `${name}: ${word}`).toContain(word);
+    expect(d, `${name}: append particles ignored`).toContain("append fragment is ignored");
+    expect(d, `${name}: append not measured`).toContain("not measured for particles");
+  }
+});
