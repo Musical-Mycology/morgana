@@ -142,17 +142,19 @@ class FakeResizeObserver {
   observe(el: Element) { this.observed.push(el); }
   unobserve() {}
   disconnect() { this.disconnected = true; this.observed = []; }
-  fire() { if (!this.disconnected) this.cb([], this as unknown as ResizeObserver); }
+  /** Deliver one callback whose entry reports the observed element's content size. */
+  fire(w = 1000, h = 500) {
+    if (this.disconnected) return;
+    const entry = { target: this.observed[0], contentRect: { width: w, height: h } } as unknown as ResizeObserverEntry;
+    this.cb([entry], this as unknown as ResizeObserver);
+  }
 }
 const live = () => FakeResizeObserver.all.filter((o) => !o.disconnected);
 
 describe("resize", () => {
-  let stageW = 1000;
   beforeEach(() => {
     FakeResizeObserver.all = [];
-    stageW = 1000;
     vi.stubGlobal("ResizeObserver", FakeResizeObserver);
-    vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function (this: Element) { return this.classList.contains("cin__stage") ? stageW : 0; });
   });
   afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -167,15 +169,33 @@ describe("resize", () => {
     expect(roll(container)!.style.transform).toBe("translateY(50px)");
     const before = JSON.stringify(sources.current);
     rollH = 1000;                                   // the roll would measure taller now…
-    act(() => live()[0].fire());                    // …but the stage is the size it was measured at (the observer's first callback)
+    act(() => live()[0].fire(1000, 500));           // …but this is the observer's first callback: it only records the size
     await act(async () => { await transport.current!.sourcesReady(); });
     expect(roll(container)!.style.transform).toBe("translateY(50px)");
     expect(JSON.stringify(sources.current)).toBe(before);
-    stageW = 1200;                                  // a resize
-    act(() => live()[0].fire());
+    act(() => live()[0].fire(1000, 500));           // the same size again: still nothing
+    await act(async () => { await transport.current!.sourcesReady(); });
+    expect(roll(container)!.style.transform).toBe("translateY(50px)");
+    expect(JSON.stringify(sources.current)).toBe(before);
+    act(() => live()[0].fire(1200, 500));           // a resize
     await act(async () => { await transport.current!.sourcesReady(); });
     expect(roll(container)!.style.transform).toBe("translateY(-100px)"); // 200 − 1200·0.25
     expect(sources.current[0].scroll).toEqual({ t0: 1, dur: 4, from: 0.4, to: -2 });
+  });
+
+  test("a beat with neither particles nor credits builds a line without reading the stage's size or rect", async () => {
+    const stage = (el: Element) => el.classList.contains("cin__stage");
+    const reads: string[] = [];
+    for (const prop of ["clientWidth", "clientHeight"] as const) {
+      vi.spyOn(Element.prototype, prop, "get").mockImplementation(function (this: Element) { if (stage(this)) reads.push(prop); return 0; });
+    }
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) { if (stage(this)) reads.push("rect"); return STAGE; });
+    const { transport, container } = mount([{ kind: "text", value: "hello", in: "fade" }, { kind: "wait", ms: 500 }]);
+    act(() => transport.current!.seek(0.3));
+    await act(async () => { await transport.current!.sourcesReady(); });  // the measurement pass has run
+    act(() => live()[0].fire(1000, 500));
+    expect(container.querySelector(".cin__text")!.textContent).toContain("hello");
+    expect(reads).toEqual([]);
   });
 
   test("the observer is disconnected on unmount and on a beat change (static and live)", () => {
