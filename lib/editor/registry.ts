@@ -1,6 +1,7 @@
 import type { Action, TextIn } from "@/engine/deck/types";
+import { DEFAULT_CREDITS_AREA } from "@/engine/deck/credits";
 
-export type FieldType = "text" | "textarea" | "number" | "select" | "range" | "checkbox" | "objectRef" | "asset";
+export type FieldType = "text" | "textarea" | "number" | "select" | "range" | "checkbox" | "objectRef" | "asset" | "credits";
 export type AssetAccept = "panel" | "overlay" | "image" | "video";
 export interface Field {
   key: string; label: string; type: FieldType; options?: { value: string; label: string }[]; min?: number; max?: number; step?: number;
@@ -13,6 +14,11 @@ export interface Field {
   /** number: the field may be left out (camera `to`: it inherits). Unset shows empty with an
    *  "inherit" placeholder; clearing the box deletes the key. */
   optional?: boolean;
+  /** checkbox on an object-valued key (text `particles`): checked writes a copy of this object,
+   *  cleared deletes the key. */
+  toggle?: Record<string, unknown>;
+  /** The Inspector shows this field only while this dot-path of the action is truthy. */
+  showIf?: string;
 }
 export interface EffectDescriptor {
   kind: string; label: string; icon: string; schema: Field[]; seekable: boolean; defaults(): Action;
@@ -21,7 +27,13 @@ export interface EffectDescriptor {
 }
 
 const opts = (...vs: string[]) => vs.map((v) => ({ value: v, label: v }));
-const TEXT_INS: TextIn[] = ["flyUp", "fade", "fadeSide", "cursive", "letterFly", "letterUp", "wordUp", "blurIn", "typewriter"];
+const TEXT_INS: TextIn[] = ["flyUp", "fade", "fadeSide", "cursive", "letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "draw"];
+const PARTICLE_FIELDS: Field[] = [
+  { key: "particles", label: "Particles", type: "checkbox", toggle: { color: "cream", rate: 6, rise: 1 } },
+  { key: "particles.color", label: "Particle color", type: "select", options: opts("cream", "cyan", "lime", "pink"), showIf: "particles" },
+  { key: "particles.rate", label: "Notes/sec (1–30)", type: "number", min: 1, max: 30, step: 1, showIf: "particles" },
+  { key: "particles.rise", label: "Rise", type: "range", min: 0.5, max: 2, step: 0.1, showIf: "particles" },
+];
 const ART_MODES = ["cut", "fade", "crossfade", "morph", "dissolve"];
 const MEDIA_INS = ["fade", "flyUp", "pop", "fadeSide"];
 
@@ -34,6 +46,7 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
     { key: "speed", label: "Speed", type: "range", min: 0.2, max: 3, step: 0.1 },
     { key: "pos.x", label: "Pos X", type: "number", min: 0, max: 1, step: 0.01 },
     { key: "pos.y", label: "Pos Y", type: "number", min: 0, max: 1, step: 0.01 },
+    ...PARTICLE_FIELDS,
   ], defaults: () => ({ kind: "text", value: "New line", in: "fade" }) },
   wait: { kind: "wait", label: "Wait", icon: "ti-clock", seekable: true, schema: [{ key: "ms", label: "Milliseconds", type: "number", min: 0, step: 50 }],
     defaults: () => ({ kind: "wait", ms: 500 }) },
@@ -54,6 +67,20 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
     { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
     { key: "ease", label: "Ease", type: "select", options: opts("inOut", "in", "out", "linear") },
   ], defaults: () => ({ kind: "camera", to: { zoom: 2, x: 0.5, y: 0.5 }, durationMs: 1200, ease: "inOut" }) },
+  credits: { kind: "credits", label: "Credits", icon: "ti-list-details", seekable: true, schema: [
+    { key: "items", label: "Entries (Role: Name, Name)", type: "credits" },
+    { key: "durationMs", label: "Duration ms", type: "number", min: 100, step: 100 },
+    { key: "area.x", label: "Area X", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "area.y", label: "Area Y", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "area.w", label: "Area W", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "area.h", label: "Area H", type: "number", min: 0, max: 1, step: 0.01 },
+    ...PARTICLE_FIELDS,
+  ], defaults: () => ({ kind: "credits", items: [{ role: "Directed by", names: ["Your Name"] }], area: { ...DEFAULT_CREDITS_AREA }, durationMs: 20000 }) },
+  screen_fade: { kind: "screen_fade", label: "Screen fade", icon: "ti-contrast", seekable: true, schema: [
+    { key: "to", label: "Level (0–1)", type: "range", min: 0, max: 1, step: 0.05 },
+    { key: "color", label: "Color", type: "text" },
+    { key: "durationMs", label: "Duration ms", type: "number", min: 0, step: 50 },
+  ], defaults: () => ({ kind: "screen_fade", to: 1, color: "#000", durationMs: 1000 }) },
   click_gate: { kind: "click_gate", label: "Click gate", icon: "ti-hand-click", seekable: true, schema: [],
     defaults: () => ({ kind: "click_gate" }) },
   clear: { kind: "clear", label: "Clear", icon: "ti-eraser", seekable: true, schema: [],
