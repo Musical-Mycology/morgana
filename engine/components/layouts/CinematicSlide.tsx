@@ -417,8 +417,10 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     svg.setAttribute("aria-hidden", "true");
     const t = document.createElementNS(SVG_NS, "text");
     t.setAttribute("x", "0");
-    t.setAttribute("y", "0.075em"); // the HTML line box's half-leading at line-height 1.15
-    t.setAttribute("dominant-baseline", "text-before-edge");
+    // Centre the glyphs' content area in the line box, as HTML half-leading does — for any font
+    // (the svg spans the wrap, which is one line box tall).
+    t.setAttribute("y", "50%");
+    t.setAttribute("dominant-baseline", "central");
     for (const ch of Array.from(text)) {
       const span = document.createElementNS(SVG_NS, "tspan");
       span.textContent = ch;
