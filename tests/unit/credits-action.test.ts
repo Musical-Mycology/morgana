@@ -44,6 +44,8 @@ describe("validation", () => {
     ["fade missing to", { kind: "screen_fade" }, ".to must be 0–1"],
     ["fade negative duration", { kind: "screen_fade", to: 1, durationMs: -5 }, ".durationMs must be a finite number ≥ 0"],
     ["fade colour not a string", { kind: "screen_fade", to: 1, color: 0 }, ".color must be a string"],
+    ["fade colour not a hex", { kind: "screen_fade", to: 1, color: "blak" }, ".color must be a hex colour"],
+    ["fade colour a short hex", { kind: "screen_fade", to: 1, color: "#00" }, ".color must be a hex colour"],
     ["text particle rate 0", { kind: "text", value: "Hi", in: "fade", particles: { rate: 0 } }, ".particles.rate must be 1–30"],
     ["credits particle rate 31", { ...credits, particles: { rate: 31 } }, ".particles.rate must be 1–30"],
     ["particles not an object", { kind: "text", value: "Hi", in: "fade", particles: true }, ".particles must be an object"],

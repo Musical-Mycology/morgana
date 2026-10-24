@@ -38,6 +38,10 @@ export function storyAssetUrl(asset: StoryAsset): string {
     : `/storyboard/notes/${asset}.png`;
 }
 
+/** A CSS hex colour: #rgb, #rgba, #rrggbb or #rrggbbaa. */
+export const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+export const isHexColor = (c: unknown): c is string => typeof c === "string" && HEX_COLOR.test(c);
+
 export type NoteColor = "cyan" | "lime" | "pink" | "cream";
 /** Per the supplied Hex sheet: fill = note color, glow = color-dodge halo. */
 export const NOTE_TINTS: Record<NoteColor, { fill: string; glow: string }> = {

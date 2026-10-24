@@ -6,6 +6,7 @@ import type { DeckDoc } from "@/engine/deck-doc";
 import { deckLayout } from "./deck-clock";
 import { beatTimeline } from "./beat-clock";
 import { clamp01 } from "./art-clock";
+import { isHexColor } from "@/engine/deck/story-assets";
 
 export const FADE_DEFAULT_MS = 1000;
 export const FADE_DEFAULT_COLOR = "#000";
@@ -32,7 +33,9 @@ export function fadeEvents(doc: DeckDoc): FadeEvent[] {
           start: s.start + b.start + w.start,
           duration: (a.durationMs ?? FADE_DEFAULT_MS) / 1000,
           to: clamp01(a.to),
-          color: a.color ?? FADE_DEFAULT_COLOR,
+          // An invalid colour never reaches the DOM (the browser would ignore it and keep the
+          // previous background, so a stepped frame would differ from a jumped one).
+          color: isHexColor(a.color) ? a.color : FADE_DEFAULT_COLOR,
           at: { sceneIdx: s.sceneIdx, beatIdx: b.beatIdx, actionIdx },
         });
       });

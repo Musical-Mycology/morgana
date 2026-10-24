@@ -66,3 +66,9 @@ test("fadeAt: 0 ms is a cut; the colour switches at a fade's start", () => {
   expect(fadeAt(e, 2)).toEqual({ level: 1, color: "#fff" });
   expect(fadeAt(e, 2.5).level).toBeCloseTo(0.75, 12);
 });
+
+test("fadeEvents: an invalid colour falls back to #000; any valid hex (3/4/6/8 digits) is kept", () => {
+  const colours = (c: string) => fadeEvents(deck([{ id: "s", beats: [{ id: "a", timeline: [fade(1, 0, c), wait(100)] }] }]))[0].color;
+  for (const c of ["#fff", "#ffff", "#a1b2c3", "#A1B2C3D4"]) expect(colours(c)).toBe(c);
+  for (const c of ["red", "#ff", "#fffff", "#ggg", "rgb(255,0,0)", " #fff"]) expect(colours(c)).toBe(FADE_DEFAULT_COLOR);
+});

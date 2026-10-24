@@ -15,6 +15,9 @@ export function paintFadeOverlay(el: HTMLElement, f: FadeState, last: string, ca
   if (key === "off") { el.style.display = "none"; el.style.opacity = ""; el.style.background = ""; return key; }
   el.style.display = "block";
   el.style.opacity = String(level);
+  // Clear first: the browser ignores an invalid colour and would keep the previous one, so the
+  // painted background would depend on the path taken to this frame.
+  el.style.background = "";
   el.style.background = f.color;
   return key;
 }

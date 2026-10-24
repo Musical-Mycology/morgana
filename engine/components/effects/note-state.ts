@@ -4,7 +4,7 @@
  *  2026-07-27-time-pure-particles-7a-design.md §3. */
 
 import type { Action, Scene, TextParticles } from "@/engine/deck/types";
-import { NOTE_GLYPHS, NOTE_TINTS, type NoteColor, type NoteGlyph } from "@/engine/deck/story-assets";
+import { NOTE_GLYPHS, NOTE_TINTS, isHexColor, type NoteColor, type NoteGlyph } from "@/engine/deck/story-assets";
 import { beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
 
 /** Reference stage width the engine's px constants were authored against. */
@@ -191,13 +191,12 @@ export function textSourceIdx(actionIdx: number, line?: number): number {
 /** Text-particle pool keys are `t${idx}:${slot}`; emitter/ring keys start with a digit. */
 export const isTextSpriteKey = (key: string): boolean => key.startsWith("t");
 
-const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 /** A tint name → its fill; a CSS hex passes through; anything else (unknown name, non-string) → cream. */
 export function resolveParticleColor(c: string | undefined): string {
   const cream = NOTE_TINTS[DEFAULT_PARTICLE_COLOR].fill;
   if (typeof c !== "string") return cream;
   if (Object.prototype.hasOwnProperty.call(NOTE_TINTS, c)) return NOTE_TINTS[c as NoteColor].fill;
-  return HEX_COLOR.test(c) ? c : cream;
+  return isHexColor(c) ? c : cream;
 }
 export function particleOpts(p: TextParticles): Pick<TextSource, "color" | "rate" | "rise"> {
   const rise = typeof p.rise === "number" && Number.isFinite(p.rise) && p.rise > 0 ? p.rise : DEFAULT_PARTICLE_RISE;

@@ -1,5 +1,6 @@
 import type { Scene, SceneObject, SlideTreatment } from "@/engine/deck/types";
 import { MEDIA_ID_PATTERN } from "@/engine/deck/media-ref";
+import { isHexColor } from "@/engine/deck/story-assets";
 
 /** Optional host-app chrome, defaulted to none so decks render generic. */
 export interface DeckChrome {
@@ -164,6 +165,7 @@ function validateCreditsAndFades(scene: Scene, si: number, e: string[]): void {
         if (!finite(a.to) || a.to < 0 || a.to > 1) e.push(`${at}.to must be 0–1`);
         if (a.durationMs !== undefined && (!finite(a.durationMs) || a.durationMs < 0)) e.push(`${at}.durationMs must be a finite number ≥ 0`);
         if (a.color !== undefined && typeof a.color !== "string") e.push(`${at}.color must be a string`);
+        else if (a.color !== undefined && !isHexColor(a.color)) e.push(`${at}.color must be a hex colour (#rgb, #rgba, #rrggbb or #rrggbbaa)`);
       }
       if ((a?.kind === "text" || a?.kind === "credits") && a.particles !== undefined) {
         const p = a.particles;
