@@ -35,12 +35,13 @@ export function drawSweepAt(chars: number, t: number, speed = 1): number {
   return clamp01((t * speed) / (DRAW_LEAD + chars * DRAW_STAGGER));
 }
 
-/** Whether a `in: "draw"` text action is actually drawn. A dotted or empty line reveals with "fade"
- *  instead (dots live in HTML; an empty line has no outline). The beat clock's introDuration and
- *  CinematicSlide's buildText both use this, so timing and rendering agree. Inline markup and
- *  `append` are handled by CinematicSlide only (introDuration cannot see them). */
-export function isDrawnLine(a: { in: string; value: string; dots?: true }): boolean {
-  return a.in === "draw" && !a.dots && a.value.length > 0;
+/** Whether a `in: "draw"` text action is actually drawn. A dotted, empty or `append` line reveals
+ *  with "fade" instead (dots live in HTML; an empty line has no outline; an append fragment joins
+ *  the current line's HTML). The beat clock's introDuration, CinematicSlide's buildText and the
+ *  draw-long lint all use this, so timing and rendering agree. Inline markup is handled by
+ *  CinematicSlide only (introDuration cannot see it). */
+export function isDrawnLine(a: { in: string; value: string; dots?: true; append?: true }): boolean {
+  return a.in === "draw" && !a.dots && !a.append && a.value.length > 0;
 }
 
 /** A draw line is one row: newlines become spaces (same length, so `chars` stays value.length). */

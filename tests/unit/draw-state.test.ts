@@ -57,3 +57,9 @@ test("drawText keeps length (newline → space); wordRuns finds each non-space r
   expect(wordRuns("  Hello  big world ")).toEqual([[2, 7], [9, 12], [13, 18]]);
   expect(wordRuns("   ")).toEqual([]);
 });
+
+test("a draw append fragment is not drawn: it is timed exactly as fade (CinematicSlide reveals it with fade)", () => {
+  expect(isDrawnLine({ in: "draw", value: "more", append: true })).toBe(false);
+  expect(introDuration({ in: "draw", value: "more", append: true })).toBe(introDuration({ in: "fade", value: "more", append: true }));
+  expect(introDuration({ in: "draw", value: "more", append: true, speed: 2 })).toBe(introDuration({ in: "fade", value: "more", speed: 2 }));
+});

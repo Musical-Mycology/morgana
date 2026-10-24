@@ -187,7 +187,7 @@ function creditsAndFadeWarnings(doc: DeckDoc): LintIssue[] {
         out.push({ rule: "credits-fast", severity: "warning", at, message: `credits roll at ${Math.round(pxPerSec)} px/s at 1080p — hard to read; use durationMs ≥ ${minMs}` });
       }
     }
-    // Same predicate as the beat clock: a dotted or empty draw line is timed as "fade".
+    // Same predicate as the beat clock: a dotted, empty or append draw line is timed as "fade".
     if (a.kind === "text" && isDrawnLine(a)) {
       const d = introDuration(a);
       if (d > DRAW_MAX_SEC) out.push({ rule: "draw-long", severity: "warning", at, message: `draw line takes ${d.toFixed(1)}s — shorten it or raise its speed` });

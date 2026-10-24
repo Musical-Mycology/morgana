@@ -21,6 +21,8 @@ test("draw-long: a draw line whose introDuration is above 8 s", () => {
   expect(rule(deck([draw(93)]), "draw-long")).toEqual([]);
   expect(rule(deck([draw(94, 2)]), "draw-long")).toEqual([]);
   expect(rule(deck([{ kind: "text", value: "x".repeat(300), in: "fade" }]), "draw-long")).toEqual([]);
+  // A draw append fragment reveals (and is timed) as fade — draw-long skips it.
+  expect(rule(deck([draw(5), { kind: "text", value: "x".repeat(300), in: "draw", append: true }]), "draw-long")).toEqual([]);
 });
 
 test("fade-unfinished: a screen fade still running at the deck's end", () => {

@@ -717,7 +717,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive", "draw"];
     // Markup, and inline `append` fragments, cannot be drawn glyph-by-glyph: they reveal with "fade".
     // So do dotted and empty draw lines (the dots live in HTML; an empty line has no outline).
-    const effIn: TextIn = (hasInlineMarkup(a.value) && perPiece.includes(a.in)) || (a.in === "draw" && (a.append || !isDrawnLine(a))) ? "fade" : a.in;
+    const effIn: TextIn = (hasInlineMarkup(a.value) && perPiece.includes(a.in)) || (a.in === "draw" && !isDrawnLine(a)) ? "fade" : a.in;
     // instantText / no-reveal lines have no entrance: they render at rest, and their dots
     // render already-faded-in via `instant`.
     const instant = !!(instantText && !a.reveal);

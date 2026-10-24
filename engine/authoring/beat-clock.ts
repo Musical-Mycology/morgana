@@ -14,10 +14,10 @@ const INTRO_DUR: Record<Exclude<TextIn, "draw">, number> = {
 };
 const DOTFADE_TAIL = 2.02;
 
-export function introDuration(a: { in: TextIn; value: string; dots?: true; speed?: number }): number {
+export function introDuration(a: { in: TextIn; value: string; dots?: true; append?: true; speed?: number }): number {
   const sp = a.speed ?? (a.in === "cursive" ? 0.2 : 1);
-  // draw: per-character outline + one fill phase (draw-state.ts). A dotted or empty draw line is
-  // not drawn: it reveals (and is timed, dots tail included) exactly as "fade".
+  // draw: per-character outline + one fill phase (draw-state.ts). A dotted, empty or append draw
+  // line is not drawn: it reveals (and is timed, dots tail included) exactly as "fade".
   if (isDrawnLine(a)) return drawDuration(a.value.length, sp);
   const inStyle: Exclude<TextIn, "draw"> = a.in === "draw" ? "fade" : a.in;
   const chars = a.value.length;
