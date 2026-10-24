@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { createRef } from "react";
 import { CinematicSlide, type CinematicRuntime, type SlideTransport } from "@/engine/components/layouts/CinematicSlide";
@@ -130,4 +130,74 @@ test("seek.ts (editor canvas) paints the roll into the text host at the same off
   renderBeatAt([credits, { kind: "clear" }], 4.1, { textHost: host, art: null });
   expect(host.querySelector(".cin__credits")).toBeNull();
   host.remove();
+});
+
+// I2: a /play resize (the stage's layout size changes) re-measures the roll and the text sources.
+// jsdom has no ResizeObserver: this stand-in records each observer so a test can fire it.
+class FakeResizeObserver {
+  static all: FakeResizeObserver[] = [];
+  observed: Element[] = [];
+  disconnected = false;
+  constructor(private cb: ResizeObserverCallback) { FakeResizeObserver.all.push(this); }
+  observe(el: Element) { this.observed.push(el); }
+  unobserve() {}
+  disconnect() { this.disconnected = true; this.observed = []; }
+  fire() { if (!this.disconnected) this.cb([], this as unknown as ResizeObserver); }
+}
+const live = () => FakeResizeObserver.all.filter((o) => !o.disconnected);
+
+describe("resize", () => {
+  let stageW = 1000;
+  beforeEach(() => {
+    FakeResizeObserver.all = [];
+    stageW = 1000;
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function (this: Element) { return this.classList.contains("cin__stage") ? stageW : 0; });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  const timeline = (): Action[] => [{ kind: "wait", ms: 1000 }, { ...credits, particles: { color: "lime" } }, { kind: "clear" }, { kind: "wait", ms: 100 }];
+
+  test("a stage size change re-reads blockH, repaints the roll and republishes the sources; an unchanged size does not", async () => {
+    const { transport, container, sources } = mount(timeline(), true);
+    expect(live()).toHaveLength(1);
+    expect(live()[0].observed).toEqual([container.querySelector(".cin__stage")]);
+    act(() => transport.current!.seek(2));
+    await act(async () => { await transport.current!.sourcesReady(); });
+    expect(roll(container)!.style.transform).toBe("translateY(50px)");
+    const before = JSON.stringify(sources.current);
+    rollH = 1000;                                   // the roll would measure taller now…
+    act(() => live()[0].fire());                    // …but the stage is the size it was measured at (the observer's first callback)
+    await act(async () => { await transport.current!.sourcesReady(); });
+    expect(roll(container)!.style.transform).toBe("translateY(50px)");
+    expect(JSON.stringify(sources.current)).toBe(before);
+    stageW = 1200;                                  // a resize
+    act(() => live()[0].fire());
+    await act(async () => { await transport.current!.sourcesReady(); });
+    expect(roll(container)!.style.transform).toBe("translateY(-100px)"); // 200 − 1200·0.25
+    expect(sources.current[0].scroll).toEqual({ t0: 1, dur: 4, from: 0.4, to: -2 });
+  });
+
+  test("the observer is disconnected on unmount and on a beat change (static and live)", () => {
+    for (const animate of [true, false]) {
+      FakeResizeObserver.all = [];
+      const transport = createRef<SlideTransport>();
+      const { rerender, unmount } = render(<CinematicSlide slots={{ sceneId: "s", beat: { id: "a", timeline: timeline() } }} animate={animate} runtime={runtime} transport={transport} autoplay={false} />);
+      expect(live()).toHaveLength(1);
+      const first = live()[0];
+      rerender(<CinematicSlide slots={{ sceneId: "s", beat: { id: "b", timeline: timeline() } }} animate={animate} runtime={runtime} transport={transport} autoplay={false} />);
+      expect(first.disconnected).toBe(true);
+      expect(live()).toHaveLength(1);
+      unmount();
+      expect(live()).toHaveLength(0);
+    }
+  });
+
+  test("without ResizeObserver the slide still mounts and measures", async () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+    const { transport, container } = mount(timeline(), true);
+    act(() => transport.current!.seek(2));
+    await act(async () => { await transport.current!.sourcesReady(); });
+    expect(roll(container)!.style.transform).toBe("translateY(50px)");
+  });
 });

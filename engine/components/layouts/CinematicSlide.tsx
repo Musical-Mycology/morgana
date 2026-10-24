@@ -220,6 +220,12 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   const measureGen = useRef(0);
   const measureQueued = useRef(false);
   const pendingSources = useRef<Promise<void>>(Promise.resolve());
+  // A /play resize changes the stage's layout size, which the cached credits sizes (px) and the
+  // published sources depend on. The observer re-measures when the size differs from the one the
+  // last measurement saw ("" before any): its first callback, and every one on a fixed viewport
+  // (/render), is a no-op.
+  const stageObserver = useRef<ResizeObserver | null>(null);
+  const measuredSize = useRef("");
   // The camera's world layer (media tiles) and the last transform written to it ("none" = the
   // initial, untransformed full frame, so a deck with no camera never writes it at all).
   const world = useRef<HTMLDivElement>(null);
@@ -251,6 +257,20 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     measureQueued.current = false;
     layoutRev.current++;
     pendingSources.current = Promise.resolve();
+    // useGSAP defers this effect's cleanup to unmount, so drop the previous beat's observer here.
+    stageObserver.current?.disconnect();
+    stageObserver.current = null;
+    measuredSize.current = "";
+    const stage = host.querySelector<HTMLElement>(".cin__stage");
+    const observer = stage && typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => {
+        if (!measuredSize.current || stageSize() === measuredSize.current) return;
+        layoutRev.current++;
+        scheduleMeasure();
+      })
+      : null;
+    observer?.observe(stage!);
+    stageObserver.current = observer;
     if (textSourcesRef) textSourcesRef.current = [];
     clearLineBoxes();
     clearCounter();
@@ -306,7 +326,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // guarantee the non-static branch has below. renderAt() itself never starts a ticker (only
       // play() does), so this stays synchronous and one-shot; pause() here is just symmetry with
       // the non-static branch's cleanup, guarding against any future caller reaching `transport`.
-      return () => { measureGen.current++; pause(); };
+      return () => { measureGen.current++; pause(); observer?.disconnect(); };
     }
 
     // Entry art: resolveEntry() already folds this beat's entry transition, so show
@@ -331,6 +351,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     return () => {
       measureGen.current++;
       pause();
+      observer?.disconnect();
       built.current.forEach((entry) => entry.tl?.kill());
       built.current.clear();
       clearLineBoxes();
@@ -1093,12 +1114,19 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     pendingSources.current = Promise.resolve(fonts).then(() => {
       if (gen !== measureGen.current || !scope.current) return; // a newer beat (or unmount) owns the ref now
       measureQueued.current = false;
+      measuredSize.current = stageSize();
       const changed = publishSources();
       repaintCredits(); // at the sizes publishSources just measured
       // The host repaints notes with the new sources at the same t. Unchanged sources need no
       // repaint (the host already painted with them), so a deck without particles sees no extra onTime.
       if (changed) onTime?.(lastT.current);
     });
+  }
+
+  /** The text stage's layout size (transform-independent), as the resize observer compares it. */
+  function stageSize(): string {
+    const s = scope.current?.querySelector<HTMLElement>(".cin__stage");
+    return s ? `${s.clientWidth}x${s.clientHeight}` : "";
   }
 
   /** Measure every built particle line AT REST and publish the sources (spec §2); true when the
