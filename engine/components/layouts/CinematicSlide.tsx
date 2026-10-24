@@ -21,6 +21,8 @@ import {
 import { DRAW_DASH_EM, DRAW_STROKE_EM, DRAW_VARIANT, drawText, isDrawnLine } from "../effects/draw-state";
 import { foldAt, rebuildBoundary, beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
 import { cameraAt, cameraTransform, FULL_FRAME, type CameraEvent } from "@/engine/authoring/camera-clock";
+import { particleOpts, textSourceEnd, textSourceIdx, type TextRect, type TextSource } from "../effects/note-state";
+import { atRestRects, restLine, wrapWords, type RestChild } from "../text-sources";
 
 /**
  * Position a text box at `pos` per its align. Right boxes anchor their RIGHT edge (via the
@@ -87,6 +89,9 @@ export interface SlideTransport {
   play(): void;
   pause(): void;
   duration(): number;
+  /** Resolves once this beat's text-particle word boxes (and credit block heights) for the current
+   *  DOM are measured and the host re-notified (spec §2 "Readiness"). /render awaits it per frame. */
+  sourcesReady(): Promise<void>;
 }
 
 interface Props {
@@ -123,6 +128,9 @@ interface Props {
    *  the framing at beat-local `t` is `cameraAt(events, beatStart + t)`. Ignored when
    *  `cameraRef` is set; with neither, the world stays at FULL_FRAME. */
   camera?: BeatCamera;
+  /** Where measured text-particle sources are published (BeatStage hands NoteField them). Written on
+   *  each layout change, after document.fonts.ready; never per frame. */
+  textSourcesRef?: React.MutableRefObject<TextSource[]>;
 }
 
 /** A beat's view of the deck camera for autoplay: the deck's events and the beat's deck start. */
@@ -133,7 +141,7 @@ export function beatFraming(t: number, cameraRef?: React.RefObject<Framing>, cam
   return cameraRef?.current ?? (camera ? cameraAt(camera.events, camera.beatStart + t) : FULL_FRAME);
 }
 
-export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true, clipModeRef, cameraRef, camera }: Props) {
+export function CinematicSlide({ slots, animate, runtime, chrome, print, instantText, transport, onTime, autoplay = true, clipModeRef, cameraRef, camera, textSourcesRef }: Props) {
   const assets = useAssetResolver();
   const scope = useRef<HTMLDivElement>(null);
   // The single gsap.ticker listener currently driving playback, or null when paused. play()
@@ -197,6 +205,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   // as done yet) left stuck past where it should have re-armed.
   const lastDestructive = useRef(-1);
   const lastT = useRef(0);
+  // Text-source measurement (sub-project 6). layoutRev bumps on every build/wipe; a renderAt that sees
+  // it ahead of measuredRev queues one measurement behind fonts.ready. measureGen invalidates a
+  // measurement queued by a previous beat (or before unmount): Review Focus #1.
+  const layoutRev = useRef(0);
+  const measuredRev = useRef(-1);
+  const measureGen = useRef(0);
+  const measureQueued = useRef(false);
+  const pendingSources = useRef<Promise<void>>(Promise.resolve());
   // The camera's world layer (media tiles) and the last transform written to it ("none" = the
   // initial, untransformed full frame, so a deck with no camera never writes it at all).
   const world = useRef<HTMLDivElement>(null);
@@ -224,6 +240,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     firedOnce.current.clear();
     lastDestructive.current = -1;
     lastT.current = 0;
+    measureGen.current++;
+    measureQueued.current = false;
+    layoutRev.current++;
+    pendingSources.current = Promise.resolve();
+    if (textSourcesRef) textSourcesRef.current = [];
     clearLineBoxes();
     clearCounter();
     clearMedia();
@@ -278,7 +299,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       // guarantee the non-static branch has below. renderAt() itself never starts a ticker (only
       // play() does), so this stays synchronous and one-shot; pause() here is just symmetry with
       // the non-static branch's cleanup, guarding against any future caller reaching `transport`.
-      return () => { pause(); };
+      return () => { measureGen.current++; pause(); };
     }
 
     // Entry art: resolveEntry() already folds this beat's entry transition, so show
@@ -301,6 +322,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // unmount that forgets this leaves a zombie ticker calling renderAt forever (ambiguity
     // res. #1).
     return () => {
+      measureGen.current++;
       pause();
       built.current.forEach((entry) => entry.tl?.kill());
       built.current.clear();
@@ -347,6 +369,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     // font-size per token set in the <style> block from TEXT_SIZES; tone:"dark" → dark ink for light grounds
     p.className = `cin__line cin__line--${sz}${tone === "dark" ? " cin__line--dark" : ""}`;
     if (align) p.style.textAlign = align;
+    lineContent(p, value, dots, instant);
+    host.appendChild(p);
+    currentLine.current = p;
+    return p;
+  }
+
+  /** Fill a line element with `value` exactly as appendText does (dots split, inline markup). */
+  function lineContent(p: HTMLElement, value: string, dots?: boolean, instant = false) {
     if (dots) {
       const { line } = lineAndDots(value);
       p.textContent = line + " ";
@@ -358,9 +388,6 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     } else {
       renderLineContent(p, value);
     }
-    host.appendChild(p);
-    currentLine.current = p;
-    return p;
   }
 
   const SVG_NS = "http://www.w3.org/2000/svg";
@@ -679,6 +706,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
   /** Build one text action's element + its real reveal timeline, paused at 0 — the only place
    *  text elements/timelines are built (design spec §7b §4.2). */
   function buildText(a: Extract<Action, { kind: "text" }>, host: HTMLElement): { el: HTMLElement; tl: gsap.core.Timeline | null; box?: HTMLElement } {
+    layoutRev.current++;
     const perPiece: TextIn[] = ["letterFly", "letterUp", "wordUp", "blurIn", "typewriter", "cursive", "draw"];
     // Markup, and inline `append` fragments, cannot be drawn glyph-by-glyph: they reveal with "fade".
     // So do dotted and empty draw lines (the dots live in HTML; an empty line has no outline).
@@ -728,6 +756,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         if (bi !== -1) lineBoxes.current.splice(bi, 1);
       }
       built.current.delete(i);
+      layoutRev.current++;
     }
   }
 
@@ -923,6 +952,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         // this action's own `start`, i.e. `t - f.start`, not `t` or `f.p`.
         let entry = built.current.get(f.index);
         if (!entry) {
+          layoutRev.current++; // it shares the text box with lines, so it moves them
           const slot = document.createElement("span");
           slot.className = `cin__rotslot cin__line--${f.action.size ?? "md"}`;
           host.appendChild(slot);
@@ -966,6 +996,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     paintCamera(t);
     setAgainRevealed(revealAgain);
     lastT.current = t;
+    if (layoutRev.current !== measuredRev.current) scheduleMeasure();
     // The one clock (design spec §7b Task 10, ambiguity res. #1): every renderAt call notifies
     // the host with the exact `t` it just painted, so a host driving sibling stages (notes,
     // objects) off THIS callback — instead of a second ticker of its own — stays in lockstep,
@@ -981,6 +1012,86 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     if (next === lastCamera.current) return;
     lastCamera.current = next;
     w.style.transform = next;
+  }
+
+  /** Queue one measurement of the current DOM behind fonts.ready (coalesced: a queued measurement
+   *  reads the DOM when it runs, so later layout changes ride along). */
+  function scheduleMeasure() {
+    measuredRev.current = layoutRev.current;
+    if (measureQueued.current) return;
+    measureQueued.current = true;
+    const gen = measureGen.current;
+    const fonts = typeof document !== "undefined" && document.fonts ? document.fonts.ready : Promise.resolve();
+    pendingSources.current = Promise.resolve(fonts).then(() => {
+      if (gen !== measureGen.current || !scope.current) return; // a newer beat (or unmount) owns the ref now
+      measureQueued.current = false;
+      // The host repaints notes with the new sources at the same t. Unchanged sources need no
+      // repaint (the host already painted with them), so a deck without particles sees no extra onTime.
+      if (publishSources()) onTime?.(lastT.current);
+    });
+  }
+
+  /** Measure every built particle line AT REST and publish the sources (spec §2); true when the
+   *  published sources changed. Ruling F3: lines are never measured live (a live line may be
+   *  mid-SplitText, and so may its neighbours); each text box holding a particle line is replicated
+   *  with every child rebuilt from its action (atRestRects), so a stepped and a jumped frame with
+   *  the same built lines measure the same. */
+  function publishSources(): boolean {
+    const timeline = slots.beat.timeline;
+    const windows = beatTimeline(timeline);
+    const sr = scope.current?.querySelector<HTMLElement>(".cin__stage")?.getBoundingClientRect();
+    const out: TextSource[] = [];
+    const byHost = new Map<HTMLElement, Map<Element, TextRect[]>>(); // each text box replicated once
+    for (const i of [...built.current.keys()].sort((x, y) => x - y)) {
+      const entry = built.current.get(i)!;
+      const a = timeline[i];
+      if (!textSourcesRef || !sr || !(sr.width > 0 && sr.height > 0)) continue;
+      // Ruling F11: an `append` fragment is not measured — a known limitation (particles on an
+      // appended fragment are ignored; its words never emit).
+      if (a?.kind !== "text" || !a.particles || a.append) continue;
+      const host = entry.el.parentElement;
+      if (!host) continue;
+      let boxes = byHost.get(host);
+      if (!boxes) { boxes = atRestRects(host, (child) => restChild(child, timeline), sr); byHost.set(host, boxes); }
+      const rects = boxes.get(entry.el) ?? [];
+      if (rects.length) out.push({ key: `a${i}`, idx: textSourceIdx(i), start: windows[i].start, end: textSourceEnd(timeline, i), rects, ...particleOpts(a.particles) });
+    }
+    if (!textSourcesRef || JSON.stringify(out) === JSON.stringify(textSourcesRef.current)) return false;
+    textSourcesRef.current = out;
+    return true;
+  }
+
+  /** A text box child's at-rest stand-in for atRestRects, rebuilt from the action that built it
+   *  (never from its live, possibly split DOM). A particle line is word-wrapped and measured: an HTML
+   *  line by its words (ruling F10: only `lineAndDots(value).line` — the dots are skipped), a draw
+   *  line by its SVG glyphs. Append fragments ride along at rest as plain spans, unmeasured (F11). */
+  function restChild(child: Element, timeline: Action[]): RestChild | null {
+    let a: Action | undefined;
+    const frags: string[] = [];
+    for (const [i, entry] of [...built.current].sort(([x], [y]) => x - y)) {
+      const ai = timeline[i];
+      if (entry.el === child) a = ai;
+      else if (ai?.kind === "text" && ai.append && entry.el.parentElement === child) frags.push(ai.value);
+    }
+    if (a?.kind === "rotateList") {
+      // Its live text cycles with time; the stand-in holds a fixed item so the measurement does not
+      // depend on when it ran.
+      const first = a.items[0] ?? "";
+      return { node: restLine(child, (c) => { c.textContent = first; }) };
+    }
+    const text = a?.kind === "text" ? a : undefined;
+    if (!text && !frags.length) return null; // not a line: cloned as it is
+    const wrap = child.querySelector(":scope > .cin__draw-wrap");
+    const measure = text?.particles;
+    const node = restLine(child, (c) => {
+      if (wrap) c.appendChild(wrap.cloneNode(true));
+      else if (text) {
+        lineContent(c, text.value, text.dots, true);
+        if (measure) wrapWords(c);
+      }
+      for (const v of frags) { const s = document.createElement("span"); s.textContent = v; c.appendChild(s); }
+    });
+    return { node, measure: measure ? (wrap ? { draw: drawText(text!.value) } : "words") : undefined };
   }
 
   // --- SlideTransport: one time axis + gate boundaries, replacing the old per-segment GSAP
@@ -1048,7 +1159,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     gsap.ticker.add(tick);
   }
 
-  useImperativeHandle(transport, () => ({ seek, play, pause, duration }));
+  useImperativeHandle(transport, () => ({ seek, play, pause, duration, sourcesReady: () => pendingSources.current }));
 
   const pos = slots.beat.pos ?? DEFAULT_TEXT_POS;
   // Anchor the shared text box at `pos` per the first NON-free line's justification
