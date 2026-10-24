@@ -1,6 +1,6 @@
 /** Paint the screen-fade overlay (sub-project 6) — shared by DeckStage (/play, /render) and the
  *  editor canvas. Writes only when the painted value changes; at level 0 the overlay is
- *  display:none, so it paints nothing. `cap` limits the level (the editor previews ≤ 0.5). Returns
+ *  display:none with no level or colour, so it paints nothing. `cap` limits the level (the editor previews ≤ 0.5). Returns
  *  the key it painted, which the caller passes back as `last`. */
 import type { FadeState } from "@/engine/authoring/fade-clock";
 
@@ -10,7 +10,9 @@ export function paintFadeOverlay(el: HTMLElement, f: FadeState, last: string, ca
   const level = r6(Math.min(f.level, cap));
   const key = level <= 0 ? "off" : `${level} ${f.color}`;
   if (key === last) return last;
-  if (key === "off") { el.style.display = "none"; return key; }
+  // Off clears the level and colour too: the hidden overlay's DOM is then the same whatever was
+  // painted before (a fresh mount's), so a stepped and a jumped /render frame compare equal.
+  if (key === "off") { el.style.display = "none"; el.style.opacity = ""; el.style.background = ""; return key; }
   el.style.display = "block";
   el.style.opacity = String(level);
   el.style.background = f.color;

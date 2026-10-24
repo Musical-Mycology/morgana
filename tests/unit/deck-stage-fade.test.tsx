@@ -53,6 +53,9 @@ test("Review Focus #3: the level holds across a scene cut; a backward scrub to b
   expect(fade().style.opacity).toBe("1");
   apply(0.5);
   expect(fade().style.display).toBe("none");
+  // Path-independent: a hidden overlay carries no stale level/colour, exactly as on a fresh mount
+  // (/render compares a stepped frame's DOM with a jumped one's).
+  expect([fade().style.opacity, fade().style.background]).toEqual(["", ""]);
 });
 
 test("mount paints the fade at initialT; a fade-less deck never shows the overlay", () => {
