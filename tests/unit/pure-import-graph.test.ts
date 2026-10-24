@@ -36,6 +36,7 @@ function runtimeGraph(entry: string, seen = new Set<string>()): Set<string> {
 // except this test (see docs/MM_MORGANA.md, note-state purity import rule).
 test.each([
   "engine/components/effects/note-state.ts",
+  "engine/components/effects/draw-state.ts",
   "lib/editor/object-state.ts",
   "engine/authoring/deck-clock.ts",
   "lib/timing/clock-format.ts",

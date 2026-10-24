@@ -5,9 +5,10 @@
  *  This is the single source of truth for when anything happens in a beat
  *  (design spec §7b D2). Never derive a duration by reading a built GSAP timeline. */
 import type { Action, TextIn } from "@/engine/deck/types";
+import { drawDuration } from "@/engine/components/effects/draw-state";
 
 // Mirrors INTRO_DUR + introDuration() in CinematicSlide.tsx so windows match playback timing.
-const INTRO_DUR: Record<TextIn, number> = {
+const INTRO_DUR: Record<Exclude<TextIn, "draw">, number> = {
   flyUp: 0.6, fade: 0.8, fadeSide: 0.7, cursive: 1.0,
   letterFly: 1.6, letterUp: 1.6, wordUp: 1.3, blurIn: 1.6, typewriter: 1.5,
 };
@@ -15,6 +16,8 @@ const DOTFADE_TAIL = 2.02;
 
 export function introDuration(a: { in: TextIn; value: string; dots?: true; speed?: number }): number {
   const sp = a.speed ?? (a.in === "cursive" ? 0.2 : 1);
+  // draw: per-character outline + one fill phase (draw-state.ts). Dots are not drawn, so no dot tail.
+  if (a.in === "draw") return drawDuration(a.value.length, sp);
   const chars = a.value.length;
   const words = a.value.trim().split(/\s+/).length;
   let base: number;

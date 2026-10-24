@@ -93,7 +93,8 @@ export interface ArtTransition {
 
 export type TextIn =
   // line-level
-  | "flyUp" | "fade" | "fadeSide" | "cursive"
+  // draw: SVG outline stroke, then fill (sub-project 6)
+  | "flyUp" | "fade" | "fadeSide" | "cursive" | "draw"
   // per-letter / per-word (GSAP SplitText). letterFly direction follows `align`.
   | "letterFly" | "letterUp" | "wordUp" | "blurIn" | "typewriter";
 export type TextSize = "lg" | "md" | "sm";
