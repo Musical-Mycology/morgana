@@ -220,7 +220,7 @@ export function textSourceEnd(timeline: Action[], index: number): number | undef
  *  fade curves as emitterSpritesAt, with dir 0 ± TEXT_SPREAD and a TEXT_LIFE lifetime. */
 export function textSpritesAt(src: TextSource, srcIdx: number, t: number): NoteSpriteState[] {
   const rate = src.rate;
-  if (!(rate > 0) || src.rects.length === 0 || t < src.start) return [];
+  if (!(rate > 0) || !Number.isFinite(rate) || src.rects.length === 0 || t < src.start) return [];
   const D = TEXT_LIFE;
   const P = Math.min(Math.ceil(D * rate) + 1, MAX_SPRITES_PER_SOURCE);
   const first = Math.ceil(src.start * rate - EPS);                                         // birth ≥ start

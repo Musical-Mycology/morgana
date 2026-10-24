@@ -61,6 +61,11 @@ describe("textSpritesAt", () => {
     }
   });
 
+  test("rate Infinity returns nothing and terminates (no unbounded birth loop)", () => {
+    expect(textSpritesAt(src({ rate: Infinity }), 0, 1)).toEqual([]);
+    expect(textSpritesAt(src({ rate: Infinity, start: 0, end: undefined }), 0, 1)).toEqual([]);
+  });
+
   test("per-source cap; deterministic; nothing for rate 0 or no rects", () => {
     const fast = src({ rate: 200, start: 0, end: undefined });
     const many = textSpritesAt(fast, 0, 5);
