@@ -5,7 +5,7 @@ import type { DeckDoc } from "@/engine/deck-doc";
 import { NOTE_GLYPHS } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { pendingVideoSeeks } from "@/engine/components/video-sync";
-import { cameraEvents, hasNoteActions } from "@/engine/authoring/camera-clock";
+import { cameraEvents, hasNoteSources } from "@/engine/authoring/camera-clock";
 import { useDeckStage } from "./DeckStage";
 
 /** What one rendered frame reports back: image or clip srcs that failed for the FIRST time
@@ -40,7 +40,7 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
   const assets = useAssetResolver();
   const root = useRef<HTMLDivElement>(null);
   const hasCamera = useMemo(() => cameraEvents(doc).length > 0, [doc]);
-  const hasNotes = useMemo(() => hasNoteActions(doc), [doc]);
+  const hasNotes = useMemo(() => hasNoteSources(doc), [doc]);
   // Camera decks and note decks get a full raster per frame (below); decks with neither render as before.
   const needsFullRaster = hasCamera || hasNotes;
   useLayoutEffect(() => {
