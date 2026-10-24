@@ -8,7 +8,10 @@ import type { Action } from "@/engine/deck/types";
 import { isMediaRef, mediaKind, mediaRefId } from "@/engine/deck/media-ref";
 import { CAMERA_DEFAULT_MS, cameraAt, cameraEvents, mergesInto, type CameraEvent } from "@/engine/authoring/camera-clock";
 import { artAt, artEvents } from "@/engine/authoring/art-clock";
-import { beatTimeline } from "@/engine/authoring/beat-clock";
+import { beatTimeline, introDuration } from "@/engine/authoring/beat-clock";
+import { isDrawnLine } from "@/engine/components/effects/draw-state";
+import { DEFAULT_CREDITS_AREA, estimateCreditsBlockH } from "@/engine/deck/credits";
+import { fadeEvents } from "@/engine/authoring/fade-clock";
 import { findMediaRefs } from "@/lib/editor/media-refs";
 import type { MediaInfo } from "@/lib/store/media-store";
 
@@ -165,6 +168,44 @@ function cameraWarnings(doc: DeckDoc): LintIssue[] {
   return out;
 }
 
+/** Lint's reference frame height for roll speed (spec §5: "about 90 px/s at 1080p"). */
+const REF_H = 1080;
+export const CREDITS_MAX_PX_PER_SEC = 90;
+export const DRAW_MAX_SEC = 8;
+
+/** Credits, draw and screen-fade warnings (sub-project 6). Runs only on a structurally valid deck. */
+function creditsAndFadeWarnings(doc: DeckDoc): LintIssue[] {
+  const out: LintIssue[] = [];
+  doc.scenes.forEach((s, sceneIdx) => s.beats.forEach((b, beatIdx) => b.timeline.forEach((a, actionIdx) => {
+    const at = { sceneIdx, beatIdx, actionIdx };
+    if (a.kind === "credits") {
+      // No DOM: blockH is estimated from line counts × line heights (engine/deck/credits.ts).
+      const travel = (estimateCreditsBlockH(a.items) + (a.area ?? DEFAULT_CREDITS_AREA).h) * REF_H;
+      const pxPerSec = travel / (a.durationMs / 1000);
+      if (pxPerSec > CREDITS_MAX_PX_PER_SEC) {
+        const minMs = Math.ceil((travel / CREDITS_MAX_PX_PER_SEC) * 10) * 100;
+        out.push({ rule: "credits-fast", severity: "warning", at, message: `credits roll at ${Math.round(pxPerSec)} px/s at 1080p — hard to read; use durationMs ≥ ${minMs}` });
+      }
+    }
+    // Same predicate as the beat clock: a dotted or empty draw line is timed as "fade".
+    if (a.kind === "text" && isDrawnLine(a)) {
+      const d = introDuration(a);
+      if (d > DRAW_MAX_SEC) out.push({ rule: "draw-long", severity: "warning", at, message: `draw line takes ${d.toFixed(1)}s — shorten it or raise its speed` });
+    }
+  })));
+  // fadeEvents already applies the reach rule (nothing past a pinned scene's cut) and carries the
+  // source action's position.
+  const total = deckLayout(doc).total;
+  for (const ev of fadeEvents(doc)) {
+    const over = ev.start + ev.duration - total;
+    if (over > 1e-6) {
+      out.push({ rule: "fade-unfinished", severity: "warning", at: ev.at,
+        message: `screen fade is still running at the end of the deck — it ends ${over.toFixed(1)}s after the last frame` });
+    }
+  }
+  return out;
+}
+
 /** Facts the editor knows that the document does not: the deck's media ids and the decoded
  *  soundtrack duration. Each soundtrack rule is skipped when its fact is absent. */
 export interface LintContext { mediaIds?: string[]; soundtrackSec?: number; media?: MediaInfo[] }
@@ -268,6 +309,7 @@ export function lintDeck(doc: DeckDoc, ctx: LintContext = {}): LintIssue[] {
   if (errors.length === 0) {
     warnings.push(...timingWarnings(doc));
     warnings.push(...cameraWarnings(doc));
+    warnings.push(...creditsAndFadeWarnings(doc));
     warnings.push(...soundtrackWarnings(doc, ctx));
     warnings.push(...mediaWarnings(doc, ctx));
     try {
