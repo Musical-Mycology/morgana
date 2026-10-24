@@ -21,7 +21,7 @@
 
 ## Global Constraints
 
-- **Draw variant (recorded by Task 1):** `DRAW_VARIANT = "<pending>"`. Task 1 replaces `<pending>` with `"dash"` or `"mask"` plus the failing assertion, if any. Task 2 sets the constant from this line.
+- **Draw variant (recorded by Task 1):** `DRAW_VARIANT = "dash"`. Task 1 recorded this: every `dash:` and `mask:` probe test passed in all three runs (Playwright Chromium). Task 2 sets the constant from this line.
 - `TextIn` gains `"draw"`. `introDuration` for `"draw"` = `(0.1 + chars·0.08 + 0.4) / speed`, where `speed` defaults to 1 and `chars = value.length`.
 - Draw outline phase:
   - `stroke = currentColor`, `stroke-width` 1.5% of the font size (`0.015em`), `fill-opacity: 0`.
