@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveBinary } from "../lib/render/ffmpeg";
 import { cameraAt, cameraEvents, cameraTransform } from "../engine/authoring/camera-clock";
+import { creditsOffset } from "../engine/deck/credits";
+import { fadeAt, fadeEvents } from "../engine/authoring/fade-clock";
 import type { DeckDoc } from "../engine/deck-doc";
 
 const ffmpeg = resolveBinary("ffmpeg", process.env);
@@ -215,5 +217,87 @@ test.describe("camera", () => {
       stage: document.querySelector<HTMLElement>("[data-testid=play-stage] .cin__stage")?.style.transform,
     }));
     expect(rest).toEqual({ cin: want, beat: [want, want], stage: "" });
+  });
+});
+
+test.describe("credits and particles", () => {
+  // Per-worker deck ids: parallel workers (--repeat-each) must not share a deck.
+  let cid = "";
+  test.beforeEach(({}, info) => { cid = `e2e-play-credits-${info.parallelIndex}`; });
+  test.afterEach(async ({ request }) => {
+    for (const id of [cid, `${cid}-cam`, `${cid}-still`]) await request.delete(`/api/decks/${id}`).catch(() => {});
+  });
+  const put = async (request: import("@playwright/test").APIRequestContext, id: string, doc: object) => {
+    await request.delete(`/api/decks/${id}`).catch(() => {});
+    await request.post("/api/decks", { data: { id, title: id } });
+    expect((await request.put(`/api/decks/${id}`, { data: doc })).status()).toBe(200);
+  };
+  const deckT = (page: import("@playwright/test").Page) => page.getByTestId("play-scrub").getAttribute("aria-valuenow").then(Number);
+
+  test("after a deep link and a scrub, the roll offset and the fade level match the deck clock", async ({ page, request }) => {
+    // Roll 0–6 s, fade to black 6–8 s, end 8.5 s.
+    const doc = { version: 1, meta: { id: cid, title: "Play credits" }, scenes: [{ id: "s", beats: [{ id: "a", timeline: [
+      { kind: "credits", items: [{ role: "Directed by", names: ["Ann Lee"] }, { role: "Music", names: ["Bo Chen", "Cy Diaz"] }], durationMs: 6000 },
+      { kind: "screen_fade", to: 1, durationMs: 2000 }, { kind: "wait", ms: 2500 },
+    ] }] }] };
+    await put(request, cid, doc);
+    const fades = fadeEvents(doc as unknown as DeckDoc);
+    const read = () => page.evaluate(() => {
+      const q = (s: string) => document.querySelector<HTMLElement>(`[data-testid=play-stage] ${s}`);
+      const roll = q(".cin__credits-roll"), block = q(".cin__credits"), fade = q(".deck__fade")!;
+      const m = /translateY\((-?[\d.]+)px\)/.exec(roll?.style.transform ?? "");
+      return { off: m ? Number(m[1]) : NaN, blockH: roll?.offsetHeight ?? 0, areaH: block?.clientHeight ?? 0, fade: [fade.style.display, fade.style.opacity] };
+    });
+    const rollMatches = async (T: number) => {
+      const r = await read();
+      return Math.abs(r.off - creditsOffset(T, 6000, r.blockH, r.areaH));
+    };
+
+    await page.goto(`/play?deck=${cid}&t=3`);
+    await expect.poll(() => deckT(page)).toBe(3);
+    await expect.poll(() => rollMatches(3)).toBeLessThanOrEqual(0.01); // poll: blockH is re-measured after fonts
+    expect((await read()).fade[0]).toBe("none");
+
+    const box = (await page.getByTestId("play-scrub").boundingBox())!;
+    await page.mouse.click(box.x + box.width * (7 / 8.5), box.y + box.height / 2);
+    await expect.poll(async () => Math.abs((await deckT(page)) - 7)).toBeLessThanOrEqual(0.1);
+    const T = await deckT(page);
+    await expect.poll(async () => (await read()).fade[0]).toBe("block");
+    expect(Number((await read()).fade[1])).toBeCloseTo(fadeAt(fades, T).level, 5);
+    expect(await rollMatches(T)).toBeLessThanOrEqual(0.01);           // past the roll: −blockH
+
+    // Review Focus #3: scrub back to before the fade — the overlay paints nothing again.
+    await page.mouse.click(box.x + box.width * (2 / 8.5), box.y + box.height / 2);
+    await expect.poll(async () => (await read()).fade[0]).toBe("none");
+  });
+
+  test("text particles stay on the words during a camera move: .notefield__text never transforms; the sprites equal the camera-less deck's", async ({ page, request }) => {
+    const line = { kind: "text", value: "Particle words", in: "fade", pos: { x: 0.3, y: 0.3 }, particles: { color: "cyan", rate: 8 } };
+    const mk = (id: string, cam: boolean) => ({ version: 1, meta: { id, title: id }, scenes: [{ id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
+      line, ...(cam ? [{ kind: "camera", to: { zoom: 3, x: 0.3, y: 0.3 }, durationMs: 2000 }] : []), { kind: "wait", ms: 3000 },
+    ] }] }] });
+    await put(request, `${cid}-cam`, mk(`${cid}-cam`, true));
+    await put(request, `${cid}-still`, mk(`${cid}-still`, false));
+    const sprites = () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>("[data-testid=play-stage] .notefield__text > *")]
+      .filter((e) => e.style.display !== "none").map((e) => [e.style.left, e.style.top]));
+    const open = async (id: string) => {
+      await page.goto(`/play?deck=${id}&t=1.8`);              // the camera is mid-move at 1.8 (0.8 → 2.8)
+      await expect.poll(async () => (await sprites()).length).toBeGreaterThan(3);
+      return sprites();
+    };
+
+    const withCam = await open(`${cid}-cam`);
+    const chain = await page.evaluate(() => {
+      const out: { tf: string; world: string }[] = [];
+      for (let n = document.querySelector<HTMLElement>("[data-testid=play-stage] .notefield__text"); n; n = n.parentElement) {
+        out.push({ tf: getComputedStyle(n).transform, world: n.className });
+        if (n.dataset.testid === "beatstage") break; // the player frame's own letterbox scaling is not ours
+      }
+      return { out, beat: document.querySelector<HTMLElement>("[data-testid=play-stage] .beat__world")!.style.transform };
+    });
+    expect(chain.beat).toContain("scale(");                  // the camera really is zooming the world
+    for (const n of chain.out) expect(n.tf, n.world).toBe("none");
+    const still = await open(`${cid}-still`);
+    expect(withCam).toEqual(still);                          // same word boxes, same notes
   });
 });
