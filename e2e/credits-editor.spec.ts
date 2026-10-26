@@ -80,3 +80,39 @@ test("add Credits and type entries: they save parsed and the canvas rolls; a scr
   await scrub(page, 1);                                       // before the fade: nothing painted
   await expect.poll(() => fade.evaluate((e: HTMLElement) => e.style.display)).toBe("none");
 });
+
+test("a screen fade with atMs survives an inspector edit and save, and previews mid-roll", async ({ page, request }) => {
+  await request.delete(`/api/decks/${id}`).catch(() => {});
+  // The roll runs 0.1–4.1 s; the fade is anchored at 2 s, mid-roll.
+  const doc = { version: 1, meta: { id, title: "Credits editor" }, scenes: [
+    { id: "s", beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
+      { kind: "wait", ms: 100 },
+      { kind: "credits", items: [{ role: "Directed by", names: ["Ann Lee"] }], durationMs: 4000 },
+      { kind: "screen_fade", to: 1, durationMs: 1000, atMs: 2000 },
+    ] }] },
+  ] };
+  await request.post("/api/decks", { data: { id, title: "Credits editor" } });
+  expect((await request.put(`/api/decks/${id}`, { data: doc })).status()).toBe(200);
+
+  await page.goto(`/editor?deck=${id}`);
+  const timeline = page.getByTestId("timeline");
+  await expect(timeline.locator(".ed__chip")).toHaveCount(3);
+  await timeline.locator(".ed__chip").nth(2).click();
+  await expect(page.getByTestId("inspector")).toContainText("Screen fade");
+  await page.getByTestId("field-durationMs").fill("1500");
+  await expect(page.getByTestId("save-status")).toHaveText("Saved");
+  const saved = (await (await request.get(`/api/decks/${id}`)).json()) as { scenes: { beats: { timeline: unknown[] }[] }[] };
+  expect(saved.scenes[0].beats[0].timeline).toEqual([
+    doc.scenes[0].beats[0].timeline[0], doc.scenes[0].beats[0].timeline[1],
+    { kind: "screen_fade", to: 1, durationMs: 1500, atMs: 2000 },
+  ]);
+
+  // Mid-roll and 40% into the fade (2 + 0.6 s): the canvas paints level 0.4 (under its 50% cap) over the roll.
+  const canvas = page.locator(".ed__canvas");
+  const fade = canvas.locator(".deck__fade");
+  await scrub(page, 2.6);
+  await expect(canvas.locator(".cin__credits")).toContainText("Ann Lee");
+  await expect.poll(() => fade.evaluate((e: HTMLElement) => [e.style.display, e.style.opacity])).toEqual(["block", "0.4"]);
+  await scrub(page, 1.9);                                     // before atMs: nothing painted
+  await expect.poll(() => fade.evaluate((e: HTMLElement) => e.style.display)).toBe("none");
+});

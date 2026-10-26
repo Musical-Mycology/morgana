@@ -796,6 +796,75 @@ test.describe("credits", () => {
     await page.setContent(`<!doctype html><html><body style="margin:0;background:#000"></body></html>`);
     expect(last.png.equals(await page.screenshot()), "the last frame is pure black").toBe(true);
   });
+
+  test("a screen fade anchored mid-roll (atMs): stepped, jumped and backward-jumped frames are byte-equal mid-fade", async ({ page, request }) => {
+    // The roll runs 0.2–4.2 s; the fade is anchored at 2 s (1000 ms), so at 2.5 s it is half-way while the roll runs on.
+    const doc = { version: 1, meta: { id: creditsId, title: "Credits" }, scenes: [{ id: "s1", beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
+      { kind: "wait", ms: 200 },
+      { kind: "credits", items: [{ role: "Directed by", names: ["Ann Lee"] }, { role: "Music", names: ["Bo Chen", "Cy Diaz"] }, { names: ["Thanks for watching"] }], durationMs: 4000 },
+      { kind: "screen_fade", to: 1, durationMs: 1000, atMs: 2000 },
+    ] }] }] };
+    expect((await request.put(`/api/decks/${creditsId}`, { data: doc })).status()).toBe(200);
+    const d = doc as unknown as DeckDoc;
+    const TOTAL = deckLayout(d).total, MID = 2.5;
+    expect(TOTAL).toBeCloseTo(4.2, 9);                       // the anchored fade adds no beat time
+    expect(fadeAt(fadeEvents(d), MID).level).toBeCloseTo(0.5, 9);
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto(`/render?deck=${creditsId}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+    const frame = (t: number) => page.evaluate(async (t) => {
+      const r = window.__morganaRender!;
+      if (!r.ready) throw new Error("not ready");
+      await r.renderFrame(t);
+    }, t);
+    const capture = async () => {
+      const png = await page.screenshot();
+      const dom = await page.evaluate(() => {
+        const q = (s: string) => document.querySelector<HTMLElement>(`[data-render-root] ${s}`);
+        const fade = q(".deck__fade"), roll = q(".cin__credits-roll"), area = q(".cin__credits");
+        return {
+          roll: roll?.style.transform ?? null,
+          // The roll still shows: its offset puts part of the block inside the clip area.
+          rollInView: !!roll && !!area && (() => {
+            const off = Number(/translateY\((-?[\d.]+)px\)/.exec(roll.style.transform)?.[1] ?? NaN);
+            return off < area.clientHeight && off > -roll.offsetHeight;
+          })(),
+          names: area?.textContent ?? "",
+          fade: fade ? [fade.style.display, fade.style.opacity, fade.style.background] : null,
+        };
+      });
+      return { png, dom };
+    };
+
+    for (let i = 0; i <= 25; i++) await frame(i / 10);
+    const mid = await capture();
+    // Sanity: mid-fade while the roll is still on screen.
+    expect(mid.dom.fade![0]).toBe("block");
+    expect(Number(mid.dom.fade![1])).toBeGreaterThan(0);
+    expect(Number(mid.dom.fade![1])).toBeLessThan(1);
+    expect(Number(mid.dom.fade![1])).toBeCloseTo(0.5, 5);
+    expect(mid.dom.roll).toMatch(/^translateY\(-?[\d.]+px\)$/);
+    expect(mid.dom.rollInView).toBe(true);
+    expect(mid.dom.names).toContain("Ann Lee");
+
+    await frame(0);
+    await frame(MID);
+    const jumped = await capture();
+    expect(jumped.dom, "jump T=2.5").toEqual(mid.dom);
+    expect(jumped.png.equals(mid.png), "jump T=2.5").toBe(true);
+
+    await frame(TOTAL);
+    await frame(MID);
+    const back = await capture();
+    expect(back.dom, "backward jump T=2.5").toEqual(mid.dom);
+    expect(back.png.equals(mid.png), "backward jump T=2.5").toBe(true);
+
+    // Before atMs the overlay is off, though the roll is already running.
+    await frame(1.9);
+    const before = await capture();
+    expect(before.dom.fade?.[0] ?? "none").toBe("none");
+    expect(before.dom.rollInView).toBe(true);
+  });
 });
 
 test.describe("error path", () => {

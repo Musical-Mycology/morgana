@@ -227,3 +227,13 @@ describe("layers carry since + clip options", () => {
     expect(get(st, "1.02").since).toBe(1);
   });
 });
+
+test("atMs: an art change anchored mid-roll starts at its atMs", () => {
+  const d = doc([{ id: "s0", beats: [
+    { id: "a", art: { to: "1.01", mode: "cut" }, timeline: [{ kind: "wait", ms: 500 }] },
+    { id: "b", timeline: [{ kind: "credits", items: [{ names: ["A"] }], durationMs: 10000 }, { kind: "art", art: { to: "1.02", mode: "crossfade" }, atMs: 4000 }] },
+  ] }]);
+  expect(artEvents(d).map((e) => [e.start, e.to])).toEqual([[0, ["1.01"]], [4.5, ["1.02"]]]);
+  const mid = artAt(artEvents(d), 4.95); // crossfade p = 0.5
+  expect(op(mid, "1.02")).toBeCloseTo(power2InOut(0.5), 6);
+});

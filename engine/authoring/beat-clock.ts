@@ -64,13 +64,35 @@ export function isSeekable(a: Action): boolean {
 
 export interface Window { action: Action; start: number; end: number; }
 
-/** Assign sequential [start,end) seconds to each action. */
+/** The zero-time kinds that may carry `atMs` (validateDeckDoc enforces it; shared so they agree). */
+export const AT_MS_KINDS: ReadonlySet<Action["kind"]> = new Set<Action["kind"]>(["screen_fade", "camera", "art"]);
+
+/** A valid anchor in seconds for `action`, or null when it takes the sequential cursor. */
+function anchorOf(action: Action, dur: number): number | null {
+  if (dur !== 0 || !AT_MS_KINDS.has(action.kind)) return null;
+  const atMs = (action as { atMs?: unknown }).atMs;
+  return typeof atMs === "number" && Number.isFinite(atMs) && atMs >= 0 ? atMs / 1000 : null;
+}
+
+/** Assign sequential [start,end) seconds to each action. A zero-time cue with `atMs` (screen_fade,
+ *  camera, art) instead sits at atMs / 1000 and does not move the cursor. Validation keeps it within
+ *  [previous window's start, cursor]; the clamp only guards an unvalidated doc, so starts stay
+ *  non-decreasing in list order (foldAt / rebuildBoundary break at the first start > t). */
 export function beatTimeline(timeline: Action[]): Window[] {
   let cursor = 0;
+  let prevStart = 0;
   const out: Window[] = [];
   for (const action of timeline) {
     const dur = actionDuration(action);
+    const at = anchorOf(action, dur);
+    if (at !== null) {
+      const start = Math.min(Math.max(at, prevStart), cursor);
+      out.push({ action, start, end: start });
+      prevStart = start;
+      continue;
+    }
     out.push({ action, start: cursor, end: cursor + dur });
+    prevStart = cursor;
     cursor += dur;
   }
   return out;
@@ -92,7 +114,8 @@ export interface FoldEntry {
 }
 
 /** Every action reached by time `t`, with its local progress. At most one entry is
- *  "in-flight", because beatTimeline lays actions out sequentially. */
+ *  "in-flight", because beatTimeline lays timed actions out sequentially (an `atMs` cue is
+ *  zero-time, so it is settled the instant it is reached — possibly listed after the in-flight one). */
 export function foldAt(timeline: Action[], t: number): FoldEntry[] {
   const out: FoldEntry[] = [];
   const windows = beatTimeline(timeline);
