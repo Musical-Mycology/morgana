@@ -887,3 +887,83 @@ test.describe("error path", () => {
     expect(await page.evaluate(() => (window.__morganaRender as { error: string }).error)).toBe("missing deck id");
   });
 });
+
+// Positioned text wraps within the stage (plain layout); a wrapped line must render identically
+// whether the frame was reached by stepping or by jumping.
+test.describe("wrapped text", () => {
+  // Byte-equality is the render's contract: a flaky mismatch must fail, never pass on a CI retry.
+  test.describe.configure({ retries: 0 });
+  let wrapId = "";
+  test.beforeEach(async ({ request }, info) => {
+    wrapId = `e2e-render-wrap-${info.parallelIndex}`;
+    await request.delete(`/api/decks/${wrapId}`).catch(() => {});
+    await request.post("/api/decks", { data: { id: wrapId, title: "Wrap" } });
+  });
+  test.afterEach(async ({ request }) => { await request.delete(`/api/decks/${wrapId}`); });
+
+  test("a centred positioned line long enough to wrap: stepped, jumped and backward-jumped frames are byte-equal", async ({ page, request }) => {
+    test.setTimeout(120_000);
+    const LONG = "The quick brown mycelium wove its quiet way through the forest floor, carrying news of rain and rot and rebirth to every sleeping root beneath the moss";
+    expect(LONG.length).toBeGreaterThan(135);
+    const doc = { version: 1, meta: { id: wrapId, title: "Wrap" }, scenes: [{ id: "s1", beats: [{ id: "a", timeline: [
+      { kind: "text", value: LONG, in: "fade", size: "lg", align: "center", pos: { x: 0.5, y: 0.4 } },
+      { kind: "wait", ms: 1500 },
+    ] }] }] };
+    expect((await request.put(`/api/decks/${wrapId}`, { data: doc })).status()).toBe(200);
+    await page.setViewportSize({ width: 640, height: 360 });
+    await page.goto(`/render?deck=${wrapId}`);
+    await page.waitForFunction(() => window.__morganaRender?.ready === true);
+    const frame = (t: number) => page.evaluate(async (t) => {
+      const r = window.__morganaRender!;
+      if (!r.ready) throw new Error("not ready");
+      await r.renderFrame(t);
+    }, t);
+    const capture = async () => {
+      const png = await page.screenshot();
+      const dom = await page.evaluate(() => {
+        const line = document.querySelector<HTMLElement>("[data-render-root] .cin__text--pos .cin__line")!;
+        const range = document.createRange();
+        range.selectNodeContents(line);
+        const tops = new Set([...range.getClientRects()].map((r) => Math.round(r.top)));
+        const stage = document.querySelector<HTMLElement>("[data-render-root] .cin__stage")!.getBoundingClientRect();
+        const ink = range.getBoundingClientRect();
+        return { text: line.textContent, opacity: line.style.opacity, rows: tops.size, inside: ink.left >= stage.left - 0.5 && ink.right <= stage.right + 0.5,
+          box: [line.parentElement!.style.width, line.parentElement!.style.maxWidth] };
+      });
+      return { png, dom };
+    };
+
+    const MID = 0.3, SETTLED = 1.4;
+    const stepped = new Map<number, Awaited<ReturnType<typeof capture>>>();
+    for (let i = 0; i <= 15; i++) {
+      const t = i / 10;
+      await frame(t);
+      if (t === MID) stepped.set(t, await capture());
+    }
+    for (const t of [1.2, 1.3, SETTLED]) await frame(t);
+    stepped.set(SETTLED, await capture());
+    const mid = stepped.get(MID)!, settled = stepped.get(SETTLED)!;
+
+    // Sanity: it really wrapped inside the stage, and MID really is mid-fade.
+    expect(settled.dom.text).toBe(LONG);
+    expect(settled.dom.rows).toBeGreaterThanOrEqual(2);
+    expect(settled.dom.inside).toBe(true);
+    expect(settled.dom.box).toEqual(["max-content", "95%"]);
+    expect(Number(mid.dom.opacity)).toBeGreaterThan(0);
+    expect(Number(mid.dom.opacity)).toBeLessThan(1);
+    expect(mid.png.equals(settled.png)).toBe(false);
+
+    for (const [T, want] of [[MID, mid], [SETTLED, settled]] as const) {
+      await frame(0);
+      await frame(T);
+      const jumped = await capture();
+      expect(jumped.dom, `jump T=${T}`).toEqual(want.dom);
+      expect(jumped.png.equals(want.png), `jump T=${T}`).toBe(true);
+    }
+    await frame(SETTLED);
+    await frame(MID);
+    const back = await capture();
+    expect(back.dom).toEqual(mid.dom);
+    expect(back.png.equals(mid.png), "backward jump").toBe(true);
+  });
+});
