@@ -38,6 +38,17 @@ function boxAnchor(pos: StagePoint, align?: TextAlign): { left: string; right: s
   return { left: `${pos.x * 100}%`, right: "", transform: "" };
 }
 
+/**
+ * Widest a point-placed text box may grow: the room it has on the stage (as a % of stage width)
+ * times 0.95. A centred box has min(x, 1 - x) on each side of its anchor; a right box grows left
+ * from x; a left box grows right from x. Past this the line wraps instead of leaving the stage.
+ */
+export function boxMaxWidth(pos: StagePoint, align?: TextAlign): string {
+  const x = Math.min(1, Math.max(0, pos.x));
+  const room = align === "center" ? 2 * Math.min(x, 1 - x) : align === "right" ? x : 1 - x;
+  return `${Math.round(room * 0.95 * 100 * 1e4) / 1e4}%`;
+}
+
 /** Stable dedup key for an ArtTransition, for renderAt's applied-art diffing (below). Built from
  *  an EXPLICIT, fixed field order — NOT `JSON.stringify(transition)` directly, whose output
  *  depends on the object's own property insertion order. Review round 1, finding 2:
@@ -475,13 +486,15 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
    *  Anchored at pos per its align (left edge / center / right edge), like the beat box. */
   function makeLineBox(pos: StagePoint, align?: TextAlign): HTMLElement {
     const box = document.createElement("div");
-    box.className = "cin__text"; // same styling as the shared box; its own left/right/transform
+    box.className = "cin__text cin__text--pos"; // same styling as the shared box; its own left/right/transform; wraps within the stage
     if (align === "center") box.classList.add("cin__text--c"); // wide, no-wrap centered lines (title slide)
     const a = boxAnchor(pos, align);
     box.style.left = a.left;
     box.style.right = a.right;
     box.style.top = `${pos.y * 100}%`;
     box.style.transform = a.transform;
+    box.style.width = "max-content";
+    box.style.maxWidth = boxMaxWidth(pos, align);
     const parent = scope.current?.querySelector<HTMLElement>(".cin__stage") ?? scope.current;
     parent?.appendChild(box);
     lineBoxes.current.push(box);
@@ -1366,6 +1379,9 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
            question holds on one line (overrides the 40% body cap; placed after it to win on order). */
         [data-slide-id="title.a"] .cin__text { max-width: 86%; }
         [data-slide-id="title.a"] .cin__line { white-space: nowrap; }
+        /* Point-placed text (makeLineBox) wraps within the room it has on stage (inline max-width);
+           a \\n in the value still forces a break. Last, so it beats the nowrap rules above. */
+        .cin__text.cin__text--pos .cin__line { white-space: pre-line; text-wrap: balance; }
         /* paper = dark ink on cream; warm keeps the default cream ink. */
         .deck--paper .cin__text, .deck--paper .cin__line { color: var(--color-mm-mushroom); text-shadow: none; }
         .deck--paper .cin__counter { color: var(--color-mm-mushroom); text-shadow: none; }
