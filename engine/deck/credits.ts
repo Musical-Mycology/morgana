@@ -5,8 +5,8 @@ import type { CreditItem, CreditsArea } from "@/engine/deck/types";
 import type { TextScroll } from "@/engine/components/effects/note-state";
 
 export const DEFAULT_CREDITS_AREA: CreditsArea = { x: 0.2, y: 0.32, w: 0.6, h: 0.63 };
-export const CREDITS_ROLE_FS = 0.02;
-export const CREDITS_ROLE_LH = 0.036;
+export const CREDITS_ROLE_FS = 0.03;     // near name size (0.034) so titles read on a projector
+export const CREDITS_ROLE_LH = 0.046;
 export const CREDITS_NAME_FS = 0.034;
 export const CREDITS_NAME_LH = 0.05;
 export const CREDITS_GAP = 0.03;
