@@ -493,8 +493,11 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     box.style.right = a.right;
     box.style.top = `${pos.y * 100}%`;
     box.style.transform = a.transform;
-    box.style.width = "max-content";
-    box.style.maxWidth = boxMaxWidth(pos, align);
+    // The intro scene keeps its no-wrap, grow-sideways CTA lines (`.cin--intro`): no width cap there.
+    if (slots.sceneId !== "intro") {
+      box.style.width = "max-content";
+      box.style.maxWidth = boxMaxWidth(pos, align);
+    }
     const parent = scope.current?.querySelector<HTMLElement>(".cin__stage") ?? scope.current;
     parent?.appendChild(box);
     lineBoxes.current.push(box);
@@ -1382,6 +1385,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         /* Point-placed text (makeLineBox) wraps within the room it has on stage (inline max-width);
            a \\n in the value still forces a break. Last, so it beats the nowrap rules above. */
         .cin__text.cin__text--pos .cin__line { white-space: pre-line; text-wrap: balance; }
+        .cin--intro .cin__text--pos .cin__line { white-space: nowrap; text-wrap: wrap; }
         /* paper = dark ink on cream; warm keeps the default cream ink. */
         .deck--paper .cin__text, .deck--paper .cin__line { color: var(--color-mm-mushroom); text-shadow: none; }
         .deck--paper .cin__counter { color: var(--color-mm-mushroom); text-shadow: none; }

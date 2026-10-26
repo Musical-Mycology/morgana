@@ -41,6 +41,10 @@ test("a long centred pos line wraps inside the stage; a short one stays on one l
   expect(ink.r).toBeLessThanOrEqual(s.x + s.width);
   expect(sh.height).toBeGreaterThan(0);
   expect(l.height).toBeGreaterThan(1.6 * sh.height); // wrapped to >= 2 lines
+  // the short line is genuinely one line: its height is under 1.5 computed line-heights
+  const lineHeight = await short.evaluate((e) => parseFloat(getComputedStyle(e).lineHeight));
+  expect(lineHeight).toBeGreaterThan(0);
+  expect(sh.height).toBeLessThan(1.5 * lineHeight);
   expect(sh.x).toBeGreaterThanOrEqual(s.x);
   expect(sh.x + sh.width).toBeLessThanOrEqual(s.x + s.width);
 });

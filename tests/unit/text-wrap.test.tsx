@@ -7,10 +7,10 @@ import type { Action, Beat } from "@/engine/deck/types";
 afterEach(cleanup);
 const runtime = { art() {}, applyArt() {}, setNightlight() {}, onGate() {}, revealArrows() {}, pulseArrow() {}, onWaiting() {}, resolveEntry: () => [], resolveEnd: () => [], jumpTo() {} } as CinematicRuntime;
 
-function mount(timeline: Action[]) {
+function mount(timeline: Action[], sceneId = "s") {
   const transport = createRef<SlideTransport>();
   const beat: Beat = { id: "d", timeline: [...timeline, { kind: "wait", ms: 1000 }] };
-  const { container } = render(<CinematicSlide slots={{ sceneId: "s", beat }} animate runtime={runtime} transport={transport} autoplay={false} />);
+  const { container } = render(<CinematicSlide slots={{ sceneId, beat }} animate runtime={runtime} transport={transport} autoplay={false} />);
   transport.current!.seek(1.5);
   return container;
 }
@@ -57,4 +57,17 @@ test("a non-positioned line gets none of it", () => {
   const shared = c.querySelector<HTMLElement>(".cin__text")!;
   expect(shared.style.width).toBe("");
   expect(shared.style.maxWidth).toBe("");
+});
+
+test("the intro scene keeps its no-wrap lines: no inline width cap, and the intro rule follows the wrap rule", () => {
+  const c = mount([{ kind: "text", value: "A long centred intro line", in: "fade", align: "center", pos: { x: 0.27, y: 0.4 } }], "intro");
+  expect(c.querySelector(".cin--intro")).not.toBeNull();
+  const box = c.querySelector<HTMLElement>(".cin__text--pos")!;
+  expect(box.style.maxWidth).toBe("");
+  expect(box.style.width).toBe("");
+  const css = Array.from(c.querySelectorAll("style")).map((s) => s.textContent).join("");
+  const wrap = css.indexOf(".cin__text.cin__text--pos .cin__line");
+  const intro = css.indexOf(".cin--intro .cin__text--pos .cin__line { white-space: nowrap");
+  expect(wrap).toBeGreaterThan(-1);
+  expect(intro).toBeGreaterThan(wrap);
 });
