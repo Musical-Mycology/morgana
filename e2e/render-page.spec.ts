@@ -798,7 +798,7 @@ test.describe("credits", () => {
   });
 
   test("a screen fade anchored mid-roll (atMs): stepped, jumped and backward-jumped frames are byte-equal mid-fade", async ({ page, request }) => {
-    // The roll runs 0.2–4.2 s; the fade is anchored at 2 s (1000 ms), so at 2.5 s it is half-way while the roll runs on.
+    // The roll runs 0.2–4.2 s; the fade is anchored at 2 s (atMs 2000) over 1 s, so at 2.5 s it is half-way while the roll runs on.
     const doc = { version: 1, meta: { id: creditsId, title: "Credits" }, scenes: [{ id: "s1", beats: [{ id: "a", art: { to: "1.01", mode: "cut" }, timeline: [
       { kind: "wait", ms: 200 },
       { kind: "credits", items: [{ role: "Directed by", names: ["Ann Lee"] }, { role: "Music", names: ["Bo Chen", "Cy Diaz"] }, { names: ["Thanks for watching"] }], durationMs: 4000 },

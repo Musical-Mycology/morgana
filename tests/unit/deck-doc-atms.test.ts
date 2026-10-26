@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
+import { beatTimeline } from "@/engine/authoring/beat-clock";
 import { validateDeckDoc } from "@/engine/deck-doc";
+import type { Action } from "@/engine/deck/types";
 
 // text "a" (0.8 s) → [0, 0.8); a 10 s roll → [0.8, 10.8); then the cue under test at timeline[2].
 const roll = { kind: "credits", items: [{ names: ["A"] }], durationMs: 10000 };
@@ -19,6 +21,9 @@ describe("atMs validation", () => {
     ["on an art", { kind: "art", art: { to: "1.02", mode: "fade" }, atMs: 2000 }],
   ])("accepts %s", (_n, cue) => {
     expect(errors(cue)).toEqual([]);
+    // what validation accepts, beatTimeline places exactly at atMs (no clamp)
+    const tl = deckWith(cue).scenes[0].beats[0].timeline as Action[];
+    expect(beatTimeline(tl)[2].start).toBe((cue as { atMs: number }).atMs / 1000);
   });
 
   test("the first action's lower bound is 0", () => {

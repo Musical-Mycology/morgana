@@ -84,6 +84,13 @@ test("beatTimeline: an atMs cue does not move the cursor — later actions are u
   expect([...starts].sort((x, y) => x - y)).toEqual(starts);
 });
 
+test("beatTimeline clamps an out-of-range atMs (an unvalidated editor doc) so starts stay in order", () => {
+  const at = (atMs: number) => beatTimeline([ANCHORED[0], ROLL, { kind: "screen_fade", to: 1, atMs }])[2];
+  expect(at(20000).start).toBe(10.8); // past the cursor → the cursor
+  expect(at(100).start).toBe(0.8);    // before the roll starts → the roll's start
+  expect(at(20000).end).toBe(at(20000).start);
+});
+
 test("foldAt mid-roll reaches the anchored cue settled while the roll is still in flight", () => {
   const fold = foldAt(ANCHORED, 7);
   expect(fold.map((f) => [f.index, f.phase])).toEqual([[0, "settled"], [1, "in-flight"], [2, "settled"]]);

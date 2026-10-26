@@ -129,8 +129,8 @@ Notable in-repo docs:
   the cursor it would otherwise take] — window starts must stay non-decreasing in list order because
   `foldAt`/`rebuildBoundary` break at the first start > t; a cue later than the cursor is what `wait`
   is for. Every consumer (fade/camera/art events, lint, `seek.ts`, the slide fold) reads the windows, so
-  none special-cases it. Gotcha: an editor edit that shortens or removes the action before an anchored
-  cue can push `atMs` out of range, and the save is then rejected until `atMs` is fixed (no editor field yet).
+  none special-cases it. Gotcha: an editor edit that shortens, removes or reorders the action before an
+  anchored cue (or inserts a timed action between them) can push `atMs` out of range, and the save is then rejected until `atMs` is fixed (no editor field yet).
 - **Note particles are pure functions of time** (`engine/components/effects/note-state.ts`).
   `NoteField` holds no time state: both `DeckCanvas` and `BeatStage` mount it and supply a
   clock. `CinematicRuntime` no longer carries `cue`/`emitter`/`noteCircle`/`stopNotes`/
