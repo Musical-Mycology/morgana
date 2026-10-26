@@ -122,6 +122,15 @@ Notable in-repo docs:
   (`DeckCanvas`, `BeatThumbnail`, the `/spike` page) — §7b did not delete or seekify it; only
   `CinematicSlide`'s own live-playback path became seekable. Unifying or deleting `seek.ts` is
   §7c's `seek.ts`-deletion item, not done here.
+- **`atMs` anchors a zero-time cue inside the timed action before it.** `screen_fade`, `camera`
+  and `art` may carry `atMs` (beat-local ms): `beatTimeline` gives that cue `start = end = atMs/1000`
+  and does not move the sequential cursor, so e.g. a fade to black can start mid credits roll without a
+  later beat (which would remove the roll). `validateDeckDoc` keeps it within [previous window's start,
+  the cursor it would otherwise take] — window starts must stay non-decreasing in list order because
+  `foldAt`/`rebuildBoundary` break at the first start > t; a cue later than the cursor is what `wait`
+  is for. Every consumer (fade/camera/art events, lint, `seek.ts`, the slide fold) reads the windows, so
+  none special-cases it. Gotcha: an editor edit that shortens or removes the action before an anchored
+  cue can push `atMs` out of range, and the save is then rejected until `atMs` is fixed (no editor field yet).
 - **Note particles are pure functions of time** (`engine/components/effects/note-state.ts`).
   `NoteField` holds no time state: both `DeckCanvas` and `BeatStage` mount it and supply a
   clock. `CinematicRuntime` no longer carries `cue`/`emitter`/`noteCircle`/`stopNotes`/
