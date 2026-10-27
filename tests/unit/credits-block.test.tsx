@@ -274,3 +274,15 @@ describe("late fonts", () => {
     expect(roll(container)!.style.transform).toBe("translateY(50px)");
   });
 });
+
+test("role titles read near name size, at full brightness", () => {
+  const { block } = buildCreditsBlock(credits);
+  const role = block.querySelector<HTMLElement>(".cin__credits-role")!;
+  const name = block.querySelector<HTMLElement>(".cin__credits-name")!;
+  expect(role.style.fontSize).toContain("calc(0.03 *");     // 3% of stage height (names: 3.4%)
+  expect(role.style.lineHeight).toContain("calc(0.046 *");
+  expect(name.style.fontSize).toContain("calc(0.034 *");
+  expect(role.style.opacity).toBe("");                      // no dimming
+  expect(role.style.textTransform).toBe("uppercase");
+  expect(role.style.letterSpacing).toBe("0.08em");
+});

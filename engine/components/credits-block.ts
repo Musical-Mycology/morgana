@@ -20,8 +20,8 @@ function line(cls: "cin__credits-role" | "cin__credits-name", text: string, line
   const role = cls === "cin__credits-role";
   el.style.fontSize = `calc(${SH} * ${role ? CREDITS_ROLE_FS : CREDITS_NAME_FS})`;
   el.style.lineHeight = `calc(${SH} * ${role ? CREDITS_ROLE_LH : CREDITS_NAME_LH})`;
-  el.style.fontFamily = "var(--font-body)"; // spec §3: a small uppercase role line, names in the body style
-  if (role) { el.style.textTransform = "uppercase"; el.style.letterSpacing = "0.12em"; el.style.opacity = "0.8"; }
+  el.style.fontFamily = "var(--font-body)"; // spec §3: an uppercase role line near name size, names in the body style
+  if (role) { el.style.textTransform = "uppercase"; el.style.letterSpacing = "0.08em"; }   // full brightness
   el.textContent = text;
   wrapWords(el);
   lines.push(el);

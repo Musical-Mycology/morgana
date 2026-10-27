@@ -138,12 +138,15 @@ export type Action =
   | { kind: "text"; value: string; in: TextIn; size?: TextSize; align?: TextAlign; speed?: number; dots?: true; pos?: StagePoint; append?: true; tone?: SlideTheme; screenOnly?: true; reveal?: true; particles?: TextParticles }
   | { kind: "rotateList"; items: string[]; size?: TextSize }
   | { kind: "clear" }
-  | { kind: "art"; art: ArtTransition }
+  // atMs (art, camera, screen_fade): fire at this beat-local time (ms) instead of after the action
+  // before it — e.g. during a credits roll. Must lie between the previous action's start and where the
+  // cue would otherwise fall (validateDeckDoc); it does not move the actions after it.
+  | { kind: "art"; art: ArtTransition; atMs?: number }
   | { kind: "nightlight"; to: number; durationMs?: number }
   // Pan/zoom the world layers (art, tiles, notes, objects; text stays fixed). Omitted fields keep
   // their current value. durationMs defaults to 1200 (0 = cut); a framing holds until the next
   // camera action. Occupies no beat-timeline time.
-  | { kind: "camera"; to: { x?: number; y?: number; zoom?: number }; durationMs?: number; ease?: CameraEase }
+  | { kind: "camera"; to: { x?: number; y?: number; zoom?: number }; durationMs?: number; ease?: CameraEase; atMs?: number }
   | { kind: "cue"; cue: EffectCue }
   // Placeable directional note emitter. dir = compass degrees (0=up, 90=right, clockwise);
   // var = ± degrees of randomness (0=laser, 180=full circle); decay = note lifetime ms;
@@ -200,7 +203,7 @@ export type Action =
   | { kind: "credits"; items: CreditItem[]; area?: CreditsArea; durationMs: number; particles?: TextParticles }
   // Fade the whole frame to `to` (0–1) in `color` (default #000) over durationMs (default 1000;
   // 0 = cut). Occupies no beat time; the level holds across beats and scenes until the next fade.
-  | { kind: "screen_fade"; to: number; color?: string; durationMs?: number }
+  | { kind: "screen_fade"; to: number; color?: string; durationMs?: number; atMs?: number }
   | { kind: "reveal_again" };
 
 /** One row in a data panel (e.g. a ledger line or a metric). */

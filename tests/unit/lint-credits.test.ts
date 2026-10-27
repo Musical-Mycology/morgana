@@ -9,9 +9,9 @@ const rule = (d: DeckDoc, r: string) => lintDeck(d).filter((i) => i.rule === r);
 const credits = (durationMs: number): Action => ({ kind: "credits", items: [{ role: "A", names: ["B"] }], durationMs });
 
 test("credits-fast: (estimated blockH + areaH) at 1080p over the duration above 90 px/s", () => {
-  // (0.036 + 0.05 + 0.63) × 1080 = 773.28 px; over 4 s = 193 px/s → at least 8600 ms.
+  // (0.046 + 0.05 + 0.63) × 1080 = 784.08 px; over 4 s = 196 px/s → at least 8800 ms.
   expect(rule(deck([credits(4000)]), "credits-fast")).toMatchObject([{ severity: "warning", at: { sceneIdx: 0, beatIdx: 0, actionIdx: 0 },
-    message: "credits roll at 193 px/s at 1080p — hard to read; use durationMs ≥ 8600" }]);
+    message: "credits roll at 196 px/s at 1080p — hard to read; use durationMs ≥ 8800" }]);
   expect(rule(deck([credits(9000)]), "credits-fast")).toEqual([]);
 });
 

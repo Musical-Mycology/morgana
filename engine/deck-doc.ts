@@ -1,4 +1,5 @@
-import type { Scene, SceneObject, SlideTreatment } from "@/engine/deck/types";
+import type { Action, Scene, SceneObject, SlideTreatment } from "@/engine/deck/types";
+import { AT_MS_KINDS, actionDuration } from "@/engine/authoring/beat-clock";
 import { MEDIA_ID_PATTERN } from "@/engine/deck/media-ref";
 import { isHexColor } from "@/engine/deck/story-assets";
 
@@ -183,6 +184,40 @@ function validateCreditsAndFades(scene: Scene, si: number, e: string[]): void {
   });
 }
 
+/** actionDuration for an unvalidated action: a malformed one (e.g. text with no value) counts as NaN. */
+function safeDuration(a: unknown): number {
+  try { return actionDuration(a as Action); } catch { return NaN; }
+}
+const msText = (s: number) => String(Math.round(s * 1e6) / 1e3);
+const AT_MS_EPS = 1e-9; // seconds: absorbs float error in the summed cursor
+
+/** Validate `atMs` (a zero-time cue anchored during the timed action before it). Mirrors beatTimeline:
+ *  the anchor must lie in [previous window's start, the cursor the cue would otherwise take] so window
+ *  starts stay non-decreasing in list order. */
+function validateAtMs(scene: Scene, si: number, e: string[]): void {
+  scene?.beats?.forEach((b, bi) => {
+    if (!Array.isArray(b?.timeline)) return;
+    let cursor = 0;
+    let prevStart = 0;
+    b.timeline.forEach((a: Record<string, unknown>, ai) => {
+      const at = `scenes[${si}].beats[${bi}].timeline[${ai}]`;
+      const dur = safeDuration(a);
+      if (a?.atMs === undefined) { prevStart = cursor; cursor += dur; return; }
+      const kind = String(a.kind);
+      if (!AT_MS_KINDS.has(a.kind as Action["kind"])) {
+        e.push(`${at}.atMs: ${kind} cannot take atMs (only screen_fade, camera and art)`);
+        prevStart = cursor; cursor += dur; return;
+      }
+      if (!finite(a.atMs) || a.atMs < 0) { e.push(`${at}.atMs: ${kind} atMs must be a finite number ≥ 0`); prevStart = cursor; return; }
+      const t = a.atMs / 1000;
+      if (Number.isFinite(cursor) && (t < prevStart - AT_MS_EPS || t > cursor + AT_MS_EPS)) {
+        e.push(`${at}.atMs: ${kind} atMs must be ${msText(prevStart)}–${msText(cursor)} ms`);
+      }
+      prevStart = Math.min(Math.max(t, prevStart), cursor); // beatTimeline's start for this cue
+    });
+  });
+}
+
 export function validateDeckDoc(obj: unknown): { ok: boolean; errors: string[] } {
   const e: string[] = [];
   const d = obj as Partial<DeckDoc>;
@@ -224,6 +259,7 @@ export function validateDeckDoc(obj: unknown): { ok: boolean; errors: string[] }
     validateSceneActionTargets(s, i, e);
     validateCameraActions(s, i, e);
     validateCreditsAndFades(s, i, e);
+    validateAtMs(s, i, e);
   });
   return { ok: e.length === 0, errors: e };
 }

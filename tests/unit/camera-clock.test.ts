@@ -209,3 +209,12 @@ describe("hasNoteSources", () => {
     expect(hasNoteSources(deck([]))).toBe(false);
   });
 });
+
+test("atMs: a camera move anchored mid-roll starts at its atMs", () => {
+  const roll: Action = { kind: "credits", items: [{ names: ["A"] }], durationMs: 10000 };
+  const d = deck([{ id: "s", beats: [{ id: "a", timeline: [
+    { kind: "wait", ms: 1000 }, roll, { kind: "camera", to: { zoom: 2 }, durationMs: 1000, ease: "linear", atMs: 3000 },
+  ] }] }]);
+  expect(cameraEvents(d)).toEqual([ev(3, 1, { zoom: 2 })]);
+  expect(cameraAt(cameraEvents(d), 3.5).zoom).toBeCloseTo(Math.SQRT2, 9); // log-linear: halfway to 2×
+});

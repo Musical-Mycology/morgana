@@ -72,3 +72,13 @@ test("fadeEvents: an invalid colour falls back to #000; any valid hex (3/4/6/8 d
   for (const c of ["#fff", "#ffff", "#a1b2c3", "#A1B2C3D4"]) expect(colours(c)).toBe(c);
   for (const c of ["red", "#ff", "#fffff", "#ggg", "rgb(255,0,0)", " #fff"]) expect(colours(c)).toBe(FADE_DEFAULT_COLOR);
 });
+
+test("atMs: a fade anchored mid-roll starts at its atMs and is mid-fade while the roll runs", () => {
+  const roll: Action = { kind: "credits", items: [{ names: ["A"] }], durationMs: 10000 };
+  const d = deck([{ id: "s0", beats: [
+    { id: "a", timeline: [wait(1000)] },
+    { id: "b", timeline: [wait(1000), roll, { kind: "screen_fade", to: 1, durationMs: 2000, atMs: 6000 }] },
+  ] }]);
+  expect(noAt(fadeEvents(d))).toEqual([ev(7, 2, 1)]);   // beat b starts at 1 s
+  expect(fadeAt(fadeEvents(d), 8).level).toBeCloseTo(0.5, 9); // the roll runs 2–12 s
+});

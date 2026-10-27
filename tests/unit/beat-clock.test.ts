@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { actionDuration, isSeekable, beatTimeline, foldAt, rebuildBoundary } from "@/engine/authoring/beat-clock";
+import { actionDuration, isSeekable, beatTimeline, beatDuration, foldAt, rebuildBoundary } from "@/engine/authoring/beat-clock";
 import type { Action } from "@/engine/deck/types";
 
 test("actionDuration mirrors the engine's reservations", () => {
@@ -56,4 +56,44 @@ test("foldAt treats a zero-duration action as settled the instant it is reached"
 test("rebuildBoundary finds the last destructive action at or before t", () => {
   expect(rebuildBoundary(TL, 0.5)).toBe(-1);  // nothing destructive yet
   expect(rebuildBoundary(TL, 1.4)).toBe(2);   // the clear at 1.0
+});
+
+// atMs: a zero-time cue anchored at a beat-local time during the timed action before it.
+const ROLL: Action = { kind: "credits", items: [{ names: ["A"] }], durationMs: 10000 };
+const ANCHORED: Action[] = [
+  { kind: "text", value: "a", in: "fade" },          // dur 0.8 → [0, 0.8)
+  ROLL,                                              // dur 10  → [0.8, 10.8)
+  { kind: "screen_fade", to: 1, atMs: 6000 },        // anchored → [6, 6]
+];
+
+test("beatTimeline: an atMs cue starts at atMs, and the beat still ends with the roll", () => {
+  const win = beatTimeline(ANCHORED);
+  expect(win.map((w) => [w.start, w.end])).toEqual([[0, 0.8], [0.8, 10.8], [6, 6]]);
+  expect(beatDuration(ANCHORED)).toBeCloseTo(10.8, 9);
+});
+
+test("beatTimeline: an atMs cue does not move the cursor — later actions are unaffected", () => {
+  const tail: Action = { kind: "text", value: "b", in: "fade" };
+  const plain = beatTimeline([ANCHORED[0], ROLL, { kind: "screen_fade", to: 1 }, tail]);
+  const win = beatTimeline([...ANCHORED, tail]);
+  expect(win[3].start).toBe(plain[3].start);
+  expect(win[3].end).toBe(plain[3].end);
+  expect(beatDuration([...ANCHORED, tail])).toBe(beatDuration([ANCHORED[0], ROLL, tail]));
+  // Every other kind ignores atMs, and windows stay in timeline order (starts non-decreasing).
+  const starts = win.map((w) => w.start);
+  expect([...starts].sort((x, y) => x - y)).toEqual(starts);
+});
+
+test("beatTimeline clamps an out-of-range atMs (an unvalidated editor doc) so starts stay in order", () => {
+  const at = (atMs: number) => beatTimeline([ANCHORED[0], ROLL, { kind: "screen_fade", to: 1, atMs }])[2];
+  expect(at(20000).start).toBe(10.8); // past the cursor → the cursor
+  expect(at(100).start).toBe(0.8);    // before the roll starts → the roll's start
+  expect(at(20000).end).toBe(at(20000).start);
+});
+
+test("foldAt mid-roll reaches the anchored cue settled while the roll is still in flight", () => {
+  const fold = foldAt(ANCHORED, 7);
+  expect(fold.map((f) => [f.index, f.phase])).toEqual([[0, "settled"], [1, "in-flight"], [2, "settled"]]);
+  expect(fold.filter((f) => f.phase === "in-flight")).toHaveLength(1);
+  expect(foldAt(ANCHORED, 5.9).map((f) => f.index)).toEqual([0, 1]); // not reached before atMs
 });
