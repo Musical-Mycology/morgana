@@ -36,12 +36,15 @@ const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
  *  same tile starts from wherever the first one ended — matching playback. Do not "optimise"
  *  this to read the original `pos`.
  *
- *  `media_out` with no `id` clears every tile (matches the old `outMedia`'s semantics), not
- *  just one. */
+ *  `media_out` with no `id` clears every tile still on stage (matches the old `outMedia`'s
+ *  semantics), not just one. A tile whose own media_out already settled is not on stage, so
+ *  it stays at 0 rather than coming back at the id-less fade's opacity. */
 export function mediaStateAt(entries: MediaFold[], _t: number): Map<string, MediaRenderState> {
   const out = new Map<string, MediaRenderState>();
+  const settledOut = new Set<string>();
   for (const { action: a, p, start } of entries) {
     if (a.kind === "media") {
+      settledOut.delete(a.id);
       const ease = ENTRANCE[a.in ?? "fade"] ?? powerOut2;
       out.set(a.id, { x: a.pos.x, y: a.pos.y, scale: 1, opacity: ease(p), since: start, clip: a.clip });
     } else if (a.kind === "media_move") {
@@ -59,10 +62,11 @@ export function mediaStateAt(entries: MediaFold[], _t: number): Map<string, Medi
       // `ease`, so GSAP applies its default, "power1.out" (quadratic out), NOT a linear ramp.
       // A raw `1 - p` here would make a scrubbed fade-out disagree with actual playback —
       // exactly the drift this task exists to remove.
-      const ids = a.id ? [a.id] : [...out.keys()];
+      const ids = a.id ? [a.id] : [...out.keys()].filter((id) => !settledOut.has(id));
       for (const id of ids) {
         const cur = out.get(id);
         if (cur) out.set(id, { ...cur, opacity: 1 - powerOut1(p) });
+        if (p >= 1) settledOut.add(id);
       }
     }
   }

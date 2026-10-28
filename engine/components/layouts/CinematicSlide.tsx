@@ -692,12 +692,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
     if (!state.size) return;
     // The latest reached `media` (show) action per tile id — the one mediaStateAt's state reflects.
     const showActions = new Map<string, Extract<Action, { kind: "media" }>>();
-    // Tiles whose latest reached media_out (by id, or id-less = every tile shown so far) has settled.
+    // Tiles whose latest reached media_out (by id, or id-less = every tile still on stage) has settled.
+    // An id-less media_out skips tiles already settled out: while it is in flight it must not
+    // un-settle them, or tiles faded out earlier come back on stage for the length of its fade.
     const settledOut = new Set<string>();
     for (const { action, p } of fold) {
       if (action.kind === "media") { showActions.set(action.id, action); settledOut.delete(action.id); }
       else if (action.kind === "media_out") {
-        for (const id of action.id ? [action.id] : [...showActions.keys()]) {
+        for (const id of action.id ? [action.id] : [...showActions.keys()].filter((k) => !settledOut.has(k))) {
           if (p >= 1) settledOut.add(id); else settledOut.delete(id);
         }
       }

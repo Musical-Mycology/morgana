@@ -226,6 +226,28 @@ describe("review round 1 — tile clip fixes", () => {
     expect(vi.mocked(syncVideo).mock.calls.map((c) => c[0])).not.toContain(v);
   });
 
+  it("an id-less media_out in flight does not bring back a tile already faded out by id", () => {
+    const other = { ...tile, id: "u", src: "media:dddddddddddddddd.mp4" } as const;
+    // t [0, 0.6) shown; out t (0 ms) at 1.6; u shown [1.6, 2.2); id-less out [3.2, 4.2)
+    const b: Beat = { id: "outLater", timeline: [
+      tile, { kind: "wait", ms: 1000 }, { kind: "media_out", id: "t", durationMs: 0 },
+      other, { kind: "wait", ms: 1000 }, { kind: "media_out", durationMs: 1000 }, { kind: "wait", ms: 1000 },
+    ] };
+    const srcs = (c: HTMLElement) => [...c.querySelectorAll<HTMLVideoElement>(".cin__media video")].map((v) => v.getAttribute("src"));
+    // stepped: through t's out and u's show, then into the id-less fade
+    const stepped = setup(b);
+    act(() => { stepped.transport.current!.seek(1); });
+    act(() => { stepped.transport.current!.seek(2.5); });
+    expect(srcs(stepped.container)).toEqual([mediaUrl("d1", "dddddddddddddddd.mp4")]);
+    act(() => { stepped.transport.current!.seek(3.7); });
+    expect(srcs(stepped.container)).toEqual([mediaUrl("d1", "dddddddddddddddd.mp4")]);
+    stepped.unmount();
+    // jumped: straight into the id-less fade
+    const jumped = setup(b);
+    act(() => { jumped.transport.current!.seek(3.7); });
+    expect(srcs(jumped.container)).toEqual([mediaUrl("d1", "dddddddddddddddd.mp4")]);
+  });
+
   it("static mode (animate=false, autoplay) paints tiles in seek mode: exact frame, never played", () => {
     const transport = createRef<SlideTransport>();
     const { container } = render(
