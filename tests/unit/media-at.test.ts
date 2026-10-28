@@ -49,6 +49,21 @@ test("media_out's fade follows power1.out (quadratic), not a linear ramp", () =>
   expect(s.opacity).not.toBeCloseTo(0.5, 1); // rules out the old linear (1 - p) shape
 });
 
+// An id-less media_out fades the tiles still on stage. A tile whose own media_out already settled stays out: the fade
+// must not bring it back at the fade's opacity (seen as removed clips flashing back during a deck's final fade).
+test("an id-less media_out leaves tiles already faded out at zero", () => {
+  const a: Extract<Action, { kind: "media" }> = { kind: "media", id: "a", pos: { x: 0.5, y: 0.5 } };
+  const b: Extract<Action, { kind: "media" }> = { kind: "media", id: "b", pos: { x: 0.5, y: 0.5 } };
+  const outA: Extract<Action, { kind: "media_out" }> = { kind: "media_out", id: "a", durationMs: 0 };
+  const outAll: Extract<Action, { kind: "media_out" }> = { kind: "media_out" };
+  const s = mediaStateAt([
+    { action: a, p: 1, start: 0 }, { action: outA, p: 1, start: 1 },
+    { action: b, p: 1, start: 1 }, { action: outAll, p: 0.5, start: 2 },
+  ], 2.25);
+  expect(s.get("a")!.opacity).toBe(0);
+  expect(s.get("b")!.opacity).toBeCloseTo(0.25, 4);
+});
+
 // --- media_move chaining (ambiguity resolution #2) -----------------------------------------
 //
 // A second media_move on the same tile must start from where the FIRST one ended, not from
