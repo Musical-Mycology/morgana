@@ -284,5 +284,7 @@ test("role titles read near name size, at full brightness", () => {
   expect(name.style.fontSize).toContain("* 0.034 * var(--cin-text-scale, 1))");
   expect(role.style.opacity).toBe("");                      // no dimming
   expect(role.style.textTransform).toBe("uppercase");
+  expect(role.style.fontWeight).toBe("700");                // bold titles
+  expect(name.style.fontWeight).toBe("");
   expect(role.style.letterSpacing).toBe("0.08em");
 });

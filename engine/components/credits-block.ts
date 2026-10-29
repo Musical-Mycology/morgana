@@ -25,7 +25,8 @@ function line(cls: "cin__credits-role" | "cin__credits-name", text: string, line
   el.style.fontSize = sh(role ? CREDITS_ROLE_FS : CREDITS_NAME_FS);
   el.style.lineHeight = sh(role ? CREDITS_ROLE_LH : CREDITS_NAME_LH);
   el.style.fontFamily = "var(--font-body)"; // spec §3: an uppercase role line near name size, names in the body style
-  if (role) { el.style.textTransform = "uppercase"; el.style.letterSpacing = "0.08em"; }   // full brightness
+  // Full brightness, and bold so the titles stand apart from the names without changing the roll's height.
+  if (role) { el.style.textTransform = "uppercase"; el.style.letterSpacing = "0.08em"; el.style.fontWeight = "700"; }
   el.textContent = text;
   wrapWords(el);
   lines.push(el);
