@@ -10,7 +10,7 @@ import { clipTimeAt } from "@/engine/deck/clip-clock";
 import { createClipVideo, MIN_VIDEO_OPACITY, releaseVideo, syncVideo, type ClipMode } from "@/engine/components/video-sync";
 import { renderPanelHTML } from "@/engine/deck/panel";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
-import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS } from "@/engine/deck/cinematic-style";
+import { TEXT_SIZES, CURSIVE_SIZE, DEFAULT_TEXT_POS, scaledSize } from "@/engine/deck/cinematic-style";
 import { parseInlineLinks, hasInlineMarkup } from "@/engine/deck/inline-links";
 import { formatCounterValue, counterValueAt } from "@/engine/deck/counter";
 import { mediaStateAt, type MediaFold, type MediaRenderState } from "@/engine/deck/media-state";
@@ -753,8 +753,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       effIn === "blurIn" ? blurIn(el, a.speed) :
       effIn === "typewriter" ? typewriter(el, a.speed) : fadeIn(el, a.speed);
     if (a.dots) { const d = el.querySelector<HTMLElement>(".dots"); if (d) tl.add(dotFade(d)); }
-    // The flash spans exactly the clock's intro, so it is over before the action's slot ends.
-    if (a.flash) tl.add(flashGlow(el, introDuration(a)), 0);
+    // The flash spans exactly the clock's intro, so it settles (to flashHold) before the action's slot ends.
+    if (a.flash) tl.add(flashGlow(el, introDuration(a), a.flashHold ?? 0), 0);
     return tl;
   }
 
@@ -1365,14 +1365,14 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         /* white-space: pre-line → lines stay long by default; break only on a \\n in the text value. */
         .cin__line { font-family: var(--font-display); line-height: 1.15; margin: 0.25em 0; white-space: pre-line; }
         .cin__line strong { font-weight: 700; } /* **bold** inline markup */
-        ${Object.entries(TEXT_SIZES).map(([k, v]) => `.cin__line--${k} { font-size: ${v}; }`).join("\n        ")}
+        ${Object.entries(TEXT_SIZES).map(([k, v]) => `.cin__line--${k} { font-size: ${scaledSize(v)}; }`).join("\n        ")}
         .cin__line--sm { opacity: 0.85; }
         /* Investor treatments: larger, tighter type with a distinct TITLE scale (~2×, ≥1.8× body)
            and a rule beneath the title. Body uses the body font. Scoped to warm/paper so /story
            keeps its own scale; text-in transitions are suppressed by instantText (Slide.tsx). */
-        .deck--warm .cin__line--lg, .deck--paper .cin__line--lg { font-size: clamp(2rem, 5.6cqmin, 3.4rem); line-height: 1.1; }
-        .deck--warm .cin__line--md, .deck--paper .cin__line--md { font-size: clamp(1.1rem, 3cqmin, 1.6rem); line-height: 1.3; }
-        .deck--warm .cin__line--sm, .deck--paper .cin__line--sm { font-size: clamp(1rem, 2.7cqmin, 1.45rem); font-family: var(--font-body); line-height: 1.35; opacity: 1; }
+        .deck--warm .cin__line--lg, .deck--paper .cin__line--lg { font-size: ${scaledSize("clamp(2rem, 5.6cqmin, 3.4rem)")}; line-height: 1.1; }
+        .deck--warm .cin__line--md, .deck--paper .cin__line--md { font-size: ${scaledSize("clamp(1.1rem, 3cqmin, 1.6rem)")}; line-height: 1.3; }
+        .deck--warm .cin__line--sm, .deck--paper .cin__line--sm { font-size: ${scaledSize("clamp(1rem, 2.7cqmin, 1.45rem)")}; font-family: var(--font-body); line-height: 1.35; opacity: 1; }
         .deck--warm .cin__line, .deck--paper .cin__line { margin: 0.08em 0; line-height: 1.2; }
         /* Rule under the slide title (the only <p> lg line on an investor slide; not the counter). */
         .deck--warm p.cin__line--lg { border-bottom: 2px solid var(--color-mm-gold); padding-bottom: 0.2em; margin-bottom: 0.5em; }
@@ -1399,7 +1399,7 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
         /* tone:"dark" — brand dark ink + a soft light halo so a line stays legible on a
            LIGHT art panel (e.g. the closing musicians). Mirrors the intro's day treatment. */
         .cin__line--dark { color: var(--color-mm-dark-brown); text-shadow: 0 1px 12px rgba(255,247,235,0.6); }
-        .cin__line--cursive { font-family: var(--font-cursive); font-size: ${CURSIVE_SIZE}; font-weight: 700; }
+        .cin__line--cursive { font-family: var(--font-cursive); font-size: ${scaledSize(CURSIVE_SIZE)}; font-weight: 700; }
         /* "draw" lines (sub-project 6): the ghost reserves layout; the SVG over it is traced. */
         .cin__line--draw { position: relative; }
         .cin__draw-wrap { position: relative; display: inline-block; white-space: pre; }

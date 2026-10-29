@@ -9,6 +9,7 @@ import { cameraAt, cameraEvents, cameraTransform } from "@/engine/authoring/came
 import { fadeAt, fadeEvents } from "@/engine/authoring/fade-clock";
 import { paintFadeOverlay } from "@/engine/components/fade-overlay";
 import type { Action } from "@/engine/deck/types";
+import { textScaleStyle } from "@/engine/deck-doc";
 import { useEditor } from "@/lib/editor/store";
 import { descriptorFor } from "@/lib/editor/registry";
 import { getPath } from "@/lib/editor/paths";
@@ -98,7 +99,7 @@ export const DeckCanvas = forwardRef<CanvasHandle, { flat: FlatBeat | null; onTi
       // height x 16/9 (the editor's .ed__canvas is a size container; with none, cqh is the viewport
       // height), and the height follows from aspect-ratio. (A 100% width with a max-height cap went
       // wider than 16:9 in a short pane, so picks landed off.)
-      <div ref={host} className="ed__canvas-host" style={{ position: "relative", flex: "none", width: "min(100%, 100cqh * 16 / 9)", aspectRatio: "16 / 9", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)" }}>
+      <div ref={host} className="ed__canvas-host" style={{ position: "relative", flex: "none", width: "min(100%, 100cqh * 16 / 9)", aspectRatio: "16 / 9", margin: "auto", containerType: "size", overflow: "hidden", background: "var(--color-mm-dark-brown)", boxShadow: "0 4px 24px rgba(0,0,0,0.4)", ...textScaleStyle(doc?.meta) }}>
         {/* clipPlayback off: the editor paints through seek.ts (no deck clock), so a clip shows its
             in-point frame, paused (spec §4 "Editor canvas", §6). */}
         <ArtStage ref={art} nightlight={night} reduced={false} transparentBg clipPlayback={false} />

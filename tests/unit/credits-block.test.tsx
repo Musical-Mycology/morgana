@@ -279,9 +279,9 @@ test("role titles read near name size, at full brightness", () => {
   const { block } = buildCreditsBlock(credits);
   const role = block.querySelector<HTMLElement>(".cin__credits-role")!;
   const name = block.querySelector<HTMLElement>(".cin__credits-name")!;
-  expect(role.style.fontSize).toContain("calc(0.03 *");     // 3% of stage height (names: 3.4%)
-  expect(role.style.lineHeight).toContain("calc(0.046 *");
-  expect(name.style.fontSize).toContain("calc(0.034 *");
+  expect(role.style.fontSize).toContain("* 0.03 * var(--cin-text-scale, 1))");    // 3% of stage height (names: 3.4%), times the deck text scale
+  expect(role.style.lineHeight).toContain("* 0.046 * var(--cin-text-scale, 1))");
+  expect(name.style.fontSize).toContain("* 0.034 * var(--cin-text-scale, 1))");
   expect(role.style.opacity).toBe("");                      // no dimming
   expect(role.style.textTransform).toBe("uppercase");
   expect(role.style.letterSpacing).toBe("0.08em");

@@ -47,6 +47,7 @@ export const REGISTRY: Record<string, EffectDescriptor> = {
     { key: "pos.x", label: "Pos X", type: "number", min: 0, max: 1, step: 0.01 },
     { key: "pos.y", label: "Pos Y", type: "number", min: 0, max: 1, step: 0.01 },
     { key: "flash", label: "Glow flash", type: "checkbox" },
+    { key: "flashHold", label: "Glow kept", type: "range", min: 0, max: 1, step: 0.05, showIf: "flash" },
     ...PARTICLE_FIELDS,
   ], defaults: () => ({ kind: "text", value: "New line", in: "fade" }) },
   wait: { kind: "wait", label: "Wait", icon: "ti-clock", seekable: true, schema: [{ key: "ms", label: "Milliseconds", type: "number", min: 0, step: 50 }],

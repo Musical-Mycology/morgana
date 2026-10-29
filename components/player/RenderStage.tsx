@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { flushSync } from "react-dom";
-import type { DeckDoc } from "@/engine/deck-doc";
+import { textScaleStyle, type DeckDoc } from "@/engine/deck-doc";
 import { NOTE_GLYPHS } from "@/engine/deck/story-assets";
 import { useAssetResolver } from "@/engine/asset-resolver-react";
 import { pendingVideoSeeks } from "@/engine/components/video-sync";
@@ -100,7 +100,7 @@ export function RenderStage({ doc }: { doc: DeckDoc }) {
     });
     return () => { live = false; delete window.__morganaRender; };
   }, [apply, layout.total, assets, needsFullRaster]);
-  return <div ref={root} data-render-root style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#000", containerType: "size" }}>
+  return <div ref={root} data-render-root style={{ position: "fixed", inset: 0, overflow: "hidden", background: "#000", containerType: "size", ...textScaleStyle(doc.meta) }}>
     {/* A note deck's sprites (and art layers) drop their will-change hints here, /render only, so
         each full raster re-rasters them too (a hinted layer keeps its own raster across the clip).
         Camera decks already drop them in DeckStage; /play and the editor keep them. Both halves are

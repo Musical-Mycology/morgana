@@ -1,16 +1,20 @@
 /** DOM for one credits roll (sub-project 6), shared by CinematicSlide (/play, /render) and seek.ts
  *  (the editor canvas). Inline styles only: the editor canvas never mounts CinematicSlide's <style>.
- *  Sizes are fractions of the 16:9 stage height (engine/deck/credits.ts), so lint's estimate holds. */
+ *  Sizes are fractions of the 16:9 stage height (engine/deck/credits.ts), so lint's estimate holds, times the
+ *  deck's text scale (TEXT_SCALE_VAR, set on the stage container; lint multiplies by meta.textScale). */
 import type { Action } from "@/engine/deck/types";
 import {
   CREDITS_GAP, CREDITS_NAME_FS, CREDITS_NAME_LH, CREDITS_ROLE_FS, CREDITS_ROLE_LH, DEFAULT_CREDITS_AREA,
 } from "@/engine/deck/credits";
 import { wrapWords } from "./text-sources";
+import { TEXT_SCALE_VAR } from "@/engine/deck/cinematic-style";
 
 export interface CreditsBlock { block: HTMLElement; roll: HTMLElement; lines: HTMLElement[] }
 
 /** The 16:9 stage height in the nearest size container (BeatStage's root; the editor canvas host). */
 const SH = "min(100cqh, calc(100cqw * 9 / 16))";
+/** A stage-height fraction scaled by the deck's text scale. */
+const sh = (f: number) => `calc(${SH} * ${f} * var(${TEXT_SCALE_VAR}, 1))`;
 const MASK = "linear-gradient(transparent, #000 8%, #000 92%, transparent)";
 const pct = (n: number) => `${n * 100}%`;
 
@@ -18,8 +22,8 @@ function line(cls: "cin__credits-role" | "cin__credits-name", text: string, line
   const el = document.createElement("div");
   el.className = cls;
   const role = cls === "cin__credits-role";
-  el.style.fontSize = `calc(${SH} * ${role ? CREDITS_ROLE_FS : CREDITS_NAME_FS})`;
-  el.style.lineHeight = `calc(${SH} * ${role ? CREDITS_ROLE_LH : CREDITS_NAME_LH})`;
+  el.style.fontSize = sh(role ? CREDITS_ROLE_FS : CREDITS_NAME_FS);
+  el.style.lineHeight = sh(role ? CREDITS_ROLE_LH : CREDITS_NAME_LH);
   el.style.fontFamily = "var(--font-body)"; // spec §3: an uppercase role line near name size, names in the body style
   if (role) { el.style.textTransform = "uppercase"; el.style.letterSpacing = "0.08em"; }   // full brightness
   el.textContent = text;
@@ -48,7 +52,7 @@ export function buildCreditsBlock(a: Extract<Action, { kind: "credits" }>): Cred
   a.items.forEach((it, k) => {
     const item = document.createElement("div");
     item.className = "cin__credits-item";
-    if (k > 0) item.style.marginTop = `calc(${SH} * ${CREDITS_GAP})`;
+    if (k > 0) item.style.marginTop = sh(CREDITS_GAP);
     if (it.role) item.appendChild(line("cin__credits-role", it.role, lines));
     for (const n of it.names) item.appendChild(line("cin__credits-name", n, lines));
     roll.appendChild(item);

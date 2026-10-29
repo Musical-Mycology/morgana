@@ -30,21 +30,24 @@ export function cursiveIn(el: HTMLElement, speed = 1): gsap.core.Timeline {
 }
 
 /** The text `flash` glow's strength (0–1) at `p`, the fraction of the intro played: it swells to full by
- *  FLASH_PEAK and is gone by the end, smoothstepped both ways. 0 outside [0, 1]. */
+ *  FLASH_PEAK and eases back down to `hold` by the end, smoothstepped both ways; it stays at `hold` once
+ *  the intro is over (p ≥ 1). 0 before it starts. */
 const FLASH_PEAK = 0.6;                     // late in the intro, when the line is near full opacity (a drop-shadow follows it)
-export function flashGlowAt(p: number): number {
-  if (!(p > 0 && p < 1)) return 0;
-  const u = p < FLASH_PEAK ? p / FLASH_PEAK : (1 - p) / (1 - FLASH_PEAK);
-  return u * u * (3 - 2 * u);
+export function flashGlowAt(p: number, hold = 0): number {
+  if (!(p > 0)) return 0;
+  if (p >= 1) return hold;
+  const smooth = (u: number) => u * u * (3 - 2 * u);
+  return p < FLASH_PEAK ? smooth(p / FLASH_PEAK) : hold + (1 - hold) * smooth((1 - p) / (1 - FLASH_PEAK));
 }
 
 /** A warm glow (three stacked drop-shadows, sized in em so it scales with the text) that flashes on `el`
- *  over `duration` seconds, painted from flashGlowAt through a proxy clock like drawIn, so a seek lands
- *  on the same glow as playback. No filter is left at either end. */
-export function flashGlow(el: HTMLElement, duration: number): gsap.core.Timeline {
+ *  over `duration` seconds and settles at `hold` of its peak, painted from flashGlowAt through a proxy
+ *  clock like drawIn, so a seek lands on the same glow as playback. No filter before it starts, nor
+ *  after it unless it holds. */
+export function flashGlow(el: HTMLElement, duration: number, hold = 0): gsap.core.Timeline {
   const clock = { p: 0 };
   const paint = () => {
-    const g = flashGlowAt(clock.p);
+    const g = flashGlowAt(clock.p, hold);
     el.style.filter = g > 0
       ? `drop-shadow(0 0 ${r4(0.15 * g)}em rgba(255, 224, 150, ${r4(g)})) drop-shadow(0 0 ${r4(0.5 * g)}em rgba(255, 200, 96, ${r4(0.95 * g)})) `
         + `drop-shadow(0 0 ${r4(1.1 * g)}em rgba(255, 180, 64, ${r4(0.7 * g)}))`

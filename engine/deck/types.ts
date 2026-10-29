@@ -136,7 +136,7 @@ export type Action =
   // reveal: force this line's `in` animation even when the deck suppresses text-in transitions
   // (instantText, the investor deck) — opts a single line back into motion.
   // flash: a brief warm glow that swells and fades while the line comes in (its intro), for emphasis.
-  | { kind: "text"; value: string; in: TextIn; size?: TextSize; align?: TextAlign; speed?: number; dots?: true; pos?: StagePoint; append?: true; tone?: SlideTheme; screenOnly?: true; reveal?: true; particles?: TextParticles; flash?: boolean }
+  | { kind: "text"; value: string; in: TextIn; size?: TextSize; align?: TextAlign; speed?: number; dots?: true; pos?: StagePoint; append?: true; tone?: SlideTheme; screenOnly?: true; reveal?: true; particles?: TextParticles; flash?: boolean; flashHold?: number }
   | { kind: "rotateList"; items: string[]; size?: TextSize }
   | { kind: "clear" }
   // atMs (art, camera, screen_fade): fire at this beat-local time (ms) instead of after the action

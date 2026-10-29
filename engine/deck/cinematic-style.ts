@@ -24,5 +24,10 @@ export const TEXT_SIZES: Record<TextSize, string> = {
  */
 export const CURSIVE_SIZE = "clamp(5rem, 28cqmin, 12rem)";
 
+/** The CSS variable a deck's `meta.textScale` sets on the stage container (TimedPlayer, RenderStage, the
+ *  editor canvas). Every text size and the credits roll multiply by it; unset = 1. */
+export const TEXT_SCALE_VAR = "--cin-text-scale";
+export const scaledSize = (size: string): string => `calc(var(${TEXT_SCALE_VAR}, 1) * ${size})`;
+
 /** Default text-box top-left on the 16:9 stage when a beat omits `pos` (normalized 0–1). */
 export const DEFAULT_TEXT_POS = { x: 0.03, y: 0.1 };

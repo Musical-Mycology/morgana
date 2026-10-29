@@ -45,3 +45,21 @@ test("a line without flash never gets a glow filter", () => {
   seek(0.35);
   expect(container.querySelector<HTMLElement>(".cin__line")!.style.filter).toBe("");
 });
+
+test("flashGlowAt with a hold eases down to the hold and keeps it once the intro is over", () => {
+  expect(flashGlowAt(0, 0.4)).toBe(0);
+  expect(flashGlowAt(0.6, 0.4)).toBeCloseTo(1, 6);
+  expect(flashGlowAt(0.99, 0.4)).toBeGreaterThan(0.4);
+  expect(flashGlowAt(1, 0.4)).toBe(0.4);
+  expect(flashGlowAt(5, 0.4)).toBe(0.4);
+  expect(flashGlowAt(0.3, 0.4)).toBeCloseTo(flashGlowAt(0.3), 9);   // the rise is the same
+});
+
+test("flashHold keeps a softer glow on the settled line, and seeking back before it clears it", () => {
+  const { container, seek } = mount([{ kind: "text", value: "Kept", in: "fade", flash: true, flashHold: 0.4, pos: { x: 0.5, y: 0.5 } }]);
+  const line = () => container.querySelector<HTMLElement>(".cin__line")!;
+  seek(1.5);
+  expect(line().style.filter).toContain("rgba(255, 224, 150, 0.4)");
+  seek(0);
+  expect(line().style.filter).toBe("");
+});
