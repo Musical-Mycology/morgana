@@ -49,6 +49,7 @@ describe("validation", () => {
     ["text particle rate 0", { kind: "text", value: "Hi", in: "fade", particles: { rate: 0 } }, ".particles.rate must be 1–30"],
     ["credits particle rate 31", { ...credits, particles: { rate: 31 } }, ".particles.rate must be 1–30"],
     ["particles not an object", { kind: "text", value: "Hi", in: "fade", particles: true }, ".particles must be an object"],
+    ["text flash not a boolean", { kind: "text", value: "Hi", in: "fade", flash: "yes" }, ".flash must be a boolean"],
   ])("rejects %s", (_n, action, frag) => {
     const r = validateDeckDoc(deckWith(action));
     expect(r.ok).toBe(false);

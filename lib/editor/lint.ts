@@ -180,7 +180,7 @@ function creditsAndFadeWarnings(doc: DeckDoc): LintIssue[] {
     const at = { sceneIdx, beatIdx, actionIdx };
     if (a.kind === "credits") {
       // No DOM: blockH is estimated from line counts × line heights (engine/deck/credits.ts).
-      const travel = (estimateCreditsBlockH(a.items) + (a.area ?? DEFAULT_CREDITS_AREA).h) * REF_H;
+      const travel = (estimateCreditsBlockH(a.items) * (doc.meta.textScale ?? 1) + (a.area ?? DEFAULT_CREDITS_AREA).h) * REF_H;
       const pxPerSec = travel / (a.durationMs / 1000);
       if (pxPerSec > CREDITS_MAX_PX_PER_SEC) {
         const minMs = Math.ceil((travel / CREDITS_MAX_PX_PER_SEC) * 10) * 100;

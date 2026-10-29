@@ -2,6 +2,7 @@ import type { Action, Scene, SceneObject, SlideTreatment } from "@/engine/deck/t
 import { AT_MS_KINDS, actionDuration } from "@/engine/authoring/beat-clock";
 import { MEDIA_ID_PATTERN } from "@/engine/deck/media-ref";
 import { isHexColor } from "@/engine/deck/story-assets";
+import { TEXT_SCALE_VAR } from "@/engine/deck/cinematic-style";
 
 /** Optional host-app chrome, defaulted to none so decks render generic. */
 export interface DeckChrome {
@@ -32,6 +33,13 @@ export interface DeckMeta {
   soundtrack?: { media: string };
   /** Deck-time cue points (e.g. "drop" @ 40.2). */
   markers?: DeckMarker[];
+  /** Multiplies every text size and the credits roll (0.5–2, default 1), via TEXT_SCALE_VAR on the stage. */
+  textScale?: number;
+}
+
+/** The stage container's style for a deck's text scale (undefined when it has none). */
+export function textScaleStyle(meta: DeckMeta | undefined): Record<string, string> | undefined {
+  return meta?.textScale === undefined ? undefined : { [TEXT_SCALE_VAR]: String(meta.textScale) };
 }
 
 export interface DeckDoc {
@@ -172,6 +180,8 @@ function validateCreditsAndFades(scene: Scene, si: number, e: string[]): void {
         if (a.color !== undefined && typeof a.color !== "string") e.push(`${at}.color must be a string`);
         else if (a.color !== undefined && !isHexColor(a.color)) e.push(`${at}.color must be a hex colour (#rgb, #rgba, #rrggbb or #rrggbbaa)`);
       }
+      if (a?.kind === "text" && a.flash !== undefined && typeof a.flash !== "boolean") e.push(`${at}.flash must be a boolean`);
+      if (a?.kind === "text" && a.flashHold !== undefined && (!finite(a.flashHold) || a.flashHold < 0 || a.flashHold > 1)) e.push(`${at}.flashHold must be 0–1`);
       if ((a?.kind === "text" || a?.kind === "credits") && a.particles !== undefined) {
         const p = a.particles;
         if (!p || typeof p !== "object" || Array.isArray(p)) e.push(`${at}.particles must be an object`);
@@ -231,7 +241,9 @@ export function validateDeckDoc(obj: unknown): { ok: boolean; errors: string[] }
     if (timing !== undefined && (timing === null || typeof timing !== "object" || !isPositiveFinite((timing as { targetSec?: unknown }).targetSec))) {
       e.push("meta.timing.targetSec must be a finite number > 0");
     }
-    const meta = d.meta as { soundtrack?: unknown; markers?: unknown };
+    const meta = d.meta as { soundtrack?: unknown; markers?: unknown; textScale?: unknown };
+    if (meta.textScale !== undefined && (typeof meta.textScale !== "number" || !Number.isFinite(meta.textScale)
+      || meta.textScale < 0.5 || meta.textScale > 2)) e.push("meta.textScale must be a number from 0.5 to 2");
     if (meta.soundtrack !== undefined) {
       const media = (meta.soundtrack as { media?: unknown } | null)?.media;
       if (typeof media !== "string" || !MEDIA_ID_PATTERN.test(media)) e.push("meta.soundtrack.media must be a media id");

@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { DeckDoc } from "@/engine/deck-doc";
+import { textScaleStyle, type DeckDoc } from "@/engine/deck-doc";
 import { useDeckStage } from "./DeckStage";
 import { formatClock } from "@/lib/timing/clock-format";
 import { TimeBar } from "@/components/timing/TimeBar";
@@ -167,7 +167,7 @@ export function TimedPlayer({ doc, initialT = 0, loadTrack }: { doc: DeckDoc; in
   const sceneId = loc ? doc.scenes[loc.sceneIdx].id : "";
   return (
     <div className="play" onPointerMove={wake}>
-      <div className="play__frame" data-testid="play-stage">
+      <div className="play__frame" data-testid="play-stage" style={textScaleStyle(doc.meta)}>
         {stage}
       </div>
       {hudPinned && (
