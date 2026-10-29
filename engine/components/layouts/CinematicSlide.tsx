@@ -16,10 +16,10 @@ import { formatCounterValue, counterValueAt } from "@/engine/deck/counter";
 import { mediaStateAt, type MediaFold, type MediaRenderState } from "@/engine/deck/media-state";
 import {
   flyUp, fadeIn, fadeSide, dotFade, rotateItemAt, lineAndDots,
-  letterFly, letterUp, wordUp, blurIn, typewriter, drawIn,
+  letterFly, letterUp, wordUp, blurIn, typewriter, drawIn, flashGlow,
 } from "../effects/cinematic-anim";
 import { DRAW_DASH_EM, DRAW_STROKE_EM, DRAW_VARIANT, drawText, isDrawnLine } from "../effects/draw-state";
-import { foldAt, rebuildBoundary, beatTimeline, beatDuration } from "@/engine/authoring/beat-clock";
+import { foldAt, rebuildBoundary, beatTimeline, beatDuration, introDuration } from "@/engine/authoring/beat-clock";
 import { cameraAt, cameraTransform, FULL_FRAME, type CameraEvent } from "@/engine/authoring/camera-clock";
 import { particleOpts, textSourceEnd, textSourceIdx, type TextRect, type TextSource } from "../effects/note-state";
 import { atRestRects, creditLineRects, restLine, wrapWords, type RestChild } from "../text-sources";
@@ -753,6 +753,8 @@ export function CinematicSlide({ slots, animate, runtime, chrome, print, instant
       effIn === "blurIn" ? blurIn(el, a.speed) :
       effIn === "typewriter" ? typewriter(el, a.speed) : fadeIn(el, a.speed);
     if (a.dots) { const d = el.querySelector<HTMLElement>(".dots"); if (d) tl.add(dotFade(d)); }
+    // The flash spans exactly the clock's intro, so it is over before the action's slot ends.
+    if (a.flash) tl.add(flashGlow(el, introDuration(a)), 0);
     return tl;
   }
 

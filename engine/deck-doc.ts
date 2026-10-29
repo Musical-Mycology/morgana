@@ -172,6 +172,7 @@ function validateCreditsAndFades(scene: Scene, si: number, e: string[]): void {
         if (a.color !== undefined && typeof a.color !== "string") e.push(`${at}.color must be a string`);
         else if (a.color !== undefined && !isHexColor(a.color)) e.push(`${at}.color must be a hex colour (#rgb, #rgba, #rrggbb or #rrggbbaa)`);
       }
+      if (a?.kind === "text" && a.flash !== undefined && typeof a.flash !== "boolean") e.push(`${at}.flash must be a boolean`);
       if ((a?.kind === "text" || a?.kind === "credits") && a.particles !== undefined) {
         const p = a.particles;
         if (!p || typeof p !== "object" || Array.isArray(p)) e.push(`${at}.particles must be an object`);
